@@ -1,0 +1,236 @@
+PRAGMA foreign_keys = ON;
+
+-- Systémové informace (z ČÁSTI 1)
+CREATE TABLE IF NOT EXISTS system_info (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    value TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Analytické běhy
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    pipeline_version TEXT,
+    config_hash TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Fronta úloh (Jobs)
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL UNIQUE,
+    run_id INTEGER,
+    job_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 50,
+    payload_json TEXT,
+    result_json TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    worker_id TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TEXT,
+    finished_at TEXT,
+    error TEXT,
+    FOREIGN KEY (run_id) REFERENCES runs(id)
+);
+
+-- Týmy
+CREATE TABLE IF NOT EXISTS teams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL UNIQUE,
+    country TEXT,
+    competition TEXT,
+    external_ids_json TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Hráči
+CREATE TABLE IF NOT EXISTS players (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    team_id INTEGER,
+    position TEXT,
+    shirt_number INTEGER,
+    external_ids_json TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (team_id) REFERENCES teams(id)
+);
+
+-- Zápasy
+CREATE TABLE IF NOT EXISTS matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    external_match_id TEXT,
+    competition TEXT NOT NULL,
+    season TEXT,
+    home_team_id INTEGER NOT NULL,
+    away_team_id INTEGER NOT NULL,
+    scheduled_at TEXT,
+    status TEXT,
+    venue TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (home_team_id) REFERENCES teams(id),
+    FOREIGN KEY (away_team_id) REFERENCES teams(id)
+);
+
+-- Zdroje informací
+CREATE TABLE IF NOT EXISTS sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain TEXT NOT NULL UNIQUE,
+    name TEXT,
+    source_type TEXT,
+    priority INTEGER NOT NULL DEFAULT 50,
+    reliability_score REAL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Dokumenty (Stažené HTML / zprávy)
+CREATE TABLE IF NOT EXISTS documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER,
+    url TEXT NOT NULL,
+    canonical_url TEXT,
+    content_hash TEXT NOT NULL,
+    title TEXT,
+    description TEXT,
+    author TEXT,
+    language TEXT,
+    published_at TEXT,
+    modified_at TEXT,
+    retrieved_at TEXT NOT NULL,
+    content_type TEXT,
+    content_length INTEGER,
+    raw_path TEXT,
+    processed_path TEXT,
+    parser_version TEXT,
+    quality_score REAL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_id) REFERENCES sources(id)
+);
+
+-- Tvrzení (Claims)
+CREATE TABLE IF NOT EXISTS claims (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER,
+    match_id INTEGER,
+    claim_text TEXT NOT NULL,
+    claim_type TEXT,
+    normalized_claim TEXT,
+    status TEXT NOT NULL DEFAULT 'UNVERIFIED',
+    confidence REAL,
+    valid_from TEXT,
+    valid_until TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (run_id) REFERENCES runs(id),
+    FOREIGN KEY (match_id) REFERENCES matches(id)
+);
+
+-- Důkazy (Evidence)
+CREATE TABLE IF NOT EXISTS evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    evidence_type TEXT NOT NULL,
+    quoted_text TEXT,
+    extracted_value TEXT,
+    locator TEXT,
+    extraction_method TEXT,
+    confidence REAL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (document_id) REFERENCES documents(id)
+);
+
+-- Vazební tabulka Claim <-> Evidence
+CREATE TABLE IF NOT EXISTS claim_evidence (
+    claim_id INTEGER NOT NULL,
+    evidence_id INTEGER NOT NULL,
+    relationship TEXT NOT NULL DEFAULT 'SUPPORTS',
+    weight REAL DEFAULT 1.0,
+    PRIMARY KEY (claim_id, evidence_id),
+    FOREIGN KEY (claim_id) REFERENCES claims(id),
+    FOREIGN KEY (evidence_id) REFERENCES evidence(id)
+);
+
+-- Indexy pro rychlé vyhledávání
+CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(content_hash);
+CREATE INDEX IF NOT EXISTS idx_documents_canonical_url ON documents(canonical_url);
+CREATE INDEX IF NOT EXISTS idx_documents_published_at ON documents(published_at);
+CREATE INDEX IF NOT EXISTS idx_claims_run ON claims(run_id);
+CREATE INDEX IF NOT EXISTS idx_claims_match ON claims(match_id);
+CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
+CREATE INDEX IF NOT EXISTS idx_evidence_document ON evidence(document_id);
+
+-- TABULKA PRO PRIMÁRNÍ STATISTIKY ZÁPASU
+CREATE TABLE IF NOT EXISTS match_statistics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL UNIQUE,
+    
+    home_goals INTEGER,
+    away_goals INTEGER,
+    home_ht_goals INTEGER,
+    away_ht_goals INTEGER,
+    home_ft_goals INTEGER,
+    away_ft_goals INTEGER,
+    
+    home_shots INTEGER,
+    away_shots INTEGER,
+    home_shots_on_target INTEGER,
+    away_shots_on_target INTEGER,
+    
+    home_possession REAL,
+    away_possession REAL,
+    
+    home_corners INTEGER,
+    away_corners INTEGER,
+    
+    home_yellow_cards INTEGER,
+    away_yellow_cards INTEGER,
+    home_red_cards INTEGER,
+    away_red_cards INTEGER,
+    
+    home_xg REAL,
+    away_xg REAL,
+    home_xga REAL,
+    away_xga REAL,
+    home_npxg REAL,
+    away_npxg REAL,
+    xg_metric_definition TEXT,
+    
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (match_id) REFERENCES matches(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_match_statistics_match ON match_statistics(match_id);
+
+-- TABULKA PRO STATISTICKÉ SNAPSHOTY (VÝSLEDKY ENGINE)
+CREATE TABLE IF NOT EXISTS statistical_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    match_id INTEGER,
+    team_id INTEGER,
+    metric TEXT NOT NULL,
+    value REAL,
+    sample_size INTEGER,
+    coverage REAL,
+    data_cutoff_at TEXT NOT NULL,
+    calculation_version TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (run_id) REFERENCES runs(id),
+    FOREIGN KEY (match_id) REFERENCES matches(id),
+    FOREIGN KEY (team_id) REFERENCES teams(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_matches_scheduled_at ON matches(scheduled_at);

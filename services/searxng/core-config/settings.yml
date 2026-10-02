@@ -1,0 +1,15 @@
+use_default_settings: true
+general:
+  instance_name: "Football Analysis Engine Search"
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json
+    - rss
+server:
+  limiter: false
+  image_proxy: false
+
+server:
+  secret_key: "325b05674577c61e2a90292d035e5e5cdcdfda3b48f331c8c0255bebf94cbbea"

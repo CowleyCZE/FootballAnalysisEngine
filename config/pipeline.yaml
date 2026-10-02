@@ -1,0 +1,33 @@
+system:
+  name: Football Analysis Engine
+  version: "0.1.0"
+  timezone: Europe/Prague
+  environment: development
+
+server:
+  host: 0.0.0.0
+  port: 8000
+
+database:
+  path: database/football.db
+
+workers:
+  notebook:
+    enabled: true
+  note9:
+    enabled: true
+
+pipeline:
+  max_retries: 3
+  request_timeout: 30
+  default_priority: 50
+
+logging:
+  level: INFO
+  directory: logs
+
+data:
+  raw_directory: data/raw
+  processed_directory: data/processed
+  cache_directory: data/cache
+  export_directory: data/exports

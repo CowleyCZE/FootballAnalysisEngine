@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+logs/*.log
+
+# Raw data
+data/raw/*
+data/cache/*
+data/processed/*
+
+# Temporary files
+*.tmp
+*.temp
+
+# OS
+Thumbs.db
+.DS_Store
+12. KROK 7 — vytvoření virtuálního Python prostředí
+python -m venv .venv
+13. Aktivace prostředí
