@@ -1,0 +1,29 @@
+ABSENCES_HOME:
+  strategy: DEEP
+  min_sources: 2
+  min_independent_sources: 2
+  max_queries: 6
+
+ABSENCES_AWAY:
+  strategy: DEEP
+  min_sources: 2
+  min_independent_sources: 2
+  max_queries: 6
+
+MATCH_IDENTITY:
+  strategy: VERIFICATION
+  min_sources: 1
+  min_independent_sources: 1
+  max_queries: 3
+
+WEATHER:
+  strategy: BASIC
+  min_sources: 1
+  min_independent_sources: 1
+  max_queries: 2
+
+DEFAULT:
+  strategy: BASIC
+  min_sources: 1
+  min_independent_sources: 1
+  max_queries: 4

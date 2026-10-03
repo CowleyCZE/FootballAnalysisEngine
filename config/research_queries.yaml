@@ -1,0 +1,40 @@
+MATCH_IDENTITY:
+  discovery:
+    - "{home_team} vs {away_team} {competition} {match_date}"
+    - "{home_team} {away_team} fixture date venue"
+  verification:
+    - "{home_team} vs {away_team} official match details"
+
+RECENT_FORM:
+  discovery:
+    - "{home_team} recent results match history"
+    - "{away_team} recent results match history"
+  verification:
+    - "{home_team} last 5 matches score"
+
+ABSENCES_HOME:
+  discovery:
+    - "{home_team} injuries"
+    - "{home_team} injury news"
+    - "{home_team} unavailable players"
+  verification:
+    - "{home_team} team news {away_team}"
+    - "{home_team} injury update {match_date}"
+  primary:
+    - "{home_team} official injury update"
+
+ABSENCES_AWAY:
+  discovery:
+    - "{away_team} injuries"
+    - "{away_team} injury news"
+    - "{away_team} unavailable players"
+  verification:
+    - "{away_team} team news {home_team}"
+    - "{away_team} injury update {match_date}"
+  primary:
+    - "{away_team} official injury update"
+
+WEATHER:
+  discovery:
+    - "weather forecast {venue} {match_date}"
+    - "weather {home_team} stadium {match_date}"

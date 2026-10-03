@@ -1,0 +1,72 @@
+{
+  "run_id": "a35e6a75-718c-49c6-aed3-573961a574b7",
+  "match_id": 555,
+  "ai_run_id": "ai-run-1",
+  "audit_score": 0.0,
+  "status": "RESEARCH_REQUIRED",
+  "issues": [
+    {
+      "type": "missing_evidence",
+      "severity": "HIGH",
+      "description": "Klíčový faktor bez důkazu: 'Klíčový faktor bez důkazu'",
+      "evidence_ids": [],
+      "requires_research": true
+    },
+    {
+      "type": "stale_evidence",
+      "severity": "HIGH",
+      "description": "Důkaz ID 10 je zastaralý (480.0h starý)",
+      "evidence_ids": [
+        10
+      ],
+      "requires_research": true
+    },
+    {
+      "type": "conflicting_evidence",
+      "severity": "HIGH",
+      "description": "Rozpor pro Hráč X -> availability: hodnoty [healthy, injured]",
+      "claim_ids": [
+        2,
+        3
+      ],
+      "requires_research": true
+    },
+    {
+      "type": "statistical_inconsistency",
+      "severity": "CRITICAL",
+      "description": "Součet výher(4), remíz(2) a proher(2) neodpovídá celku(10)",
+      "requires_research": false
+    },
+    {
+      "type": "statistical_contradiction",
+      "severity": "CRITICAL",
+      "description": "AI uvádí 7 výher, ale statistická vrstva obsahuje 4 výher",
+      "requires_research": false
+    }
+  ],
+  "research_jobs": [
+    {
+      "job_type": "fetch_additional_sources",
+      "priority": 90,
+      "match_id": 555,
+      "reason": "Klíčový faktor bez důkazu: 'Klíčový faktor bez důkazu'",
+      "status": "pending"
+    },
+    {
+      "job_type": "fetch_additional_sources",
+      "priority": 90,
+      "match_id": 555,
+      "reason": "Důkaz ID 10 je zastaralý (480.0h starý)",
+      "status": "pending"
+    },
+    {
+      "job_type": "verify_player_availability",
+      "priority": 90,
+      "match_id": 555,
+      "reason": "Rozpor pro Hráč X -> availability: hodnoty [healthy, injured]",
+      "status": "pending"
+    }
+  ],
+  "current_cycle": 1,
+  "max_cycles": 3
+}

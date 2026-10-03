@@ -1,0 +1,25 @@
+source_types:
+  official_club:
+    authority: 1.0
+  official_league:
+    authority: 1.0
+  statistical_provider:
+    authority: 0.9
+  major_news:
+    authority: 0.8
+  aggregator:
+    authority: 0.5
+  unknown:
+    authority: 0.2
+
+domains:
+  arsenal.com:
+    type: official_club
+  chelsea.com:
+    type: official_club
+  premierleague.com:
+    type: official_league
+  bbc.com:
+    type: major_news
+  sky sports.com:
+    type: major_news

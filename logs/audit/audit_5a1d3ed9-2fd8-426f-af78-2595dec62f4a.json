@@ -1,0 +1,27 @@
+{
+  "run_id": "5a1d3ed9-2fd8-426f-af78-2595dec62f4a",
+  "match_id": 200,
+  "ai_run_id": "run-max",
+  "audit_score": 0.85,
+  "status": "UNRESOLVED",
+  "issues": [
+    {
+      "type": "missing_evidence",
+      "severity": "HIGH",
+      "description": "Klíčový faktor bez důkazu: 'Neznámý faktor'",
+      "evidence_ids": [],
+      "requires_research": true
+    }
+  ],
+  "research_jobs": [
+    {
+      "job_type": "fetch_additional_sources",
+      "priority": 90,
+      "match_id": 200,
+      "reason": "Klíčový faktor bez důkazu: 'Neznámý faktor'",
+      "status": "pending"
+    }
+  ],
+  "current_cycle": 3,
+  "max_cycles": 3
+}
