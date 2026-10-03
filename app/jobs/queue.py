@@ -55,7 +55,8 @@ class JobQueue:
 
         if depends_on_pks:
             for dep in depends_on_pks:
-                self.add_dependency_by_pk(self._job_pk(job_id), dep)
+                self.add_dependency_by_pk(self._job_pk(job_id), int(dep))
+            self.store.mark_blocked(job_id)
         return job_id
 
     def _job_pk(self, job_id: str) -> int:
@@ -89,11 +90,14 @@ class JobQueue:
                 raise ValueError("Deadlock detected: circular dependency")
             conn.execute(
                 "INSERT OR IGNORE INTO job_dependencies(job_id, depends_on_job_id) VALUES(?, ?)",
-                (job_id, depends_on_id),
+                (int(job_id), int(depends_on_id)),
             )
 
     def add_dependency(self, job_id: str, depends_on_id: str) -> None:
-        self.add_dependency_by_pk(self._job_pk(job_id), self._job_pk(depends_on_id))
+        if isinstance(job_id, int) and isinstance(depends_on_id, int):
+            self.add_dependency_by_pk(job_id, depends_on_id)
+            return
+        self.add_dependency_by_pk(self._job_pk(str(job_id)), self._job_pk(str(depends_on_id)))
 
     def claim_job(self, worker_id: str, capabilities: List[str]) -> Optional[Dict[str, Any]]:
         return self.store.claim(worker_id, capabilities)
