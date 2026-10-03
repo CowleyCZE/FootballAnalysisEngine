@@ -1,131 +1,135 @@
 import sqlite3
-from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, Status, Query
+from typing import Any, Dict
+
+from fastapi import APIRouter, HTTPException, Status
 
 from app.orchestrator.models import AnalysisRequest, ResearchReadiness
-from app.orchestrator.orchestrator import MatchOrchestrator
-from app.orchestrator.match_resolver import MatchNotFoundException, AmbiguousMatchException
-from app.orchestrator.state_machine import RunStatus
+from app.orchestrator.orchestrator import MasterOrchestrator
+from app.orchestrator.state_machine import MatchState
 
 router = APIRouter(prefix="/api/analysis", tags=["Analysis Orchestrator"])
-orchestrator = MatchOrchestrator()
+orchestrator = MasterOrchestrator()
+
+
+def _resolve_match_id(request: AnalysisRequest) -> int:
+    with sqlite3.connect(orchestrator.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT m.id
+            FROM matches m
+            JOIN teams ht ON ht.id = m.home_team_id
+            JOIN teams at ON at.id = m.away_team_id
+            WHERE lower(ht.name) = lower(?)
+              AND lower(at.name) = lower(?)
+              AND lower(COALESCE(m.competition, '')) = lower(?)
+              AND date(m.scheduled_at) = date(?)
+            ORDER BY abs(strftime('%s', m.scheduled_at) - strftime('%s', ?)) ASC
+            LIMIT 1
+            """,
+            (
+                request.home_team,
+                request.away_team,
+                request.competition,
+                request.scheduled_at.isoformat(),
+                request.scheduled_at.isoformat(),
+            ),
+        ).fetchone()
+    if not row:
+        raise HTTPException(
+            status_code=Status.HTTP_404_NOT_FOUND,
+            detail="Zadaný zápas nebyl nalezen v databázi.",
+        )
+    return int(row["id"])
 
 
 @router.post("/start", status_code=Status.HTTP_201_CREATED)
 def start_analysis(request: AnalysisRequest) -> Dict[str, Any]:
-    """
-    Zahájí nový proces výzkumu a analýzy pro zadaný zápas.
-    """
+    """Zahájí autonomní pipeline pro existující zápas v databázi."""
+    match_id = _resolve_match_id(request)
     try:
-        result = orchestrator.start_analysis_run(request)
-        return result
-    except MatchNotFoundException as e:
-        raise HTTPException(
-            status_code=Status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
-    except AmbiguousMatchException as e:
-        raise HTTPException(
-            status_code=Status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
+        run_id = orchestrator.start_pipeline(match_id)
+        return {"run_id": run_id, "match_id": match_id, "status": MatchState.DISCOVERY}
+    except ValueError as exc:
+        raise HTTPException(status_code=Status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
         raise HTTPException(
             status_code=Status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Chyba při spouštění analýzy: {str(e)}"
-        )
+            detail=f"Chyba při spuštění analýzy: {exc}",
+        ) from exc
 
 
 @router.get("/{run_id}")
-def get_analysis_status(run_id: int) -> Dict[str, Any]:
-    """
-    Vrátí aktuální detail a stav běhu výzkumu (Analysis Run) vč. seznamu úkolů.
-    """
-    conn = sqlite3.connect(orchestrator.db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM analysis_runs WHERE id = ?", (run_id,))
-    run = cursor.fetchone()
-
-    if not run:
-        conn.close()
-        raise HTTPException(
-            status_code=Status.HTTP_404_NOT_FOUND,
-            detail=f"Analysis run s ID {run_id} nebyl nalezen."
-        )
-
-    cursor.execute("SELECT * FROM research_tasks WHERE run_id = ?", (run_id,))
-    tasks = cursor.fetchall()
-    conn.close()
-
-    return {
-        "run": dict(run),
-        "tasks": [dict(t) for t in tasks]
-    }
+def get_analysis_status(run_id: str) -> Dict[str, Any]:
+    """Vrátí stav pipeline a všechny Joby patřící k danému běhu."""
+    with sqlite3.connect(orchestrator.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        run = conn.execute(
+            "SELECT * FROM pipeline_runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if not run:
+            raise HTTPException(status_code=Status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
+        jobs = conn.execute(
+            "SELECT * FROM jobs WHERE run_id = ? ORDER BY id", (run_id,)
+        ).fetchall()
+    return {"run": dict(run), "jobs": [dict(job) for job in jobs]}
 
 
 @router.get("/{run_id}/readiness", response_model=ResearchReadiness)
-def check_analysis_readiness(run_id: int) -> ResearchReadiness:
-    """
-    Vyhodnotí připravenost a coverage sesbíraných dat pro spuštění samotné analýzy.
-    """
-    conn = sqlite3.connect(orchestrator.db_path)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM analysis_runs WHERE id = ?", (run_id,))
-    exists = cursor.fetchone()
-    conn.close()
+def check_analysis_readiness(run_id: str) -> ResearchReadiness:
+    """Vyhodnotí, zda má pipeline dostatek dokončených podkladů pro AI analýzu."""
+    with sqlite3.connect(orchestrator.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        run = conn.execute(
+            "SELECT * FROM pipeline_runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        jobs = conn.execute(
+            "SELECT job_type, status FROM jobs WHERE run_id = ?", (run_id,)
+        ).fetchall()
+    if not run:
+        raise HTTPException(status_code=Status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
 
-    if not exists:
-        raise HTTPException(
-            status_code=Status.HTTP_404_NOT_FOUND,
-            detail=f"Analysis run s ID {run_id} nebyl nalezen."
-        )
-
-    return orchestrator.check_readiness(run_id)
+    required_types = {"SEARCH", "STATISTICS"}
+    completed = {row["job_type"] for row in jobs if row["status"] == "SUCCESS"}
+    required_complete = required_types.issubset(completed)
+    state = run["state"]
+    ready = required_complete and state in {
+        MatchState.ANALYZING,
+        MatchState.AUDITING,
+        MatchState.FINALIZING,
+        MatchState.COMPLETED,
+    }
+    warnings = [] if required_complete else ["Požadované discovery/statistics Joby nejsou dokončené."]
+    return ResearchReadiness(
+        ready=ready,
+        required_complete=required_complete,
+        coverage_score=1.0 if required_complete else len(completed) / len(required_types),
+        critical_conflicts=0,
+        warnings=warnings,
+        blocking_reasons=[] if ready else [f"Pipeline je ve stavu {state}"],
+    )
 
 
 @router.post("/{run_id}/cancel")
-def cancel_analysis(run_id: int) -> Dict[str, Any]:
-    """
-    Zruší probíhající běh výzkumu a stornuje otevřené úkoly.
-    """
-    conn = sqlite3.connect(orchestrator.db_path)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT status FROM analysis_runs WHERE id = ?", (run_id,))
-    row = cursor.fetchone()
-
-    if not row:
-        conn.close()
-        raise HTTPException(
-            status_code=Status.HTTP_404_NOT_FOUND,
-            detail=f"Analysis run s ID {run_id} nebyl nalezen."
+def cancel_analysis(run_id: str) -> Dict[str, Any]:
+    """Zastaví běh pipeline a zruší dosud nespouštěné Joby."""
+    with sqlite3.connect(orchestrator.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        run = conn.execute(
+            "SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if not run:
+            raise HTTPException(status_code=Status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
+        conn.execute(
+            "UPDATE jobs SET status='CANCELLED', finished_at=CURRENT_TIMESTAMP WHERE run_id=? AND status IN ('PENDING','BLOCKED','RETRY')",
+            (run_id,),
         )
-
-    current_status = row[0]
-    if current_status in [RunStatus.CANCELLED, RunStatus.FAILED, RunStatus.READY_FOR_ANALYSIS]:
-        conn.close()
-        raise HTTPException(
-            status_code=Status.HTTP_400_BAD_REQUEST,
-            detail=f"Run ve stavu '{current_status}' nelze zrušit."
+        conn.execute(
+            "UPDATE pipeline_runs SET state=?, updated_at=CURRENT_TIMESTAMP, finished_at=CURRENT_TIMESTAMP, error_text=? WHERE run_id=?",
+            (MatchState.FAILED, "Cancelled by API", run_id),
         )
-
-    # Aktualizace stavu běhu i rozpracovaných úkolů
-    cursor.execute(
-        "UPDATE analysis_runs SET status = ? WHERE id = ?",
-        (RunStatus.CANCELLED, run_id)
-    )
-    cursor.execute(
-        "UPDATE research_tasks SET status = 'CANCELLED' WHERE run_id = ? AND status IN ('PENDING', 'QUEUED', 'CLAIMED', 'RUNNING')",
-        (run_id,)
-    )
-
-    conn.commit()
-    conn.close()
-
-    return {
-        "run_id": run_id,
-        "status": RunStatus.CANCELLED,
-        "message": "Běh výzkumu byl úspěšně zrušen."
-    }
+        conn.execute(
+            "UPDATE runs SET status=?, finished_at=CURRENT_TIMESTAMP WHERE run_id=?",
+            (MatchState.FAILED, run_id),
+        )
+    return {"run_id": run_id, "status": "CANCELLED", "message": "Běh pipeline byl zastaven."}
