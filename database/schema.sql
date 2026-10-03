@@ -1,6 +1,5 @@
 PRAGMA foreign_keys = ON;
 
--- Systémové informace (z ČÁSTI 1)
 CREATE TABLE IF NOT EXISTS system_info (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT NOT NULL UNIQUE,
@@ -8,7 +7,6 @@ CREATE TABLE IF NOT EXISTS system_info (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Analytické běhy
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL UNIQUE,
@@ -20,11 +18,37 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Fronta úloh (Jobs)
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL UNIQUE,
+    match_id INTEGER,
+    state TEXT NOT NULL,
+    cycle INTEGER NOT NULL DEFAULT 1,
+    max_cycles INTEGER NOT NULL DEFAULT 3,
+    started_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    error_text TEXT
+);
+
+CREATE TABLE IF NOT EXISTS workers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id TEXT NOT NULL UNIQUE,
+    worker_type TEXT NOT NULL DEFAULT 'generic',
+    status TEXT NOT NULL DEFAULT 'OFFLINE',
+    capabilities_json TEXT NOT NULL DEFAULT '[]',
+    last_heartbeat TEXT,
+    current_job_id TEXT,
+    metadata_json TEXT,
+    registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id TEXT NOT NULL UNIQUE,
-    run_id INTEGER,
+    run_id TEXT,
+    match_id INTEGER,
+    parent_job_id INTEGER,
     job_type TEXT NOT NULL,
     status TEXT NOT NULL,
     priority INTEGER NOT NULL DEFAULT 50,
@@ -33,14 +57,44 @@ CREATE TABLE IF NOT EXISTS jobs (
     attempts INTEGER NOT NULL DEFAULT 0,
     max_attempts INTEGER NOT NULL DEFAULT 3,
     worker_id TEXT,
+    fingerprint TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at TEXT,
     finished_at TEXT,
-    error TEXT,
-    FOREIGN KEY (run_id) REFERENCES runs(id)
+    heartbeat_at TEXT,
+    next_attempt_at TEXT,
+    error_text TEXT,
+    FOREIGN KEY (parent_job_id) REFERENCES jobs(id),
+    FOREIGN KEY (worker_id) REFERENCES workers(worker_id)
 );
 
--- Týmy
+CREATE TABLE IF NOT EXISTS job_dependencies (
+    job_id INTEGER NOT NULL,
+    depends_on_job_id INTEGER NOT NULL,
+    PRIMARY KEY (job_id, depends_on_job_id),
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+    FOREIGN KEY (depends_on_job_id) REFERENCES jobs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_state_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    old_state TEXT,
+    new_state TEXT NOT NULL,
+    reason TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS system_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    run_id TEXT,
+    job_id TEXT,
+    worker_id TEXT,
+    payload_json TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS teams (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -52,7 +106,6 @@ CREATE TABLE IF NOT EXISTS teams (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Hráči
 CREATE TABLE IF NOT EXISTS players (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -66,7 +119,6 @@ CREATE TABLE IF NOT EXISTS players (
     FOREIGN KEY (team_id) REFERENCES teams(id)
 );
 
--- Zápasy
 CREATE TABLE IF NOT EXISTS matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     external_match_id TEXT,
@@ -83,7 +135,6 @@ CREATE TABLE IF NOT EXISTS matches (
     FOREIGN KEY (away_team_id) REFERENCES teams(id)
 );
 
--- Zdroje informací
 CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     domain TEXT NOT NULL UNIQUE,
@@ -96,7 +147,6 @@ CREATE TABLE IF NOT EXISTS sources (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Dokumenty (Stažené HTML / zprávy)
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_id INTEGER,
@@ -120,7 +170,6 @@ CREATE TABLE IF NOT EXISTS documents (
     FOREIGN KEY (source_id) REFERENCES sources(id)
 );
 
--- Tvrzení (Claims)
 CREATE TABLE IF NOT EXISTS claims (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER,
@@ -138,7 +187,6 @@ CREATE TABLE IF NOT EXISTS claims (
     FOREIGN KEY (match_id) REFERENCES matches(id)
 );
 
--- Důkazy (Evidence)
 CREATE TABLE IF NOT EXISTS evidence (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     document_id INTEGER NOT NULL,
@@ -152,7 +200,6 @@ CREATE TABLE IF NOT EXISTS evidence (
     FOREIGN KEY (document_id) REFERENCES documents(id)
 );
 
--- Vazební tabulka Claim <-> Evidence
 CREATE TABLE IF NOT EXISTS claim_evidence (
     claim_id INTEGER NOT NULL,
     evidence_id INTEGER NOT NULL,
@@ -163,43 +210,27 @@ CREATE TABLE IF NOT EXISTS claim_evidence (
     FOREIGN KEY (evidence_id) REFERENCES evidence(id)
 );
 
--- Indexy pro rychlé vyhledávání
-CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(content_hash);
-CREATE INDEX IF NOT EXISTS idx_documents_canonical_url ON documents(canonical_url);
-CREATE INDEX IF NOT EXISTS idx_documents_published_at ON documents(published_at);
-CREATE INDEX IF NOT EXISTS idx_claims_run ON claims(run_id);
-CREATE INDEX IF NOT EXISTS idx_claims_match ON claims(match_id);
-CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
-CREATE INDEX IF NOT EXISTS idx_evidence_document ON evidence(document_id);
-
--- TABULKA PRO PRIMÁRNÍ STATISTIKY ZÁPASU
 CREATE TABLE IF NOT EXISTS match_statistics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     match_id INTEGER NOT NULL UNIQUE,
-    
     home_goals INTEGER,
     away_goals INTEGER,
     home_ht_goals INTEGER,
     away_ht_goals INTEGER,
     home_ft_goals INTEGER,
     away_ft_goals INTEGER,
-    
     home_shots INTEGER,
     away_shots INTEGER,
     home_shots_on_target INTEGER,
     away_shots_on_target INTEGER,
-    
     home_possession REAL,
     away_possession REAL,
-    
     home_corners INTEGER,
     away_corners INTEGER,
-    
     home_yellow_cards INTEGER,
     away_yellow_cards INTEGER,
     home_red_cards INTEGER,
     away_red_cards INTEGER,
-    
     home_xg REAL,
     away_xg REAL,
     home_xga REAL,
@@ -207,18 +238,14 @@ CREATE TABLE IF NOT EXISTS match_statistics (
     home_npxg REAL,
     away_npxg REAL,
     xg_metric_definition TEXT,
-    
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (match_id) REFERENCES matches(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_match_statistics_match ON match_statistics(match_id);
-
--- TABULKA PRO STATISTICKÉ SNAPSHOTY (VÝSLEDKY ENGINE)
 CREATE TABLE IF NOT EXISTS statistical_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id INTEGER NOT NULL,
+    run_id INTEGER,
     match_id INTEGER,
     team_id INTEGER,
     metric TEXT NOT NULL,
@@ -233,4 +260,19 @@ CREATE TABLE IF NOT EXISTS statistical_snapshots (
     FOREIGN KEY (team_id) REFERENCES teams(id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_jobs_queue ON jobs(status, priority DESC, id);
+CREATE INDEX IF NOT EXISTS idx_jobs_match ON jobs(match_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_run ON jobs(run_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_worker ON jobs(worker_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_heartbeat ON jobs(status, heartbeat_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(fingerprint, status);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_match ON pipeline_runs(match_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_state_history_run ON pipeline_state_history(run_id);
+CREATE INDEX IF NOT EXISTS idx_system_events_run ON system_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(content_hash);
+CREATE INDEX IF NOT EXISTS idx_documents_canonical_url ON documents(canonical_url);
+CREATE INDEX IF NOT EXISTS idx_documents_published_at ON documents(published_at);
+CREATE INDEX IF NOT EXISTS idx_claims_run ON claims(run_id);
+CREATE INDEX IF NOT EXISTS idx_claims_match ON claims(match_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_document ON evidence(document_id);
 CREATE INDEX IF NOT EXISTS idx_matches_scheduled_at ON matches(scheduled_at);
