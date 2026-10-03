@@ -115,10 +115,15 @@ class JobStore:
             )
             return job_id
 
+    def mark_blocked(self, job_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE jobs SET status='BLOCKED' WHERE job_id=? AND status='PENDING'", (job_id,))
+
     def claim(self, worker_id: str, capabilities: Iterable[str]) -> Optional[Dict[str, Any]]:
         caps = list(set(capabilities))
         if not caps:
             return None
+        self.register_worker(worker_id, caps)
         placeholders = ",".join("?" for _ in caps)
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
