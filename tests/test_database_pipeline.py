@@ -22,12 +22,10 @@ def test_evidence_first_pipeline():
     try:
         cursor.execute("INSERT INTO runs (run_id, status, started_at) VALUES (?, 'RUNNING', '2026-10-02T12:00:00Z')", (run_key,))
         run_id = cursor.lastrowid
-
         cursor.execute("INSERT INTO teams (name, normalized_name) VALUES (?, ?)", (home_name, home_norm))
         home_id = cursor.lastrowid
         cursor.execute("INSERT INTO teams (name, normalized_name) VALUES (?, ?)", (away_name, away_norm))
         away_id = cursor.lastrowid
-
         cursor.execute(
             "INSERT INTO matches (competition, season, home_team_id, away_team_id) VALUES ('Chance Liga', '2026/27', ?, ?)",
             (home_id, away_id),
@@ -49,20 +47,17 @@ def test_evidence_first_pipeline():
             quality_score=1.0,
         )
         doc_id = save_document_to_db(doc, raw_path, conn=conn)
-
         cursor.execute(
             "INSERT INTO evidence (document_id, evidence_type, quoted_text, locator) VALUES (?, 'QUOTE', ?, 'paragraph: 1')",
             (doc_id, "Útočník Dostál má zraněný kotník a do zápasu nenastoupí."),
         )
         evidence_id = cursor.lastrowid
-
         cursor.execute(
             "INSERT INTO claims (run_id, match_id, claim_text, claim_type, status, confidence) VALUES (?, ?, 'Útočník Dostál nenastoupí kvůli zranění.', 'INJURY', 'SUPPORTED', 0.95)",
             (run_id, match_id),
         )
         claim_id = cursor.lastrowid
         cursor.execute("INSERT INTO claim_evidence (claim_id, evidence_id, relationship) VALUES (?, ?, 'SUPPORTS')", (claim_id, evidence_id))
-        conn.commit()
 
         cursor.execute(
             """
