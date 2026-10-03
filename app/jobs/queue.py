@@ -1,21 +1,30 @@
-import json
-import sqlite3
-import uuid
 import hashlib
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+import json
+import uuid
+from typing import Any, Dict, List, Optional
 
-from app.jobs.repository import JobRepository
 from app.jobs.models import JobStatus
+from app.jobs.store import JobStore
+
 
 class JobQueue:
+    """Public queue API used by orchestrator and workers.
+
+    All persistence is delegated to JobStore so there is one job model and one
+    set of SQLite locking rules across the application.
+    """
+
     def __init__(self, db_path: str = "database/football.db"):
-        self.repo = JobRepository(db_path)
+        self.store = JobStore(db_path)
 
     @staticmethod
-    def generate_fingerprint(job_type: str, match_id: Optional[int], payload: Dict[str, Any]) -> str:
-        raw = f"{job_type}_{match_id}_{json.dumps(payload, sort_keys=True)}"
-        return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+    def generate_fingerprint(job_type: str, match_id: Optional[int], payload: Dict[str, Any], run_id: Optional[str] = None) -> str:
+        raw = json.dumps(
+            {"job_type": job_type, "match_id": match_id, "run_id": run_id, "payload": payload},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def create_job(
         self,
@@ -25,161 +34,83 @@ class JobQueue:
         priority: int = 50,
         max_attempts: int = 3,
         parent_job_id: Optional[int] = None,
-        depends_on_pks: Optional[List[int]] = None
+        depends_on_pks: Optional[List[int]] = None,
+        run_id: Optional[str] = None,
     ) -> Optional[str]:
-        fingerprint = self.generate_fingerprint(job_type, match_id, payload)
-        conn = self.repo.get_connection()
-        cursor = conn.cursor()
-
-        # Ochrana před duplicitními aktivními joby
-        cursor.execute(
-            "SELECT job_id FROM jobs WHERE fingerprint = ? AND status IN (?, ?, ?, ?)",
-            (fingerprint, JobStatus.PENDING, JobStatus.CLAIMED, JobStatus.RUNNING, JobStatus.BLOCKED)
+        job_id = str(uuid.uuid4())
+        fingerprint = self.generate_fingerprint(job_type, match_id, payload, run_id)
+        created = self.store.create_job(
+            job_id=job_id,
+            job_type=job_type,
+            match_id=match_id,
+            run_id=run_id,
+            payload=payload,
+            fingerprint=fingerprint,
+            priority=int(priority),
+            max_attempts=int(max_attempts),
+            parent_job_id=parent_job_id,
         )
-        existing = cursor.fetchone()
-        if existing:
-            conn.close()
+        if not created:
             return None
 
-        job_id = str(uuid.uuid4())
-        created_at = datetime.now(timezone.utc).isoformat()
-        status = JobStatus.BLOCKED if depends_on_pks else JobStatus.PENDING
-
-        cursor.execute(
-            """INSERT INTO jobs (job_id, job_type, match_id, parent_job_id, status, priority, max_attempts, payload_json, fingerprint, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (job_id, job_type, match_id, parent_job_id, status, priority, max_attempts, json.dumps(payload), fingerprint, created_at)
-        )
-        new_pk = cursor.lastrowid
-
         if depends_on_pks:
-            try:
-                for dep_pk in depends_on_pks:
-                    self._insert_dependency(conn, new_pk, dep_pk)
-            except ValueError:
-                conn.rollback()
-                conn.close()
-                raise
-
-        conn.commit()
-        conn.close()
+            for dep in depends_on_pks:
+                self.add_dependency_by_pk(self._job_pk(job_id), dep)
         return job_id
 
-    def _has_path(self, from_id: int, to_id: int, conn: sqlite3.Connection) -> bool:
+    def _job_pk(self, job_id: str) -> int:
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT id FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if not row:
+                raise KeyError(job_id)
+            return int(row["id"])
+
+    def _has_path(self, from_id: int, to_id: int, conn) -> bool:
+        pending = [from_id]
         visited = set()
-        queue = [from_id]
-        cursor = conn.cursor()
-
-        while queue:
-            curr = queue.pop(0)
-            if curr == to_id:
+        while pending:
+            current = pending.pop()
+            if current == to_id:
                 return True
-            if curr in visited:
+            if current in visited:
                 continue
-            visited.add(curr)
-
-            cursor.execute(
-                "SELECT depends_on_job_id FROM job_dependencies WHERE job_id = ?",
-                (curr,),
-            )
-            for row in cursor.fetchall():
-                dep = row[0]
-                if dep not in visited:
-                    queue.append(dep)
-
+            visited.add(current)
+            rows = conn.execute(
+                "SELECT depends_on_job_id FROM job_dependencies WHERE job_id=?", (current,)
+            ).fetchall()
+            pending.extend(int(row[0]) for row in rows)
         return False
 
-    def _insert_dependency(self, conn: sqlite3.Connection, job_id: int, depends_on_id: int) -> None:
+    def add_dependency_by_pk(self, job_id: int, depends_on_id: int) -> None:
         if job_id == depends_on_id:
-            raise ValueError("Deadlock detected: Job cannot depend on itself")
-        if self._has_path(from_id=depends_on_id, to_id=job_id, conn=conn):
-            raise ValueError("Deadlock detected: Circular dependency")
+            raise ValueError("Deadlock detected: job cannot depend on itself")
+        with self.store.connect() as conn:
+            if self._has_path(depends_on_id, job_id, conn):
+                raise ValueError("Deadlock detected: circular dependency")
+            conn.execute(
+                "INSERT OR IGNORE INTO job_dependencies(job_id, depends_on_job_id) VALUES(?, ?)",
+                (job_id, depends_on_id),
+            )
 
-        conn.execute(
-            "INSERT INTO job_dependencies (job_id, depends_on_job_id) VALUES (?, ?)",
-            (job_id, depends_on_id),
-        )
-
-    def add_dependency(self, job_id: int, depends_on_id: int) -> None:
-        conn = self.repo.get_connection()
-        try:
-            self._insert_dependency(conn, job_id, depends_on_id)
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+    def add_dependency(self, job_id: str, depends_on_id: str) -> None:
+        self.add_dependency_by_pk(self._job_pk(job_id), self._job_pk(depends_on_id))
 
     def claim_job(self, worker_id: str, capabilities: List[str]) -> Optional[Dict[str, Any]]:
-        conn = self.repo.get_connection()
-        cursor = conn.cursor()
+        return self.store.claim(worker_id, capabilities)
 
-        try:
-            cursor.execute("BEGIN IMMEDIATE")
-            placeholders = ",".join(["?"] * len(capabilities))
-            query = f"""
-                SELECT id, job_id, job_type, match_id, payload_json
-                FROM jobs
-                WHERE status = ? AND job_type IN ({placeholders})
-                ORDER BY priority DESC, id ASC
-                LIMIT 1
-            """
-            cursor.execute(query, [JobStatus.PENDING] + capabilities)
-            row = cursor.fetchone()
-
-            if not row:
-                conn.commit()
-                conn.close()
-                return None
-
-            job_pk, job_id, jtype, match_id, payload_json = row["id"], row["job_id"], row["job_type"], row["match_id"], row["payload_json"]
-            now_iso = datetime.now(timezone.utc).isoformat()
-
-            cursor.execute(
-                "UPDATE jobs SET status = ?, worker_id = ?, started_at = ?, heartbeat_at = ? WHERE id = ?",
-                (JobStatus.CLAIMED, worker_id, now_iso, now_iso, job_pk)
-            )
-            conn.commit()
-            conn.close()
-
-            return {
-                "id": job_pk,
-                "job_id": job_id,
-                "job_type": jtype,
-                "match_id": match_id,
-                "payload": json.loads(payload_json) if payload_json else {}
-            }
-        except Exception:
-            conn.rollback()
-            conn.close()
-            raise
-
-    def update_job_status(self, job_id: str, status: str, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None):
-        conn = self.repo.get_connection()
-        cursor = conn.cursor()
-        now_iso = datetime.now(timezone.utc).isoformat()
-
+    def update_job_status(self, job_id: str, status: str, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None, worker_id: Optional[str] = None):
+        worker_id = worker_id or "system"
         if status == JobStatus.SUCCESS:
-            cursor.execute(
-                "UPDATE jobs SET status = ?, result_json = ?, finished_at = ? WHERE job_id = ?",
-                (status, json.dumps(result) if result else None, now_iso, job_id)
-            )
-        elif status in [JobStatus.FAILED, JobStatus.RETRY]:
-            cursor.execute(
-                "UPDATE jobs SET status = ?, error_text = ?, finished_at = ? WHERE job_id = ?",
-                (status, error, now_iso, job_id)
-            )
+            self.store.finish(job_id, worker_id, True, result=result)
+        elif status in (JobStatus.FAILED, JobStatus.RETRY):
+            self.store.finish(job_id, worker_id, False, result=result, error=error)
         else:
-            cursor.execute("UPDATE jobs SET status = ? WHERE job_id = ?", (status, job_id))
+            with self.store.connect() as conn:
+                conn.execute("UPDATE jobs SET status=? WHERE job_id=?", (status, job_id))
 
-        conn.commit()
-        conn.close()
-
-    def update_heartbeat(self, job_id: str):
-        conn = self.repo.get_connection()
-        cursor = conn.cursor()
-        now_iso = datetime.now(timezone.utc).isoformat()
-        cursor.execute("UPDATE jobs SET heartbeat_at = ? WHERE job_id = ?", (now_iso, job_id))
-        conn.commit()
-        conn.close()
+    def update_heartbeat(self, job_id: str, worker_id: Optional[str] = None):
+        if worker_id:
+            self.store.heartbeat(worker_id, job_id)
+        else:
+            with self.store.connect() as conn:
+                conn.execute("UPDATE jobs SET heartbeat_at=? WHERE job_id=?", (self.store.now(), job_id))
