@@ -1,0 +1,75 @@
+import logging
+import os
+import time
+from typing import Callable, Dict
+
+from app.jobs.queue import JobQueue
+from app.jobs.models import JobStatus
+from app.workers.ai_worker import AIWorker
+from app.workers.audit_worker import AuditWorker
+from app.workers.crawler_worker import CrawlerWorker
+from app.workers.search_worker import SearchWorker
+from app.workers.statistics_worker import StatisticsWorker
+
+logger = logging.getLogger(__name__)
+
+
+class WorkerDaemon:
+    """Pull-based worker shared by Notebook and Note 9.
+
+    A worker asks the database for work instead of receiving pushed tasks. This
+    makes temporary device disconnects safe and allows capabilities to differ
+    between devices.
+    """
+
+    HANDLERS: Dict[str, Callable] = {
+        "SEARCH": SearchWorker.execute,
+        "CRAWL": CrawlerWorker.execute,
+        "STATISTICS": StatisticsWorker.execute,
+        "AI_ANALYSIS": AIWorker.execute,
+        "AUDIT": AuditWorker.execute,
+    }
+
+    def __init__(self, worker_id: str, capabilities: list[str], db_path: str = "database/football.db", poll_interval: float = 2.0):
+        self.worker_id = worker_id
+        self.capabilities = sorted(set(capabilities))
+        self.queue = JobQueue(db_path)
+        self.poll_interval = poll_interval
+        self.running = True
+        self.queue.store.register_worker(worker_id, self.capabilities, metadata={"pid": os.getpid()})
+
+    def run_once(self) -> bool:
+        job = self.queue.claim_job(self.worker_id, self.capabilities)
+        if not job:
+            self.queue.store.heartbeat(self.worker_id)
+            return False
+
+        job_id = job["job_id"]
+        handler = self.HANDLERS.get(job["job_type"])
+        if handler is None:
+            self.queue.update_job_status(job_id, JobStatus.FAILED, error=f"No handler for job type {job['job_type']}", worker_id=self.worker_id)
+            return True
+
+        try:
+            self.queue.store.heartbeat(self.worker_id, job_id)
+            result = handler(job["payload"])
+            self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=result, worker_id=self.worker_id)
+        except Exception as exc:
+            logger.exception("Worker %s failed job %s", self.worker_id, job_id)
+            self.queue.update_job_status(job_id, JobStatus.RETRY, error=str(exc), worker_id=self.worker_id)
+        return True
+
+    def run_forever(self) -> None:
+        logger.info("Worker %s started with capabilities=%s", self.worker_id, self.capabilities)
+        try:
+            while self.running:
+                worked = self.run_once()
+                if not worked:
+                    time.sleep(self.poll_interval)
+        finally:
+            self.queue.store.heartbeat(self.worker_id)
+            with self.queue.store.connect() as conn:
+                conn.execute("UPDATE workers SET status='OFFLINE', current_job_id=NULL WHERE worker_id=?", (self.worker_id,))
+
+    def stop(self) -> None:
+        self.running = False
