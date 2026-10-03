@@ -126,6 +126,12 @@ def test_14_deadlock_detection(test_db):
 
 
 def test_15_full_autonomous_pipeline(test_db):
+    """Exercise the complete orchestrator/worker lifecycle without live internet or Ollama.
+
+    External boundaries are replaced with deterministic fixtures. The real JobQueue,
+    worker daemon, orchestrator, state machine, scheduler, recovery and persistence
+    remain active. Live SearXNG/crawler/Ollama integration is tested separately.
+    """
     orc = MasterOrchestrator(db_path=test_db)
     run_id = orc.start_pipeline(1)
 
@@ -135,18 +141,72 @@ def test_15_full_autonomous_pipeline(test_db):
         db_path=test_db,
     )
 
+    def fixture_search(_payload):
+        return {
+            "status": "COMPLETED",
+            "query": "fixture",
+            "results": [
+                {
+                    "title": "Fixture source",
+                    "url": "https://fixture.test/match-report",
+                    "snippet": "Deterministic integration-test source",
+                    "engine": "fixture",
+                }
+            ],
+            "result_count": 1,
+            "source": "fixture",
+        }
+
+    def fixture_crawl(_payload):
+        return {
+            "status": "COMPLETED",
+            "url": "https://fixture.test/match-report",
+            "final_url": "https://fixture.test/match-report",
+            "status_code": 200,
+            "content_length": 1024,
+            "used_playwright": False,
+            "content_hash": "fixture-content-hash",
+            "title": "Fixture match report",
+            "word_count": 100,
+            "quality_score": 1.0,
+        }
+
+    def fixture_ai(_payload):
+        return {
+            "status": "COMPLETED",
+            "analysis_status": "sufficient_data",
+            "confidence": 0.8,
+            "key_factors": [],
+            "claims": [],
+            "uncertainties": [],
+            "input_hash": "fixture-input-hash",
+            "output_hash": "fixture-output-hash",
+        }
+
+    def fixture_audit(_payload):
+        return {
+            "status": "AUDIT_COMPLETE",
+            "pipeline_status": "PASS",
+            "research_required": False,
+            "issues": [],
+            "score": 1.0,
+        }
+
     handlers = {
-        "SEARCH": SearchWorker.execute,
-        "CRAWL": CrawlerWorker.execute,
+        "SEARCH": fixture_search,
+        "CRAWL": fixture_crawl,
         "STATISTICS": StatisticsWorker.execute,
-        "AI_ANALYSIS": AIWorker.execute,
-        "AUDIT": AuditWorker.execute,
-        "RESEARCH": lambda p: {"status": "resolved"},
+        "AI_ANALYSIS": fixture_ai,
+        "AUDIT": fixture_audit,
+        "RESEARCH": lambda _payload: {"status": "resolved"},
     }
 
     for _ in range(25):
         orc.tick(run_id)
         worker.process_next_job(handlers)
+
+    # One final scheduler/orchestrator tick consumes the last successful job.
+    orc.tick(run_id)
 
     with sqlite3.connect(test_db) as conn:
         final_state = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()[0]
