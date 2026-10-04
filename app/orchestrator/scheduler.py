@@ -1,19 +1,18 @@
 import sqlite3
 import logging
+
+from app.database.schema import initialize_database
 from app.jobs.models import JobStatus
 
 logger = logging.getLogger(__name__)
 
 
 class DependencyScheduler:
-    """Releases jobs only when all dependencies succeeded.
-
-    Research-task mirroring is optional at the queue layer: a database that only
-    contains the canonical job schema remains a valid scheduler database.
-    """
+    """Releases jobs only when all dependencies succeeded."""
 
     def __init__(self, db_path: str = "database/football.db"):
         self.db_path = db_path
+        initialize_database(db_path)
 
     @staticmethod
     def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
@@ -42,7 +41,6 @@ class DependencyScheduler:
                 ).fetchall()
                 if not deps:
                     continue
-
                 if any(d["status"] in {JobStatus.FAILED, JobStatus.CANCELLED} for d in deps):
                     conn.execute(
                         "UPDATE jobs SET status=?, error_text=? WHERE id=?",
