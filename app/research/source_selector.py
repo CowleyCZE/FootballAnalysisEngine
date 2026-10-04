@@ -2,6 +2,7 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from typing import List, Dict, Any
 from app.research.source_registry import SourceRegistry
 
+
 class SourceSelector:
     def __init__(self, registry: SourceRegistry, max_per_domain: int = 3):
         self.registry = registry
@@ -26,9 +27,12 @@ class SourceSelector:
         ))
 
     def select_candidates(self, search_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        domain_counts: Dict[str, int] = {}
         candidates = []
 
+        # SearchEngine already performs the authoritative relevance ranking.
+        # Recalculate only the research-layer policy score here, then sort
+        # BEFORE applying max_per_domain. This prevents low-quality early
+        # results from consuming a domain's quota and hiding better sources.
         for res in search_results:
             raw_url = res.get("url", "")
             url = self.normalize_url(raw_url)
@@ -36,26 +40,37 @@ class SourceSelector:
                 continue
 
             info = self.registry.get_domain_info(url)
-            domain = info["domain"]
-
-            if domain_counts.get(domain, 0) >= self.max_per_domain:
-                continue
-
             score = self._calculate_score(info["authority"], res)
 
             candidate = {
                 "url": url,
-                "domain": domain,
+                "domain": info["domain"],
                 "source_type": info["source_type"],
                 "score": score,
+                "search_relevance": res.get("relevance", 0),
                 "title": res.get("title", ""),
                 "snippet": res.get("content", "")
             }
             candidates.append(candidate)
+
+        candidates.sort(
+            key=lambda x: (
+                x["score"],
+                x.get("search_relevance", 0),
+            ),
+            reverse=True,
+        )
+
+        domain_counts: Dict[str, int] = {}
+        selected = []
+        for candidate in candidates:
+            domain = candidate["domain"]
+            if domain_counts.get(domain, 0) >= self.max_per_domain:
+                continue
+            selected.append(candidate)
             domain_counts[domain] = domain_counts.get(domain, 0) + 1
 
-        candidates.sort(key=lambda x: x["score"], reverse=True)
-        return candidates
+        return selected
 
     def _calculate_score(self, authority: float, res: Dict[str, Any]) -> float:
         relevance = 0.5
