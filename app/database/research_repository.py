@@ -1,9 +1,21 @@
+from __future__ import annotations
+
+import hashlib
 import sqlite3
-import json
-from datetime import datetime
-from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
 
 class ResearchRepository:
+    """Persistence boundary for research data using the canonical SQLite schema.
+
+    Core provenance is stored in the shared tables from database/schema.sql:
+    sources -> documents -> evidence -> claims -> claim_evidence.
+    Research-specific execution tables live in database/research_schema.sql.
+    """
+
     def __init__(self, db_path: str = "database/football.db"):
         self.db_path = db_path
         self._init_tables()
@@ -11,133 +23,257 @@ class ResearchRepository:
     def get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
-    def _init_tables(self):
+    def _init_tables(self) -> None:
+        """Ensure the canonical schema is available without redefining core tables."""
         with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS research_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_uuid TEXT NOT NULL UNIQUE,
-                run_id INTEGER NOT NULL,
-                task_id INTEGER NOT NULL,
-                strategy TEXT NOT NULL,
-                started_at TEXT NOT NULL,
-                completed_at TEXT,
-                status TEXT NOT NULL,
-                FOREIGN KEY (run_id) REFERENCES analysis_runs(id),
-                FOREIGN KEY (task_id) REFERENCES research_tasks(id)
-            );
-            """)
-
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS research_queries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
-                query TEXT NOT NULL,
-                query_type TEXT NOT NULL,
-                query_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                result_count INTEGER DEFAULT 0,
-                FOREIGN KEY (session_id) REFERENCES research_sessions(id)
-            );
-            """)
-
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS source_candidates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
-                url TEXT NOT NULL,
-                domain TEXT NOT NULL,
-                source_type TEXT,
-                source_score REAL,
-                selected INTEGER NOT NULL DEFAULT 0,
-                rejection_reason TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (session_id) REFERENCES research_sessions(id)
-            );
-            """)
-
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS research_executions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                execution_uuid TEXT NOT NULL UNIQUE,
-                task_id INTEGER NOT NULL,
-                attempt_number INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                started_at TEXT NOT NULL,
-                completed_at TEXT,
-                error_message TEXT,
-                FOREIGN KEY (task_id) REFERENCES research_tasks(id)
-            );
-            """)
+            root = Path(__file__).resolve().parents[2]
+            schema = root / "database" / "schema.sql"
+            research_schema = root / "database" / "research_schema.sql"
+            if schema.exists():
+                conn.executescript(schema.read_text(encoding="utf-8"))
+            if research_schema.exists():
+                conn.executescript(research_schema.read_text(encoding="utf-8"))
             conn.commit()
 
     def create_session(self, session_uuid: str, run_id: int, task_id: int, strategy: str) -> int:
+        now = datetime.now(timezone.utc).isoformat()
         with self.get_connection() as conn:
-            cursor = conn.cursor()
-            now = datetime.now().isoformat()
-            cursor.execute(
-                "INSERT INTO research_sessions (session_uuid, run_id, task_id, strategy, started_at, status) VALUES (?, ?, ?, ?, ?, ?)",
-                (session_uuid, run_id, task_id, strategy, now, "RUNNING")
+            cur = conn.execute(
+                """
+                INSERT INTO research_sessions
+                    (session_uuid, run_id, task_id, strategy, started_at, status)
+                VALUES (?, ?, ?, ?, ?, 'RUNNING')
+                """,
+                (session_uuid, int(run_id), int(task_id), strategy, now),
             )
-            return cursor.lastrowid
+            return int(cur.lastrowid)
 
-    def save_query(self, session_id: int, query: str, query_type: str, query_hash: str, result_count: int = 0):
+    def save_query(
+        self,
+        session_id: int,
+        query: str,
+        query_type: str,
+        query_hash: str,
+        result_count: int = 0,
+    ) -> None:
         with self.get_connection() as conn:
             conn.execute(
-                "INSERT INTO research_queries (session_id, query, query_type, query_hash, result_count) VALUES (?, ?, ?, ?, ?)",
-                (session_id, query, query_type, query_hash, result_count)
+                """
+                INSERT INTO research_queries
+                    (session_id, query, query_type, query_hash, result_count)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (session_id, query, query_type, query_hash, int(result_count)),
             )
 
-    def save_source_candidate(self, session_id: int, url: str, domain: str, source_type: str, score: float, selected: bool, rejection_reason: Optional[str] = None):
+    def save_source_candidate(
+        self,
+        session_id: int,
+        url: str,
+        domain: str,
+        source_type: Optional[str],
+        score: float,
+        selected: bool,
+        rejection_reason: Optional[str] = None,
+    ) -> None:
         with self.get_connection() as conn:
             conn.execute(
-                "INSERT INTO source_candidates (session_id, url, domain, source_type, source_score, selected, rejection_reason) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (session_id, url, domain, source_type, score, 1 if selected else 0, rejection_reason)
+                """
+                INSERT INTO source_candidates
+                    (session_id, url, domain, source_type, source_score, selected, rejection_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    url,
+                    domain,
+                    source_type,
+                    float(score),
+                    1 if selected else 0,
+                    rejection_reason,
+                ),
             )
 
     def create_execution(self, execution_uuid: str, task_id: int, attempt_number: int) -> int:
+        now = datetime.now(timezone.utc).isoformat()
         with self.get_connection() as conn:
-            cursor = conn.cursor()
-            now = datetime.now().isoformat()
-            cursor.execute(
-                "INSERT INTO research_executions (execution_uuid, task_id, attempt_number, status, started_at) VALUES (?, ?, ?, ?, ?)",
-                (execution_uuid, task_id, attempt_number, "RUNNING", now)
+            cur = conn.execute(
+                """
+                INSERT INTO research_executions
+                    (execution_uuid, task_id, attempt_number, status, started_at)
+                VALUES (?, ?, ?, 'RUNNING', ?)
+                """,
+                (execution_uuid, int(task_id), int(attempt_number), now),
             )
-            return cursor.lastrowid
+            return int(cur.lastrowid)
 
-    def complete_execution(self, execution_id: int, status: str, error_message: Optional[str] = None):
+    def complete_execution(
+        self,
+        execution_id: int,
+        status: str,
+        error_message: Optional[str] = None,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
         with self.get_connection() as conn:
-            now = datetime.now().isoformat()
+            row = conn.execute(
+                "SELECT task_id FROM research_executions WHERE id=?",
+                (execution_id,),
+            ).fetchone()
             conn.execute(
-                "UPDATE research_executions SET status = ?, completed_at = ?, error_message = ? WHERE id = ?",
-                (status, now, error_message, execution_id)
+                """
+                UPDATE research_executions
+                   SET status=?, completed_at=?, error_message=?
+                 WHERE id=?
+                """,
+                (status, now, error_message, execution_id),
             )
+            if row:
+                conn.execute(
+                    "UPDATE research_sessions SET status=?, completed_at=? WHERE task_id=? AND status='RUNNING'",
+                    (status, now, int(row["task_id"])),
+                )
 
-    def save_claims_and_evidence(self, run_id: int, task_id: int, claims: List[Dict[str, Any]]):
+    @staticmethod
+    def _content_hash(url: str, text: str) -> str:
+        return hashlib.sha256(f"{url}\n{text}".encode("utf-8")).hexdigest()
+
+    def _ensure_source(self, conn: sqlite3.Connection, url: str, source_type: Optional[str]) -> int:
+        domain = urlparse(url).netloc.lower()
+        row = conn.execute("SELECT id FROM sources WHERE domain=?", (domain,)).fetchone()
+        if row:
+            return int(row["id"])
+        cur = conn.execute(
+            """
+            INSERT INTO sources(domain, name, source_type, priority, active)
+            VALUES (?, ?, ?, 50, 1)
+            """,
+            (domain, domain, source_type),
+        )
+        return int(cur.lastrowid)
+
+    def _ensure_document(
+        self,
+        conn: sqlite3.Connection,
+        url: str,
+        text: str,
+        published_at: Optional[str],
+        document_id: Optional[int] = None,
+    ) -> int:
+        if document_id is not None:
+            row = conn.execute("SELECT id FROM documents WHERE id=?", (int(document_id),)).fetchone()
+            if row:
+                return int(row["id"])
+
+        canonical_url = url.split("#", 1)[0]
+        content_hash = self._content_hash(url, text)
+        row = conn.execute(
+            "SELECT id FROM documents WHERE content_hash=? LIMIT 1",
+            (content_hash,),
+        ).fetchone()
+        if row:
+            return int(row["id"])
+
+        source_id = self._ensure_source(conn, url, None)
+        retrieved_at = datetime.now(timezone.utc).isoformat()
+        cur = conn.execute(
+            """
+            INSERT INTO documents(
+                source_id, url, canonical_url, content_hash, title,
+                published_at, retrieved_at, content_type, content_length
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                source_id,
+                url,
+                canonical_url,
+                content_hash,
+                None,
+                published_at,
+                retrieved_at,
+                "text/html",
+                len(text),
+            ),
+        )
+        return int(cur.lastrowid)
+
+    def save_claims_and_evidence(
+        self,
+        run_id: int,
+        task_id: int,
+        claims: List[Dict[str, Any]],
+    ) -> None:
+        """Persist claims and provenance into the shared canonical tables."""
         with self.get_connection() as conn:
-            cursor = conn.cursor()
+            task_row = conn.execute(
+                "SELECT match_id FROM research_tasks WHERE id=?",
+                (int(task_id),),
+            ).fetchone()
+            default_match_id = int(task_row["match_id"]) if task_row else None
+
             for claim in claims:
-                cursor.execute("""
-                    INSERT INTO claims (run_id, match_id, task_id, subject, predicate, object, normalized_value, source_date, confidence, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    run_id, claim.get("match_id"), task_id, claim["subject"], claim["predicate"],
-                    str(claim["object"]), claim["normalized_value"], claim.get("source_date"),
-                    claim.get("confidence", 1.0), claim["status"]
-                ))
-                claim_id = cursor.lastrowid
+                object_value = str(claim.get("object", ""))
+                subject = str(claim.get("subject", ""))
+                predicate = str(claim.get("predicate", ""))
+                normalized = str(claim.get("normalized_value", object_value))
+                status = str(claim.get("status", "UNVERIFIED"))
+                claim_text = f"{subject} {predicate} {object_value}".strip()
+
+                cur = conn.execute(
+                    """
+                    INSERT INTO claims(
+                        run_id, match_id, claim_text, claim_type,
+                        normalized_claim, status, confidence, valid_from
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        int(run_id),
+                        claim.get("match_id", default_match_id),
+                        claim_text,
+                        predicate or None,
+                        normalized,
+                        status,
+                        float(claim.get("confidence", 1.0)),
+                        claim.get("source_date"),
+                    ),
+                )
+                claim_id = int(cur.lastrowid)
 
                 for ev in claim.get("evidence_list", []):
-                    cursor.execute("""
-                        INSERT INTO evidence (claim_id, document_id, source_url, text_fragment, published_at, retrieved_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (
-                        claim_id, ev.get("document_id"), ev["source_url"], ev["text_fragment"],
-                        ev.get("published_at"), datetime.now().isoformat()
-                    ))
+                    url = str(ev.get("source_url", ""))
+                    fragment = str(ev.get("text_fragment", ""))
+                    document_id = self._ensure_document(
+                        conn,
+                        url,
+                        fragment,
+                        ev.get("published_at"),
+                        ev.get("document_id"),
+                    )
+                    ev_cur = conn.execute(
+                        """
+                        INSERT INTO evidence(
+                            document_id, evidence_type, quoted_text,
+                            extracted_value, locator, extraction_method, confidence
+                        ) VALUES (?, 'TEXT', ?, ?, ?, 'research_engine', ?)
+                        """,
+                        (
+                            document_id,
+                            fragment,
+                            object_value,
+                            url,
+                            float(claim.get("confidence", 1.0)),
+                        ),
+                    )
+                    evidence_id = int(ev_cur.lastrowid)
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO claim_evidence
+                            (claim_id, evidence_id, relationship, weight)
+                        VALUES (?, ?, 'SUPPORTS', ?)
+                        """,
+                        (claim_id, evidence_id, float(claim.get("confidence", 1.0))),
+                    )
+
             conn.commit()
