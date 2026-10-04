@@ -13,13 +13,31 @@ source_types:
     authority: 0.2
 
 domains:
+  sparta.cz:
+    type: official_club
+  slavia.cz:
+    type: official_club
+  fcbayern.com:
+    type: official_club
+  realmadrid.com:
+    type: official_club
   arsenal.com:
     type: official_club
   chelsea.com:
     type: official_club
   premierleague.com:
     type: official_league
+  uefa.com:
+    type: official_league
   bbc.com:
     type: major_news
-  sky sports.com:
+  bbc.co.uk:
+    type: major_news
+  skysports.com:
+    type: major_news
+  livesport.cz:
+    type: aggregator
+  eurofotbal.cz:
+    type: aggregator
+  ruik.cz:
     type: major_news
