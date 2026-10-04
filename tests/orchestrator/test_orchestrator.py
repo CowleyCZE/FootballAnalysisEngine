@@ -21,13 +21,14 @@ def test_db(tmp_path):
             away_team_id INTEGER NOT NULL,
             competition TEXT NOT NULL,
             season TEXT,
-            scheduled_at TEXT NOT NULL
+            scheduled_at TEXT NOT NULL,
+            venue TEXT
         );
         """
     )
     cursor.execute("INSERT INTO teams VALUES (1, 'Sparta Praha'), (2, 'Slavia Praha');")
     cursor.execute(
-        "INSERT INTO matches VALUES (100, 1, 2, '1. Liga', '2026/27', '2026-10-10 18:00:00');"
+        "INSERT INTO matches VALUES (100, 1, 2, '1. Liga', '2026/27', '2026-10-10 18:00:00', 'Letna');"
     )
     conn.commit()
     conn.close()
@@ -54,7 +55,7 @@ def test_start_pipeline_creates_run_and_initial_jobs(test_db):
     assert run is not None
     assert run["match_id"] == 100
     assert run["state"] == MatchState.DISCOVERY
-    assert {job["job_type"] for job in jobs} == {"SEARCH", "STATISTICS"}
+    assert {job["job_type"] for job in jobs} == {"RESEARCH", "STATISTICS"}
     assert all(job["status"] == "PENDING" for job in jobs)
     assert all(job["run_id"] == run_id for job in jobs)
 
