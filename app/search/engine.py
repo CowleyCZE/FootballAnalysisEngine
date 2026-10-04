@@ -38,29 +38,28 @@ class SearchEngine:
         team: str = "",
         topic_terms: list[str] | None = None,
     ) -> list[SearchResult]:
-
         data = await self.client.search(
             query.query,
             language=query.language,
             time_range=query.time_range,
         )
 
-        raw_results = data.get("results", [])
+        # Keep compatibility with injected test/legacy clients that return
+        # the raw result list instead of the SearXNG response envelope.
+        if isinstance(data, list):
+            raw_results = data
+        elif isinstance(data, dict):
+            raw_results = data.get("results", [])
+        else:
+            raw_results = []
 
-        normalized = [
-            normalize_searx_result(item)
-            for item in raw_results
-        ]
-
+        normalized = [normalize_searx_result(item) for item in raw_results]
         unique = deduplicate(normalized)
-
         terms = topic_terms or []
 
         for result in unique:
             info = self.source_registry.get_info(result.url)
-
             result.source_type = info["source_type"]
-
             result.relevance = calculate_relevance(
                 result,
                 team=team,
@@ -76,7 +75,6 @@ class SearchEngine:
             ),
             reverse=True,
         )
-
         return unique
 
     async def search_many(
@@ -85,15 +83,9 @@ class SearchEngine:
         team: str = "",
         topic_terms: list[str] | None = None,
     ) -> list[SearchResult]:
-
         all_results: list[SearchResult] = []
-
         for query in queries:
-            results = await self.search(
-                query=query,
-                team=team,
-                topic_terms=topic_terms,
+            all_results.extend(
+                await self.search(query=query, team=team, topic_terms=topic_terms)
             )
-            all_results.extend(results)
-
         return deduplicate(all_results)
