@@ -1,8 +1,16 @@
+from __future__ import annotations
+
+import os
 from urllib.parse import urlparse
+from typing import Any
+
+import yaml
 
 
 class SearchSourceRegistry:
-    SOURCE_TYPES = {
+    """Single source-of-truth registry for source type and authority."""
+
+    DEFAULT_TYPES = {
         "official_club": 1.0,
         "official_league": 1.0,
         "statistical_provider": 0.9,
@@ -11,29 +19,41 @@ class SearchSourceRegistry:
         "unknown": 0.2,
     }
 
-    DOMAINS = {
-        "sparta.cz": "official_club",
-        "slavia.cz": "official_club",
-        "fcbayern.com": "official_club",
-        "realmadrid.com": "official_club",
-        "arsenal.com": "official_club",
-        "chelsea.com": "official_club",
-        "premierleague.com": "official_league",
-        "uefa.com": "official_league",
-        "bbc.com": "major_news",
-        "skysports.com": "major_news",
-        "livesport.cz": "aggregator",
-        "eurofotbal.cz": "aggregator",
-        "ruik.cz": "major_news",
-    }
+    def __init__(self, config_path: str = "config/source_registry.yaml"):
+        self.config_path = config_path
+        self.config = self._load_config(config_path)
+        self.source_types = self.config.get("source_types", self.DEFAULT_TYPES)
+        self.domains = self.config.get("domains", {})
 
-    def get_info(self, url: str) -> dict:
+    @staticmethod
+    def _load_config(path: str) -> dict[str, Any]:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                return yaml.safe_load(handle) or {}
+        except (OSError, yaml.YAMLError):
+            return {}
+
+    def get_info(self, url: str) -> dict[str, Any]:
         domain = urlparse(url).netloc.lower()
         if domain.startswith("www."):
             domain = domain[4:]
-        source_type = self.DOMAINS.get(domain, "unknown")
+
+        domain_cfg = self.domains.get(domain, {})
+        source_type = domain_cfg.get("type", "unknown")
+        type_cfg = self.source_types.get(source_type, {})
+
+        try:
+            authority = float(type_cfg.get("authority", 0.2))
+        except (TypeError, ValueError):
+            authority = 0.2
+
+        authority = max(0.0, min(1.0, authority))
         return {
             "domain": domain,
             "source_type": source_type,
-            "authority": self.SOURCE_TYPES.get(source_type, 0.2),
+            "authority": authority,
         }
+
+    def get_domain_info(self, url: str) -> dict[str, Any]:
+        """Compatibility alias for the former ResearchSourceRegistry API."""
+        return self.get_info(url)
