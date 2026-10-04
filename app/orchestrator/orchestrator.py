@@ -8,9 +8,12 @@ from typing import Any, Dict, Optional
 from app.jobs.models import JobPriority, JobStatus
 from app.jobs.queue import JobQueue
 from app.orchestrator.config import PipelineConfig
+from app.orchestrator.policies import ResearchPolicy
 from app.orchestrator.recovery import PipelineRecovery
+from app.orchestrator.research_planner import ResearchPlanner
 from app.orchestrator.scheduler import DependencyScheduler
 from app.orchestrator.state_machine import MatchState, MatchStateMachine
+from app.orchestrator.models import MatchIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -18,21 +21,17 @@ logger = logging.getLogger(__name__)
 class MasterOrchestrator:
     """Single source of truth for the autonomous match-analysis pipeline."""
 
-    INITIAL_RESEARCH_DOMAINS = [
-        "MATCH_IDENTITY",
-        "RECENT_FORM",
-        "ABSENCES_HOME",
-        "ABSENCES_AWAY",
-        "WEATHER",
-    ]
-
     def __init__(self, db_path: str = "database/football.db", config_path: str = "config/pipeline.yaml"):
         self.db_path = db_path
         self.config = PipelineConfig.load(config_path)
         self.queue = JobQueue(db_path)
         self.state_machine = MatchStateMachine(db_path)
-        self.recovery = PipelineRecovery(db_path=db_path, timeout_seconds=int(self.config["orchestrator"]["worker_timeout"]))
+        self.recovery = PipelineRecovery(
+            db_path=db_path,
+            timeout_seconds=int(self.config["orchestrator"]["worker_timeout"]),
+        )
         self.scheduler = DependencyScheduler(db_path=db_path)
+        self.research_planner = ResearchPlanner()
         self._init_db()
 
     def _init_db(self) -> None:
@@ -79,10 +78,43 @@ class MasterOrchestrator:
                     payload_json TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS research_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    run_db_id INTEGER,
+                    match_id INTEGER NOT NULL,
+                    task_uuid TEXT NOT NULL,
+                    domain TEXT NOT NULL,
+                    task_type TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    required INTEGER NOT NULL DEFAULT 0,
+                    priority INTEGER NOT NULL DEFAULT 50,
+                    capabilities_json TEXT NOT NULL DEFAULT '[]',
+                    data_cutoff_at TEXT NOT NULL,
+                    home_team TEXT NOT NULL,
+                    away_team TEXT NOT NULL,
+                    competition TEXT NOT NULL,
+                    scheduled_at TEXT NOT NULL,
+                    venue TEXT,
+                    status TEXT NOT NULL DEFAULT 'PLANNED',
+                    attempt_number INTEGER NOT NULL DEFAULT 1,
+                    job_id TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(run_id, task_uuid)
+                );
+                CREATE INDEX IF NOT EXISTS idx_research_tasks_run ON research_tasks(run_id);
+                CREATE INDEX IF NOT EXISTS idx_research_tasks_status ON research_tasks(run_id, status);
                 """
             )
 
-    def _event(self, event_type: str, run_id: Optional[str], job_id: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> None:
+    def _event(
+        self,
+        event_type: str,
+        run_id: Optional[str],
+        job_id: Optional[str] = None,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> None:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 "INSERT INTO system_events(event_type, run_id, job_id, payload_json) VALUES(?,?,?,?)",
@@ -94,7 +126,7 @@ class MasterOrchestrator:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
-                SELECT m.id, m.scheduled_at, m.competition, m.season,
+                SELECT m.id, m.scheduled_at, m.competition, m.season, m.venue,
                        m.home_team_id, m.away_team_id,
                        ht.name AS home_team, at.name AS away_team
                 FROM matches m
@@ -109,6 +141,18 @@ class MasterOrchestrator:
         data = dict(row)
         data["cutoff_datetime"] = data.get("scheduled_at") or self._now()
         return data
+
+    def _match_identity(self, match: Dict[str, Any]) -> MatchIdentity:
+        scheduled_at = datetime.fromisoformat(match["scheduled_at"])
+        cutoff = datetime.fromisoformat(match["cutoff_datetime"])
+        return MatchIdentity(
+            match_id=int(match["id"]),
+            home_team_id=int(match["home_team_id"]),
+            away_team_id=int(match["away_team_id"]),
+            competition_id=int(match["id"]),
+            scheduled_at=scheduled_at,
+            data_cutoff_at=cutoff,
+        )
 
     def start_pipeline(self, match_id: int) -> str:
         match = self._match_context(match_id)
@@ -130,14 +174,8 @@ class MasterOrchestrator:
         self._event("PIPELINE_CREATED", run_id, payload={"match_id": match_id})
         self.state_machine.transition_to(run_id, MatchState.DISCOVERY, "Pipeline initialized")
 
-        search_query = f"{match['home_team']} {match['away_team']} {match['competition']} lineup injuries form"
-        self.queue.create_job(
-            "SEARCH",
-            match_id,
-            {"query": search_query, "run_id": run_id},
-            priority=JobPriority.HIGH,
-            run_id=run_id,
-        )
+        identity = self._match_identity(match)
+        self._create_research_plan(run_id, run_db_id, match, identity, cycle=1)
         self.queue.create_job(
             "STATISTICS",
             match_id,
@@ -153,7 +191,124 @@ class MasterOrchestrator:
             priority=JobPriority.NORMAL,
             run_id=run_id,
         )
+        self._event(
+            "RESEARCH_PLAN_CREATED",
+            run_id,
+            payload={"cycle": 1, "tasks": self._research_task_count(run_id)},
+        )
         return run_id
+
+    def _create_research_plan(
+        self,
+        run_id: str,
+        run_db_id: int,
+        match: Dict[str, Any],
+        identity: MatchIdentity,
+        cycle: int,
+        domains: Optional[list[str]] = None,
+    ) -> list[Dict[str, Any]]:
+        plan = self.research_planner.create_plan(identity)
+        if domains:
+            allowed = set(domains)
+            plan = [task for task in plan if task.domain in allowed]
+
+        created: list[Dict[str, Any]] = []
+        for requirement in plan:
+            task_id = self._upsert_research_task(run_id, run_db_id, match, requirement, cycle)
+            payload = self._research_task_payload(run_id, run_db_id, match, requirement, task_id, cycle)
+            job_id = self.queue.create_job(
+                "RESEARCH",
+                int(match["id"]),
+                payload,
+                priority=int(requirement.priority),
+                run_id=run_id,
+            )
+            if job_id is None:
+                job_id = self._existing_task_job(run_id, task_id)
+            if job_id:
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.execute(
+                        "UPDATE research_tasks SET job_id=?, status='QUEUED', updated_at=? WHERE id=?",
+                        (job_id, self._now(), task_id),
+                    )
+                self._event(
+                    "RESEARCH_TASK_QUEUED",
+                    run_id,
+                    job_id=job_id,
+                    payload={"task_id": task_id, "domain": requirement.domain, "cycle": cycle},
+                )
+            created.append({"task_id": task_id, "job_id": job_id, "domain": requirement.domain, "required": requirement.required})
+        return created
+
+    def _upsert_research_task(self, run_id: str, run_db_id: int, match: Dict[str, Any], requirement, cycle: int) -> int:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO research_tasks(
+                    run_id, run_db_id, match_id, task_uuid, domain, task_type, description,
+                    required, priority, capabilities_json, data_cutoff_at, home_team, away_team,
+                    competition, scheduled_at, venue, status, attempt_number
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(run_id, task_uuid) DO UPDATE SET
+                    description=excluded.description,
+                    required=excluded.required,
+                    priority=excluded.priority,
+                    capabilities_json=excluded.capabilities_json,
+                    data_cutoff_at=excluded.data_cutoff_at,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    run_id,
+                    run_db_id,
+                    int(match["id"]),
+                    requirement.task_uuid + f"-C{cycle}",
+                    requirement.domain,
+                    requirement.task_type,
+                    requirement.description,
+                    1 if requirement.required else 0,
+                    int(requirement.priority),
+                    json.dumps(requirement.capabilities_required),
+                    match["cutoff_datetime"],
+                    match["home_team"],
+                    match["away_team"],
+                    match["competition"],
+                    match["scheduled_at"],
+                    match.get("venue"),
+                    "PLANNED",
+                    1,
+                ),
+            )
+            return int(cursor.lastrowid or conn.execute(
+                "SELECT id FROM research_tasks WHERE run_id=? AND task_uuid=?",
+                (run_id, requirement.task_uuid + f"-C{cycle}"),
+            ).fetchone()[0])
+
+    def _research_task_payload(self, run_id: str, run_db_id: int, match: Dict[str, Any], requirement, task_id: int, cycle: int) -> Dict[str, Any]:
+        return {
+            "run_id": run_id,
+            "run_db_id": run_db_id,
+            "task_id": task_id,
+            "match_id": int(match["id"]),
+            "domain": requirement.domain,
+            "task_type": requirement.task_type,
+            "description": requirement.description,
+            "required": requirement.required,
+            "priority": requirement.priority,
+            "capabilities_required": requirement.capabilities_required,
+            "match": match,
+            "cycle": cycle,
+            "cutoff_datetime": match["cutoff_datetime"],
+        }
+
+    def _existing_task_job(self, run_id: str, task_id: int) -> Optional[str]:
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT job_id FROM research_tasks WHERE run_id=? AND id=?", (run_id, task_id)).fetchone()
+            return row[0] if row and row[0] else None
+
+    def _research_task_count(self, run_id: str) -> int:
+        with sqlite3.connect(self.db_path) as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM research_tasks WHERE run_id=?", (run_id,)).fetchone()[0])
 
     def tick(self, run_id: str) -> None:
         self.recovery.recover_dead_workers_and_jobs()
@@ -171,27 +326,20 @@ class MasterOrchestrator:
             return
 
         if state == MatchState.DISCOVERY:
-            search = self._latest_success(jobs, "SEARCH")
-            if search:
-                results = self._result(search)
-                urls = list(dict.fromkeys(r.get("url") for r in results.get("results", []) if r.get("url")))
-                if not urls:
-                    self._fail(run_id, "Search returned no crawlable URLs")
-                    return
-                for url in urls:
-                    self.queue.create_job("CRAWL", match_id, {"url": url, "run_id": run_id}, priority=JobPriority.HIGH, run_id=run_id)
-                self.state_machine.transition_to(run_id, MatchState.COLLECTING, "Search complete; crawl jobs scheduled")
+            research_ready = self._research_plan_ready(run_id)
+            if research_ready:
+                self.state_machine.transition_to(run_id, MatchState.COLLECTING, "Research plan completed")
 
         elif state == MatchState.COLLECTING:
-            crawl_jobs = [j for j in jobs if j["job_type"] == "CRAWL"]
-            if crawl_jobs and all(j["status"] == JobStatus.SUCCESS for j in crawl_jobs):
-                self.state_machine.transition_to(run_id, MatchState.NORMALIZING, "Crawling complete")
+            research_ready = self._research_plan_ready(run_id)
+            stats_ready = self._latest_success(jobs, "STATISTICS")
+            if research_ready and stats_ready:
+                self.state_machine.transition_to(run_id, MatchState.NORMALIZING, "Research and statistics collected")
                 self.state_machine.transition_to(run_id, MatchState.CALCULATING, "Normalization complete")
-                self._schedule_initial_research(run_id, match_id)
 
         elif state == MatchState.CALCULATING:
             stats_ready = self._latest_success(jobs, "STATISTICS")
-            research_ready = self._latest_success(jobs, "RESEARCH")
+            research_ready = self._research_plan_ready(run_id)
             if stats_ready and research_ready:
                 self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics and research evidence ready")
                 self.queue.create_job(
@@ -235,18 +383,12 @@ class MasterOrchestrator:
                     else:
                         self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Audit requires research for cycle {cycle}")
                         domains = self._research_domains_from_audit(audit)
-                        self.queue.create_job(
-                            "RESEARCH",
-                            match_id,
-                            self._research_payload(run_id, match_id, domains=domains, cycle=cycle + 1),
-                            priority=JobPriority.HIGH,
-                            run_id=run_id,
-                        )
-                else:
-                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Audit did not produce a resolvable terminal state")
+                        match = self._match_context(match_id)
+                        identity = self._match_identity(match)
+                        self._create_research_plan(run_id, self._run_db_id(run_id), match, identity, cycle=cycle + 1, domains=domains)
 
         elif state == MatchState.RESEARCHING:
-            if self._latest_success(jobs, "RESEARCH"):
+            if self._research_plan_ready(run_id, cycle=cycle + 1):
                 with sqlite3.connect(self.db_path) as conn:
                     conn.execute(
                         "UPDATE pipeline_runs SET cycle=cycle+1, updated_at=? WHERE run_id=?",
@@ -265,28 +407,28 @@ class MasterOrchestrator:
         elif state == MatchState.FINALIZING and self._run_is_terminal_ready(run_id):
             self._finish(run_id, MatchState.COMPLETED, "All required jobs completed")
 
-    def _schedule_initial_research(self, run_id: str, match_id: int) -> None:
-        jobs = self._jobs_for_run(run_id)
-        if self._latest_success(jobs, "RESEARCH") or any(j["job_type"] == "RESEARCH" for j in jobs):
-            return
-        self.queue.create_job(
-            "RESEARCH",
-            match_id,
-            self._research_payload(run_id, match_id, domains=self.INITIAL_RESEARCH_DOMAINS, cycle=1),
-            priority=JobPriority.HIGH,
-            run_id=run_id,
-        )
+    def _research_plan_ready(self, run_id: str, cycle: Optional[int] = None) -> bool:
+        where = "run_id=?"
+        params: list[Any] = [run_id]
+        if cycle is not None:
+            where += " AND task_uuid LIKE ?"
+            params.append(f"%-C{cycle}")
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                f"SELECT required, status FROM research_tasks WHERE {where}",
+                params,
+            ).fetchall()
+        required = [row for row in rows if int(row[0]) == 1]
+        if not required:
+            return False
+        return all(row[1] in {"SUCCESS", "PARTIAL", "NO_RESULT", "CONFLICTED"} for row in required)
 
-    def _research_payload(self, run_id: str, match_id: int, domains: list[str], cycle: int) -> Dict[str, Any]:
-        match = self._match_context(match_id)
-        return {
-            "run_id": run_id,
-            "match_id": match_id,
-            "match": match,
-            "domains": domains,
-            "cycle": cycle,
-            "cutoff_datetime": match["cutoff_datetime"],
-        }
+    def _run_db_id(self, run_id: str) -> int:
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT id FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        if not row:
+            raise ValueError(f"Run {run_id} not found")
+        return int(row[0])
 
     def _ai_payload(self, run_id: str, match_id: int, mode: str) -> Dict[str, Any]:
         stats_job = self._latest_success(self._jobs_for_run(run_id), "STATISTICS")
@@ -320,9 +462,9 @@ class MasterOrchestrator:
             requested = list(requested.keys())
         if isinstance(requested, str):
             requested = [requested]
-        valid = {"MATCH_IDENTITY", "RECENT_FORM", "ABSENCES_HOME", "ABSENCES_AWAY", "WEATHER", "EXPECTED_LINEUPS", "HEAD_TO_HEAD"}
+        valid = set(ResearchPolicy.REQUIRED_DOMAINS + ResearchPolicy.OPTIONAL_DOMAINS)
         domains = [str(item) for item in requested if str(item) in valid]
-        return domains or MasterOrchestrator.INITIAL_RESEARCH_DOMAINS
+        return domains or ResearchPolicy.REQUIRED_DOMAINS
 
     def _get_run(self, run_id: str):
         with sqlite3.connect(self.db_path) as conn:
