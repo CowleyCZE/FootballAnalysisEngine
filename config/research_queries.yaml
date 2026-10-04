@@ -5,12 +5,31 @@ MATCH_IDENTITY:
   verification:
     - "{home_team} vs {away_team} official match details"
 
-RECENT_FORM:
+FORM_HOME:
   discovery:
     - "{home_team} recent results match history"
-    - "{away_team} recent results match history"
+    - "{home_team} last 5 matches results"
   verification:
-    - "{home_team} last 5 matches score"
+    - "{home_team} recent form statistics"
+
+FORM_AWAY:
+  discovery:
+    - "{away_team} recent results match history"
+    - "{away_team} last 5 matches results"
+  verification:
+    - "{away_team} recent form statistics"
+
+STATISTICS:
+  discovery:
+    - "{home_team} {away_team} statistics {competition}"
+    - "{home_team} {away_team} xG shots possession"
+  verification:
+    - "{home_team} {away_team} match statistics"
+
+HEAD_TO_HEAD:
+  discovery:
+    - "{home_team} {away_team} head to head"
+    - "{home_team} vs {away_team} previous meetings"
 
 ABSENCES_HOME:
   discovery:
@@ -33,6 +52,11 @@ ABSENCES_AWAY:
     - "{away_team} injury update {match_date}"
   primary:
     - "{away_team} official injury update"
+
+EXPECTED_LINEUPS:
+  discovery:
+    - "{home_team} {away_team} predicted lineups"
+    - "{home_team} {away_team} expected lineup"
 
 WEATHER:
   discovery:
