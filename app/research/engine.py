@@ -10,12 +10,50 @@ from app.research.source_registry import SourceRegistry
 from app.research.source_policy import SourcePolicy
 from app.research.source_selector import SourceSelector
 from app.research.search_adapter import SearchAdapter
+from app.search.models import SearchResult
 from app.research.document_processor import DocumentProcessor
 from app.research.evidence_extractor import EvidenceExtractor
 from app.research.claim_builder import ClaimBuilder
 from app.research.claim_validator import ClaimValidator
 from app.research.conflict_detector import ConflictDetector
 from app.database.research_repository import ResearchRepository
+
+
+class _InjectedSearchAdapter:
+    """Compatibility adapter for explicitly injected legacy search clients."""
+
+    def __init__(self, client):
+        self.client = client
+
+    def search(self, query, **kwargs) -> List[SearchResult]:
+        raw_results = self.client.search(query)
+        if raw_results is None:
+            return []
+        if not isinstance(raw_results, list):
+            raw_results = list(raw_results)
+
+        normalized = []
+        for item in raw_results:
+            if isinstance(item, SearchResult):
+                normalized.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            normalized.append(
+                SearchResult(
+                    title=str(item.get("title", "")),
+                    url=str(item.get("url", "")),
+                    content=str(item.get("content", item.get("text", ""))),
+                    engine=item.get("engine"),
+                    category=item.get("category"),
+                    published_at=item.get("published_at"),
+                    score=float(item.get("score", 0.0) or 0.0),
+                    relevance=int(item.get("relevance", 0) or 0),
+                    source_type=str(item.get("source_type", "search")),
+                    retrieved_at=item.get("retrieved_at"),
+                )
+            )
+        return normalized
 
 
 class ResearchEngine:
@@ -33,7 +71,12 @@ class ResearchEngine:
         self.source_registry = SourceRegistry()
         self.source_policy = SourcePolicy()
         self.source_selector = SourceSelector(self.source_registry)
-        self.search_adapter = search_adapter or SearchAdapter()
+        if search_adapter is not None:
+            self.search_adapter = search_adapter
+        elif search_client is not None:
+            self.search_adapter = _InjectedSearchAdapter(search_client)
+        else:
+            self.search_adapter = SearchAdapter()
         self.document_processor = DocumentProcessor()
         self.evidence_extractor = EvidenceExtractor()
         self.claim_builder = ClaimBuilder()
@@ -46,9 +89,6 @@ class ResearchEngine:
         session_uuid = f"RS-{uuid.uuid4().hex[:8]}"
         metrics = ResearchMetrics()
 
-        # The job queue owns job state; ResearchEngine owns research-task state.
-        # Enter RUNNING before creating the execution/session records so the DB
-        # has one deterministic lifecycle for the task.
         self.repository.mark_task_running(task.task_id, task.attempt_number)
         exec_id = self.repository.create_execution(exec_uuid, task.task_id, task.attempt_number)
         session_id = self.repository.create_session(session_uuid, task.run_id, task.task_id, task.domain)
