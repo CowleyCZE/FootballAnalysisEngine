@@ -8,10 +8,6 @@ from app.jobs.models import JobStatus
 from app.jobs.queue import JobQueue
 from app.jobs.worker import BaseWorkerDaemon
 from app.orchestrator.orchestrator import MasterOrchestrator
-from app.workers.ai_worker import AIWorker
-from app.workers.audit_worker import AuditWorker
-from app.workers.crawler_worker import CrawlerWorker
-from app.workers.search_worker import SearchWorker
 from app.workers.statistics_worker import StatisticsWorker
 
 
@@ -41,27 +37,49 @@ def test_01_create_pipeline(test_db):
     assert "M1" in run_id
 
 
-def test_02_automatic_job_creation(test_db):
+def test_02_planner_creates_research_tasks_and_jobs(test_db):
     orc = MasterOrchestrator(db_path=test_db)
     run_id = orc.start_pipeline(1)
 
     with sqlite3.connect(test_db) as conn:
-        count = conn.execute("SELECT COUNT(*) FROM jobs WHERE match_id = 1 AND run_id = ?", (run_id,)).fetchone()[0]
-    assert count >= 2
+        task_count = conn.execute("SELECT COUNT(*) FROM research_tasks WHERE run_id = ?", (run_id,)).fetchone()[0]
+        research_jobs = conn.execute("SELECT COUNT(*) FROM jobs WHERE match_id = 1 AND run_id = ? AND job_type='RESEARCH'", (run_id,)).fetchone()[0]
+        search_jobs = conn.execute("SELECT COUNT(*) FROM jobs WHERE match_id = 1 AND run_id = ? AND job_type='SEARCH'", (run_id,)).fetchone()[0]
+
+    assert task_count >= 6
+    assert research_jobs == task_count
+    assert search_jobs == 0
 
 
-def test_03_04_worker_claim_and_multi_worker(test_db):
+def test_03_04_research_jobs_are_claimable_by_research_workers(test_db):
     orc = MasterOrchestrator(db_path=test_db)
-    orc.start_pipeline(1)
+    run_id = orc.start_pipeline(1)
 
-    w1 = BaseWorkerDaemon(worker_id="notebook-01", capabilities=["SEARCH"], db_path=test_db)
-    w2 = BaseWorkerDaemon(worker_id="note9-01", capabilities=["SEARCH"], db_path=test_db)
+    w1 = BaseWorkerDaemon(worker_id="notebook-01", capabilities=["RESEARCH"], db_path=test_db)
+    w2 = BaseWorkerDaemon(worker_id="note9-01", capabilities=["RESEARCH"], db_path=test_db)
 
-    handlers = {"SEARCH": SearchWorker.execute}
+    def fixture_research(payload):
+        with sqlite3.connect(test_db) as conn:
+            conn.execute(
+                "UPDATE research_tasks SET status='SUCCESS', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (payload["task_id"],),
+            )
+        return {
+            "status": "SUCCESS",
+            "task_id": payload["task_id"],
+            "claims": [],
+            "evidence_count": 0,
+        }
+
+    handlers = {"RESEARCH": fixture_research}
     p1 = w1.process_next_job(handlers)
     p2 = w2.process_next_job(handlers)
 
-    assert p1 or p2
+    assert p1 and p2
+
+    with sqlite3.connect(test_db) as conn:
+        processed = conn.execute("SELECT COUNT(*) FROM research_tasks WHERE run_id=? AND status='SUCCESS'", (run_id,)).fetchone()[0]
+    assert processed == 2
 
 
 def test_05_06_worker_crash_recovery_and_retry_limit(test_db):
@@ -126,50 +144,26 @@ def test_14_deadlock_detection(test_db):
 
 
 def test_15_full_autonomous_pipeline(test_db):
-    """Exercise the complete orchestrator/worker lifecycle without live internet or Ollama.
-
-    External boundaries are replaced with deterministic fixtures. The real JobQueue,
-    worker daemon, orchestrator, state machine, scheduler, recovery and persistence
-    remain active. Live SearXNG/crawler/Ollama integration is tested separately.
-    """
+    """Deterministic lifecycle with ResearchPlanner-driven research jobs."""
     orc = MasterOrchestrator(db_path=test_db)
     run_id = orc.start_pipeline(1)
 
     worker = BaseWorkerDaemon(
         worker_id="notebook-01",
-        capabilities=["SEARCH", "CRAWL", "STATISTICS", "AI_ANALYSIS", "AUDIT", "RESEARCH"],
+        capabilities=["STATISTICS", "AI_ANALYSIS", "AUDIT", "RESEARCH"],
         db_path=test_db,
     )
 
-    def fixture_search(_payload):
-        return {
-            "status": "COMPLETED",
-            "query": "fixture",
-            "results": [
-                {
-                    "title": "Fixture source",
-                    "url": "https://fixture.test/match-report",
-                    "snippet": "Deterministic integration-test source",
-                    "engine": "fixture",
-                }
-            ],
-            "result_count": 1,
-            "source": "fixture",
-        }
+    def fixture_research(payload):
+        with sqlite3.connect(test_db) as conn:
+            conn.execute(
+                "UPDATE research_tasks SET status='SUCCESS', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (payload["task_id"],),
+            )
+        return {"status": "SUCCESS", "task_id": payload["task_id"], "claims": []}
 
-    def fixture_crawl(_payload):
-        return {
-            "status": "COMPLETED",
-            "url": "https://fixture.test/match-report",
-            "final_url": "https://fixture.test/match-report",
-            "status_code": 200,
-            "content_length": 1024,
-            "used_playwright": False,
-            "content_hash": "fixture-content-hash",
-            "title": "Fixture match report",
-            "word_count": 100,
-            "quality_score": 1.0,
-        }
+    def fixture_stats(_payload):
+        return {"status": "COMPLETED", "home_form": [], "away_form": [], "cutoff_datetime": "2026-10-04T20:00:00+00:00"}
 
     def fixture_ai(_payload):
         return {
@@ -193,19 +187,16 @@ def test_15_full_autonomous_pipeline(test_db):
         }
 
     handlers = {
-        "SEARCH": fixture_search,
-        "CRAWL": fixture_crawl,
-        "STATISTICS": StatisticsWorker.execute,
+        "RESEARCH": fixture_research,
+        "STATISTICS": fixture_stats,
         "AI_ANALYSIS": fixture_ai,
         "AUDIT": fixture_audit,
-        "RESEARCH": lambda _payload: {"status": "resolved"},
     }
 
-    for _ in range(25):
+    for _ in range(40):
         orc.tick(run_id)
         worker.process_next_job(handlers)
 
-    # One final scheduler/orchestrator tick consumes the last successful job.
     orc.tick(run_id)
 
     with sqlite3.connect(test_db) as conn:
