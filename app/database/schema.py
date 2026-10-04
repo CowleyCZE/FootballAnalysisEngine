@@ -23,17 +23,45 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
 
 
 def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
-    """Apply additive migrations before indexes that depend on new columns."""
-    _ensure_column(conn, "matches", "venue", "TEXT")
-    _ensure_column(conn, "matches", "status", "TEXT")
-    _ensure_column(conn, "matches", "season", "TEXT")
-    _ensure_column(conn, "jobs", "heartbeat_at", "TEXT")
-    _ensure_column(conn, "jobs", "next_attempt_at", "TEXT")
-    _ensure_column(conn, "jobs", "fingerprint", "TEXT")
-    _ensure_column(conn, "pipeline_runs", "cycle", "INTEGER NOT NULL DEFAULT 1")
-    _ensure_column(conn, "pipeline_runs", "max_cycles", "INTEGER NOT NULL DEFAULT 3")
-    _ensure_column(conn, "pipeline_runs", "finished_at", "TEXT")
-    _ensure_column(conn, "pipeline_runs", "error_text", "TEXT")
+    """Apply additive migrations before indexes depend on newly added columns."""
+    for column, definition in (
+        ("external_match_id", "TEXT"),
+        ("season", "TEXT"),
+        ("status", "TEXT"),
+        ("venue", "TEXT"),
+    ):
+        _ensure_column(conn, "matches", column, definition)
+
+    for column, definition in (
+        ("run_id", "TEXT"),
+        ("match_id", "INTEGER"),
+        ("parent_job_id", "INTEGER"),
+        ("job_type", "TEXT"),
+        ("priority", "INTEGER NOT NULL DEFAULT 50"),
+        ("payload_json", "TEXT"),
+        ("result_json", "TEXT"),
+        ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("max_attempts", "INTEGER NOT NULL DEFAULT 3"),
+        ("worker_id", "TEXT"),
+        ("fingerprint", "TEXT"),
+        ("created_at", "TEXT"),
+        ("started_at", "TEXT"),
+        ("finished_at", "TEXT"),
+        ("heartbeat_at", "TEXT"),
+        ("next_attempt_at", "TEXT"),
+        ("error_text", "TEXT"),
+    ):
+        _ensure_column(conn, "jobs", column, definition)
+
+    for column, definition in (
+        ("match_id", "INTEGER"),
+        ("cycle", "INTEGER NOT NULL DEFAULT 1"),
+        ("max_cycles", "INTEGER NOT NULL DEFAULT 3"),
+        ("finished_at", "TEXT"),
+        ("error_text", "TEXT"),
+    ):
+        _ensure_column(conn, "pipeline_runs", column, definition)
+
     if _table_exists(conn, "system_info"):
         conn.execute(
             "INSERT INTO system_info(key, value) VALUES('schema_version', ?) "
@@ -49,7 +77,6 @@ def initialize_database(db_path: str) -> None:
 
     with sqlite3.connect(db_path, timeout=30) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
-        # Migrate columns before executing the canonical schema's dependent indexes.
         _migrate_legacy_schema(conn)
         conn.executescript(schema_path.read_text(encoding="utf-8"))
         conn.executescript(research_schema_path.read_text(encoding="utf-8"))
