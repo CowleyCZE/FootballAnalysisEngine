@@ -3,6 +3,8 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Optional
 
+from app.database.schema import initialize_database
+
 
 class JobStore:
     """Canonical SQLite persistence layer for Part 11 orchestration."""
@@ -18,19 +20,7 @@ class JobStore:
         return conn
 
     def init_db(self) -> None:
-        with self.connect() as conn:
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS workers (id INTEGER PRIMARY KEY AUTOINCREMENT, worker_id TEXT NOT NULL UNIQUE, worker_type TEXT NOT NULL DEFAULT 'generic', status TEXT NOT NULL DEFAULT 'OFFLINE', capabilities_json TEXT NOT NULL DEFAULT '[]', last_heartbeat TEXT, current_job_id TEXT, metadata_json TEXT, registered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-                CREATE TABLE IF NOT EXISTS jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL UNIQUE, run_id TEXT, match_id INTEGER, parent_job_id INTEGER, job_type TEXT NOT NULL, status TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 50, payload_json TEXT, result_json TEXT, attempts INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3, worker_id TEXT, fingerprint TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, started_at TEXT, finished_at TEXT, heartbeat_at TEXT, next_attempt_at TEXT, error_text TEXT, FOREIGN KEY(parent_job_id) REFERENCES jobs(id), FOREIGN KEY(worker_id) REFERENCES workers(worker_id));
-                CREATE TABLE IF NOT EXISTS job_dependencies (job_id INTEGER NOT NULL, depends_on_job_id INTEGER NOT NULL, PRIMARY KEY(job_id, depends_on_job_id), FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE, FOREIGN KEY(depends_on_job_id) REFERENCES jobs(id) ON DELETE CASCADE);
-                CREATE TABLE IF NOT EXISTS system_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL, run_id TEXT, job_id TEXT, worker_id TEXT, payload_json TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-                CREATE INDEX IF NOT EXISTS idx_jobs_queue ON jobs(status, priority DESC, id);
-                CREATE INDEX IF NOT EXISTS idx_jobs_run ON jobs(run_id);
-                CREATE INDEX IF NOT EXISTS idx_jobs_match ON jobs(match_id);
-                CREATE INDEX IF NOT EXISTS idx_jobs_worker ON jobs(worker_id);
-                CREATE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(fingerprint, status);
-                CREATE INDEX IF NOT EXISTS idx_jobs_heartbeat ON jobs(status, heartbeat_at);
-            """)
+        initialize_database(self.db_path)
 
     def register_worker(self, worker_id: str, capabilities: Iterable[str], worker_type: str = "generic", metadata: Optional[Dict[str, Any]] = None) -> None:
         now = self.now()
