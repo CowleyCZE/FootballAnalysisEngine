@@ -19,8 +19,7 @@ class JobStore:
 
     def init_db(self) -> None:
         with self.connect() as conn:
-            conn.executescript(
-                """
+            conn.executescript("""
                 CREATE TABLE IF NOT EXISTS workers (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     worker_id TEXT NOT NULL UNIQUE,
@@ -69,50 +68,30 @@ class JobStore:
                 CREATE INDEX IF NOT EXISTS idx_jobs_worker ON jobs(worker_id);
                 CREATE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(fingerprint, status);
                 CREATE INDEX IF NOT EXISTS idx_jobs_heartbeat ON jobs(status, heartbeat_at);
-                """
-            )
+            """)
 
     def register_worker(self, worker_id: str, capabilities: Iterable[str], worker_type: str = "generic", metadata: Optional[Dict[str, Any]] = None) -> None:
         now = self.now()
         with self.connect() as conn:
             conn.execute(
-                """
-                INSERT INTO workers(worker_id, worker_type, status, capabilities_json, last_heartbeat, metadata_json)
-                VALUES(?, ?, 'IDLE', ?, ?, ?)
-                ON CONFLICT(worker_id) DO UPDATE SET
-                    worker_type=excluded.worker_type,
-                    status='IDLE',
-                    capabilities_json=excluded.capabilities_json,
-                    last_heartbeat=excluded.last_heartbeat,
-                    metadata_json=excluded.metadata_json
-                """,
+                """INSERT INTO workers(worker_id, worker_type, status, capabilities_json, last_heartbeat, metadata_json)
+                   VALUES(?, ?, 'IDLE', ?, ?, ?)
+                   ON CONFLICT(worker_id) DO UPDATE SET worker_type=excluded.worker_type, status='IDLE', capabilities_json=excluded.capabilities_json, last_heartbeat=excluded.last_heartbeat, metadata_json=excluded.metadata_json""",
                 (worker_id, worker_type, json.dumps(sorted(set(capabilities))), now, json.dumps(metadata or {})),
             )
 
     def heartbeat(self, worker_id: str, current_job_id: Optional[str] = None) -> None:
         with self.connect() as conn:
-            conn.execute(
-                "UPDATE workers SET status=?, last_heartbeat=?, current_job_id=? WHERE worker_id=?",
-                ('BUSY' if current_job_id else 'IDLE', self.now(), current_job_id, worker_id),
-            )
+            conn.execute("UPDATE workers SET status=?, last_heartbeat=?, current_job_id=? WHERE worker_id=?", ('BUSY' if current_job_id else 'IDLE', self.now(), current_job_id, worker_id))
             if current_job_id:
                 conn.execute("UPDATE jobs SET heartbeat_at=? WHERE job_id=?", (self.now(), current_job_id))
 
     def create_job(self, job_id: str, job_type: str, match_id: Optional[int], run_id: Optional[str], payload: Dict[str, Any], fingerprint: str, priority: int, max_attempts: int, parent_job_id: Optional[int] = None) -> Optional[str]:
         with self.connect() as conn:
-            existing = conn.execute(
-                "SELECT job_id FROM jobs WHERE fingerprint=? AND status IN ('PENDING','CLAIMED','RUNNING','BLOCKED','RETRY') LIMIT 1",
-                (fingerprint,),
-            ).fetchone()
+            existing = conn.execute("SELECT job_id FROM jobs WHERE fingerprint=? AND status IN ('PENDING','CLAIMED','RUNNING','BLOCKED','RETRY') LIMIT 1", (fingerprint,)).fetchone()
             if existing:
                 return None
-            conn.execute(
-                """
-                INSERT INTO jobs(job_id, run_id, match_id, parent_job_id, job_type, status, priority, payload_json, fingerprint, max_attempts, created_at)
-                VALUES(?,?,?,?,?,'PENDING',?,?,?,?,?)
-                """,
-                (job_id, run_id, match_id, parent_job_id, job_type, priority, json.dumps(payload, sort_keys=True), fingerprint, max_attempts, self.now()),
-            )
+            conn.execute("INSERT INTO jobs(job_id, run_id, match_id, parent_job_id, job_type, status, priority, payload_json, fingerprint, max_attempts, created_at) VALUES(?,?,?,?,?,'PENDING',?,?,?,?,?)", (job_id, run_id, match_id, parent_job_id, job_type, priority, json.dumps(payload, sort_keys=True), fingerprint, max_attempts, self.now()))
             return job_id
 
     def mark_blocked(self, job_id: str) -> None:
@@ -120,38 +99,44 @@ class JobStore:
             conn.execute("UPDATE jobs SET status='BLOCKED' WHERE job_id=? AND status='PENDING'", (job_id,))
 
     def claim(self, worker_id: str, capabilities: Iterable[str]) -> Optional[Dict[str, Any]]:
-        caps = list(set(capabilities))
+        caps = set(capabilities)
         if not caps:
             return None
         self.register_worker(worker_id, caps)
-        placeholders = ",".join("?" for _ in caps)
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                f"""
-                SELECT * FROM jobs
-                WHERE status='PENDING'
-                  AND job_type IN ({placeholders})
-                  AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-                  AND NOT EXISTS (
-                      SELECT 1 FROM job_dependencies d
-                      JOIN jobs dep ON dep.id=d.depends_on_job_id
-                      WHERE d.job_id=jobs.id AND dep.status!='SUCCESS'
-                  )
-                ORDER BY priority DESC, id ASC LIMIT 1
-                """,
-                [*caps, self.now()],
-            ).fetchone()
-            if not row:
+            rows = conn.execute(
+                """SELECT * FROM jobs
+                   WHERE status='PENDING'
+                     AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+                     AND NOT EXISTS (
+                         SELECT 1 FROM job_dependencies d
+                         JOIN jobs dep ON dep.id=d.depends_on_job_id
+                         WHERE d.job_id=jobs.id AND dep.status!='SUCCESS'
+                     )
+                   ORDER BY priority DESC, id ASC""",
+                (self.now(),),
+            ).fetchall()
+            selected = None
+            for row in rows:
+                payload = json.loads(row["payload_json"] or "{}")
+                required = set(payload.get("capabilities_required") or [])
+                # A worker may claim a job when it explicitly advertises every
+                # required capability, while job_type remains the dispatch key.
+                if required and not required.issubset(caps):
+                    continue
+                if not required and row["job_type"] not in caps and "generic" not in caps:
+                    continue
+                selected = row
+                break
+            if not selected:
                 conn.commit()
                 return None
             now = self.now()
-            conn.execute(
-                "UPDATE jobs SET status='CLAIMED', worker_id=?, started_at=?, heartbeat_at=?, attempts=attempts+1 WHERE id=? AND status='PENDING'",
-                (worker_id, now, now, row['id']),
-            )
-            conn.execute("UPDATE workers SET status='BUSY', current_job_id=?, last_heartbeat=? WHERE worker_id=?", (row['job_id'], now, worker_id))
-            return dict(row) | {"payload": json.loads(row['payload_json'] or '{}')}
+            conn.execute("UPDATE jobs SET status='CLAIMED', worker_id=?, started_at=?, heartbeat_at=?, attempts=attempts+1 WHERE id=? AND status='PENDING'", (worker_id, now, now, selected['id']))
+            conn.execute("UPDATE workers SET status='BUSY', current_job_id=?, last_heartbeat=? WHERE worker_id=?", (selected['job_id'], now, worker_id))
+            attempt = int(selected["attempts"]) + 1
+            return dict(selected) | {"payload": json.loads(selected['payload_json'] or '{}'), "attempt_number": attempt}
 
     def finish(self, job_id: str, worker_id: str, success: bool, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None) -> None:
         now = self.now()
@@ -169,10 +154,7 @@ class JobStore:
             else:
                 status = 'FAILED'
                 next_attempt = None
-            conn.execute(
-                "UPDATE jobs SET status=?, result_json=?, error_text=?, finished_at=?, next_attempt_at=?, worker_id=NULL WHERE job_id=?",
-                (status, json.dumps(result) if result is not None else None, error, now if status in ('SUCCESS','FAILED') else None, next_attempt, job_id),
-            )
+            conn.execute("UPDATE jobs SET status=?, result_json=?, error_text=?, finished_at=?, next_attempt_at=?, worker_id=NULL WHERE job_id=?", (status, json.dumps(result) if result is not None else None, error, now if status in ('SUCCESS','FAILED') else None, next_attempt, job_id))
             conn.execute("UPDATE workers SET status='IDLE', current_job_id=NULL, last_heartbeat=? WHERE worker_id=?", (now, worker_id))
 
     @staticmethod
