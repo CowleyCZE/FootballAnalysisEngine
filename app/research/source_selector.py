@@ -29,10 +29,10 @@ class SourceSelector:
     def select_candidates(self, search_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         candidates = []
 
-        # SearchEngine already performs the authoritative relevance ranking.
-        # Recalculate only the research-layer policy score here, then sort
-        # BEFORE applying max_per_domain. This prevents low-quality early
-        # results from consuming a domain's quota and hiding better sources.
+        # SearchEngine supplies the primary relevance signal. SourceSelector
+        # combines it with source authority before applying domain limits.
+        # Ranking must happen before the quota so weak early results cannot
+        # consume a domain's available slots.
         for res in search_results:
             raw_url = res.get("url", "")
             url = self.normalize_url(raw_url)
@@ -53,13 +53,7 @@ class SourceSelector:
             }
             candidates.append(candidate)
 
-        candidates.sort(
-            key=lambda x: (
-                x["score"],
-                x.get("search_relevance", 0),
-            ),
-            reverse=True,
-        )
+        candidates.sort(key=lambda x: x["score"], reverse=True)
 
         domain_counts: Dict[str, int] = {}
         selected = []
@@ -73,7 +67,19 @@ class SourceSelector:
         return selected
 
     def _calculate_score(self, authority: float, res: Dict[str, Any]) -> float:
-        relevance = 0.5
-        if res.get("title"):
-            relevance += 0.2
-        return round(0.6 * authority + 0.4 * relevance, 2)
+        try:
+            search_relevance = max(0.0, min(100.0, float(res.get("relevance", 0) or 0)))
+        except (TypeError, ValueError):
+            search_relevance = 0.0
+
+        title_signal = 0.2 if res.get("title") else 0.0
+        authority_signal = max(0.0, min(1.0, float(authority or 0.0)))
+
+        # Keep the unified SearchEngine relevance dominant while preserving
+        # the research-layer authority signal and a small title-quality signal.
+        return round(
+            0.6 * (search_relevance / 100.0)
+            + 0.3 * authority_signal
+            + 0.1 * title_signal,
+            4,
+        )
