@@ -68,6 +68,20 @@ def test_terminal_job_result_is_idempotent(tmp_path):
     assert [event[0] for event in events].count("JOB_FINISHED") == 1
 
 
+def test_job_creation_is_idempotent_for_same_fingerprint(tmp_path):
+    db = tmp_path / "fingerprint.db"
+    store = JobStore(str(db))
+
+    assert store.create_job("j1", "RESEARCH", 1, "r1", {"domain": "FORM_HOME"}, "fp1", 50, 3) == "j1"
+    assert store.create_job("j2", "RESEARCH", 1, "r1", {"domain": "FORM_HOME"}, "fp1", 50, 3) is None
+
+    with sqlite3.connect(db) as conn:
+        row = conn.execute("SELECT COUNT(*), MIN(job_id) FROM jobs WHERE fingerprint='fp1'").fetchone()
+        events = conn.execute("SELECT event_type FROM system_events WHERE job_id IN ('j1','j2')").fetchall()
+    assert row == (1, "j1")
+    assert [event[0] for event in events] == ["JOB_CREATED"]
+
+
 def test_dead_worker_recovery_is_restart_safe(tmp_path):
     db = tmp_path / "recovery.db"
     store = JobStore(str(db))
