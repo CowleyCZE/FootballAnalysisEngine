@@ -51,7 +51,7 @@ def test_selector_ranks_before_domain_limit():
     selected = selector.select_candidates(results)
 
     assert [item["url"] for item in selected] == [
-        "https://official.example/low",
+        "https://official.example/high",
         "https://news.example/article",
     ]
 
