@@ -10,6 +10,7 @@ class SearchResult:
     category: Optional[str] = None
     published_at: Optional[str] = None
     score: float = 0.0
+    relevance: int = 0
     source_type: str = "search"
     retrieved_at: Optional[str] = None
 
