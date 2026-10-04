@@ -12,10 +12,16 @@ from app.search.source_registry import SearchSourceRegistry
 
 class SearchEngine:
     """
-    Unified search pipeline:
+    Unified search pipeline.
 
-    QuerySpec -> SearXNG -> normalization -> deduplication ->
-    source authority/type -> relevance -> ranking.
+    Flow:
+        QuerySpec
+          -> SearXNG
+          -> normalization
+          -> deduplication
+          -> source authority
+          -> relevance
+          -> ranking
     """
 
     def __init__(
@@ -32,25 +38,33 @@ class SearchEngine:
         team: str = "",
         topic_terms: list[str] | None = None,
     ) -> list[SearchResult]:
+
         data = await self.client.search(
             query.query,
             language=query.language,
             time_range=query.time_range,
         )
 
+        raw_results = data.get("results", [])
+
         normalized = [
             normalize_searx_result(item)
-            for item in data.get("results", [])
+            for item in raw_results
         ]
+
         unique = deduplicate(normalized)
+
+        terms = topic_terms or []
 
         for result in unique:
             info = self.source_registry.get_info(result.url)
+
             result.source_type = info["source_type"]
+
             result.relevance = calculate_relevance(
                 result,
                 team=team,
-                topic_terms=topic_terms or [],
+                topic_terms=terms,
                 source_priority=query.priority,
                 source_authority=info["authority"],
             )
@@ -62,6 +76,7 @@ class SearchEngine:
             ),
             reverse=True,
         )
+
         return unique
 
     async def search_many(
@@ -70,13 +85,15 @@ class SearchEngine:
         team: str = "",
         topic_terms: list[str] | None = None,
     ) -> list[SearchResult]:
+
         all_results: list[SearchResult] = []
+
         for query in queries:
-            all_results.extend(
-                await self.search(
-                    query=query,
-                    team=team,
-                    topic_terms=topic_terms,
-                )
+            results = await self.search(
+                query=query,
+                team=team,
+                topic_terms=topic_terms,
             )
+            all_results.extend(results)
+
         return deduplicate(all_results)
