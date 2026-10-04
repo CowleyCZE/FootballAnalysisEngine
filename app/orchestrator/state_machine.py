@@ -24,7 +24,7 @@ class MatchState:
 
 
 class MatchStateMachine:
-    """Canonical pipeline state machine and state-history writer."""
+    """Canonical pipeline state machine and immutable state-history writer."""
 
     ALLOWED_TRANSITIONS = {
         MatchState.NEW: [MatchState.DISCOVERY, MatchState.FAILED],
@@ -46,11 +46,12 @@ class MatchStateMachine:
         self.db_path = db_path
 
     def transition_to(self, run_id: str, new_state: str, reason: str = "") -> bool:
-        """Atomically update pipeline state and append its immutable history row."""
+        """Atomically validate, update, audit and persist one state transition."""
         now_iso = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
             if not row:
                 return False
@@ -62,9 +63,10 @@ class MatchStateMachine:
                 logger.error("Invalid state transition requested for %s: %s -> %s", run_id, current_state, new_state)
                 return False
 
+            finished_at = now_iso if new_state in (MatchState.COMPLETED, MatchState.UNRESOLVED, MatchState.FAILED) else None
             conn.execute(
-                "UPDATE pipeline_runs SET state=?, updated_at=?, finished_at=CASE WHEN ? IN ('COMPLETED','UNRESOLVED','FAILED') THEN ? ELSE finished_at END WHERE run_id=?",
-                (new_state, now_iso, new_state, now_iso, run_id),
+                "UPDATE pipeline_runs SET state=?, updated_at=?, finished_at=CASE WHEN ? IS NOT NULL THEN ? ELSE finished_at END WHERE run_id=? AND state=?",
+                (new_state, now_iso, finished_at, finished_at, run_id, current_state),
             )
             conn.execute(
                 "INSERT INTO pipeline_state_history(run_id, old_state, new_state, reason, created_at) VALUES(?,?,?,?,?)",
