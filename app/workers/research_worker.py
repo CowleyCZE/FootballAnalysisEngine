@@ -6,30 +6,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.crawler.crawler import EngineCrawler
+from app.database.research_repository import ResearchRepository
 from app.research.engine import ResearchEngine
 from app.research.models import ResearchStatus, ResearchTask
-
-
-class _NoopRepository:
-    """Compatibility repository used until the DB research schema is unified."""
-
-    def create_execution(self, *args):
-        return 0
-
-    def create_session(self, *args):
-        return 0
-
-    def save_query(self, *args, **kwargs):
-        return None
-
-    def save_source_candidate(self, *args, **kwargs):
-        return None
-
-    def complete_execution(self, *args, **kwargs):
-        return None
-
-    def save_claims_and_evidence(self, *args, **kwargs):
-        return None
 
 
 class _CrawlerAdapter:
@@ -81,12 +60,17 @@ class ResearchWorker:
 
     def __init__(self, db_path: str = "database/football.db", engine: Optional[ResearchEngine] = None):
         self.db_path = db_path
-        self.engine = engine or ResearchEngine(repository=_NoopRepository(), crawler=_CrawlerAdapter())
+        if engine is None:
+            repository = ResearchRepository(db_path=db_path)
+            engine = ResearchEngine(repository=repository, crawler=_CrawlerAdapter())
+        self.engine = engine
 
     def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         match = payload.get("match") or {}
         match_id = int(payload.get("match_id") or match.get("id"))
-        cutoff = self._parse_datetime(payload.get("cutoff_datetime") or match.get("cutoff_datetime") or match.get("scheduled_at"))
+        cutoff = self._parse_datetime(
+            payload.get("cutoff_datetime") or match.get("cutoff_datetime") or match.get("scheduled_at")
+        )
         scheduled_at = self._parse_datetime(match.get("scheduled_at") or cutoff)
         task_id = int(payload["task_id"])
 
