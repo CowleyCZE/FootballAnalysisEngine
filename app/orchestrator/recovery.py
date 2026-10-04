@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import datetime, timezone
 import logging
@@ -6,6 +7,8 @@ logger = logging.getLogger(__name__)
 
 
 class PipelineRecovery:
+    """Recover abandoned jobs without creating duplicate terminal work."""
+
     def __init__(self, db_path: str = "database/football.db", timeout_seconds: int = 120):
         self.db_path = db_path
         self.timeout_seconds = timeout_seconds
@@ -13,10 +16,10 @@ class PipelineRecovery:
     def recover_dead_workers_and_jobs(self) -> int:
         now = datetime.now(timezone.utc)
         recovered = 0
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA foreign_keys = ON")
-            rows = conn.execute("SELECT id, job_id, attempts, max_attempts, heartbeat_at, worker_id, status FROM jobs WHERE status IN ('CLAIMED','RUNNING')").fetchall()
+            rows = conn.execute("SELECT id, job_id, run_id, attempts, max_attempts, heartbeat_at, worker_id, status FROM jobs WHERE status IN ('CLAIMED','RUNNING')").fetchall()
             for job in rows:
                 heartbeat = job["heartbeat_at"]
                 if not heartbeat:
@@ -43,21 +46,13 @@ class PipelineRecovery:
                     next_attempt = None
                     task_status = "FAILED"
 
-                conn.execute("UPDATE jobs SET status=?, worker_id=NULL, heartbeat_at=NULL, finished_at=?, next_attempt_at=?, error_text=? WHERE id=?", (status, now.isoformat(), next_attempt, f"Worker heartbeat timeout after {int(age)}s", job["id"]))
+                conn.execute("UPDATE jobs SET status=?, worker_id=NULL, heartbeat_at=NULL, finished_at=?, next_attempt_at=?, error_text=? WHERE id=? AND status IN ('CLAIMED','RUNNING')", (status, job["job_id"] and now.isoformat(), next_attempt, f"Worker heartbeat timeout after {int(age)}s", job["id"]))
                 conn.execute("UPDATE research_tasks SET status=?, attempt_number=MAX(attempt_number, ?), updated_at=? WHERE job_id=? AND status='RUNNING'", (task_status, attempts, now.isoformat(), job["job_id"]))
-
-                # Close an open research execution so restart/retry cannot leave
-                # a permanently RUNNING execution behind.
                 if task_status in {"QUEUED", "FAILED"}:
-                    conn.execute(
-                        """UPDATE research_executions
-                           SET status=?, completed_at=?, error_message=?
-                         WHERE task_id IN (SELECT id FROM research_tasks WHERE job_id=?)
-                           AND status='RUNNING'""",
-                        ("RETRY" if task_status == "QUEUED" else "FAILED", now.isoformat(), f"Worker heartbeat timeout after {int(age)}s", job["job_id"]),
-                    )
+                    conn.execute("""UPDATE research_executions SET status=?, completed_at=?, error_message=? WHERE task_id IN (SELECT id FROM research_tasks WHERE job_id=?) AND status='RUNNING'""", ("RETRY" if task_status == "QUEUED" else "FAILED", now.isoformat(), f"Worker heartbeat timeout after {int(age)}s", job["job_id"]))
                 if job["worker_id"]:
-                    conn.execute("UPDATE workers SET status='OFFLINE', current_job_id=NULL WHERE worker_id=?", (job["worker_id"],))
+                    conn.execute("UPDATE workers SET status='OFFLINE', current_job_id=NULL, last_heartbeat=? WHERE worker_id=?", (now.isoformat(), job["worker_id"]))
+                conn.execute("INSERT INTO system_events(event_type,run_id,job_id,worker_id,payload_json,created_at) VALUES(?,?,?,?,?,?)", ("JOB_RECOVERED", job["run_id"], job["job_id"], job["worker_id"], json.dumps({"old_status": job["status"], "new_status": status, "attempts": attempts, "heartbeat_age_seconds": int(age)}, sort_keys=True), now.isoformat()))
                 recovered += 1
                 logger.warning("Recovered job %s as %s", job["job_id"], status)
         return recovered
