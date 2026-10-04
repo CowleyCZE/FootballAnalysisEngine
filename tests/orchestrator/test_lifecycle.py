@@ -33,7 +33,6 @@ def test_dependency_scheduler_unblocks_only_after_all_dependencies_succeed(tmp_p
     first = store.create_job("first", "A", 1, "run", {}, "fp-a", 50, 1)
     second = store.create_job("second", "B", 1, "run", {}, "fp-b", 50, 1)
     assert first and second
-    store.add_dependency = None
     with store.connect() as conn:
         first_pk = conn.execute("SELECT id FROM jobs WHERE job_id='first'").fetchone()[0]
         second_pk = conn.execute("SELECT id FROM jobs WHERE job_id='second'").fetchone()[0]
@@ -56,18 +55,28 @@ def test_recovery_requeues_research_job_and_updates_task(tmp_path):
     store.create_job("research-job", "RESEARCH", 50, "run-1", {}, "fp-r", 80, 3)
     with store.connect() as conn:
         job = conn.execute("SELECT id FROM jobs WHERE job_id='research-job'").fetchone()
-        conn.execute("CREATE TABLE research_tasks (id INTEGER PRIMARY KEY, job_id TEXT, status TEXT, attempt_number INTEGER, updated_at TEXT)")
-        conn.execute("CREATE TABLE research_executions (id INTEGER PRIMARY KEY, task_id INTEGER, status TEXT, completed_at TEXT, error_message TEXT)")
-        conn.execute("INSERT INTO research_tasks VALUES (1, 'research-job', 'RUNNING', 1, '')")
-        conn.execute("INSERT INTO research_executions VALUES (1, 1, 'RUNNING', NULL, NULL)")
+        task = conn.execute(
+            "INSERT INTO research_tasks "
+            "(run_id, match_id, task_uuid, domain, task_type, description, data_cutoff_at, "
+            "home_team, away_team, competition, scheduled_at, status, job_id) "
+            "VALUES ('run-1', 50, 'TASK-RECOVERY', 'ABSENCES_HOME', 'NEWS_COLLECTION', 'Recovery', "
+            "'2026-10-04T12:00:00', 'Home', 'Away', 'League', '2026-10-04T15:00:00', 'RUNNING', 'research-job')"
+        )
+        task_id = task.lastrowid
+        conn.execute(
+            "INSERT INTO research_executions "
+            "(execution_uuid, task_id, attempt_number, status, started_at) "
+            "VALUES ('EXEC-RECOVERY', ?, 1, 'RUNNING', CURRENT_TIMESTAMP)",
+            (task_id,),
+        )
         stale = (datetime.now(timezone.utc) - timedelta(seconds=600)).isoformat()
         conn.execute("UPDATE jobs SET status='RUNNING', attempts=1, heartbeat_at=?, worker_id=NULL WHERE id=?", (stale, job[0]))
 
     recovered = PipelineRecovery(db, timeout_seconds=120).recover_dead_workers_and_jobs()
     assert recovered == 1
     with sqlite3.connect(db) as conn:
-        task = conn.execute("SELECT status, attempt_number FROM research_tasks WHERE id=1").fetchone()
-        execution = conn.execute("SELECT status FROM research_executions WHERE id=1").fetchone()
+        task = conn.execute("SELECT status, attempt_number FROM research_tasks WHERE id=?", (task_id,)).fetchone()
+        execution = conn.execute("SELECT status FROM research_executions WHERE task_id=?", (task_id,)).fetchone()
     assert task[0] == "QUEUED"
     assert task[1] == 1
     assert execution[0] == "RETRY"
