@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
+
+from app.database.schema import initialize_database
 
 
 class ResearchRepository:
@@ -25,15 +26,7 @@ class ResearchRepository:
         return conn
 
     def _init_tables(self) -> None:
-        with self.get_connection() as conn:
-            root = Path(__file__).resolve().parents[2]
-            schema = root / "database" / "schema.sql"
-            research_schema = root / "database" / "research_schema.sql"
-            if schema.exists():
-                conn.executescript(schema.read_text(encoding="utf-8"))
-            if research_schema.exists():
-                conn.executescript(research_schema.read_text(encoding="utf-8"))
-            conn.commit()
+        initialize_database(self.db_path)
 
     @staticmethod
     def _now() -> str:
@@ -63,7 +56,6 @@ class ResearchRepository:
             return conn.execute("SELECT * FROM research_tasks WHERE id=?", (int(task_id),)).fetchone()
 
     def start_task_execution(self, task_id: int, attempt_number: Optional[int] = None) -> int:
-        """Compatibility helper for callers that want transition + execution creation."""
         now = self._now()
         execution_uuid = hashlib.sha256(f"{task_id}:{now}".encode("utf-8")).hexdigest()
         with self.get_connection() as conn:
@@ -162,4 +154,3 @@ class ResearchRepository:
                     ev_cur = conn.execute("INSERT INTO evidence(document_id, evidence_type, quoted_text, extracted_value, locator, extraction_method, confidence) VALUES (?, 'TEXT', ?, ?, ?, 'research_engine', ?)", (document_id, fragment, object_value, url, float(claim.get("confidence", 1.0))))
                     evidence_id = int(ev_cur.lastrowid)
                     conn.execute("INSERT OR IGNORE INTO claim_evidence(claim_id, evidence_id, relationship, weight) VALUES (?, ?, 'SUPPORTS', ?)", (claim_id, evidence_id, float(claim.get("confidence", 1.0))))
-            conn.commit()
