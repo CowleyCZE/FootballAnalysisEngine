@@ -82,6 +82,43 @@ def test_job_creation_is_idempotent_for_same_fingerprint(tmp_path):
     assert [event[0] for event in events] == ["JOB_CREATED"]
 
 
+def test_terminal_job_fingerprint_cannot_be_recreated(tmp_path):
+    db = tmp_path / "terminal-fingerprint.db"
+    store = JobStore(str(db))
+    assert store.create_job("j1", "STATISTICS", 1, "r1", {}, "fp1", 50, 3) == "j1"
+    assert store.claim("worker-1", ["STATISTICS"]) is not None
+    store.finish("j1", "worker-1", True, {"value": 1})
+
+    assert store.create_job("j2", "STATISTICS", 1, "r1", {}, "fp1", 50, 3) is None
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM jobs WHERE fingerprint='fp1'").fetchone()[0] == 1
+
+
+def test_stale_worker_callback_cannot_finish_reclaimed_job(tmp_path):
+    db = tmp_path / "stale-worker.db"
+    store = JobStore(str(db))
+    store.create_job("j1", "STATISTICS", 1, "r1", {}, "fp1", 50, 3)
+    assert store.claim("worker-1", ["STATISTICS"]) is not None
+
+    stale = (datetime.now(timezone.utc) - timedelta(seconds=500)).isoformat()
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE jobs SET status='RUNNING', heartbeat_at=? WHERE job_id='j1'", (stale,))
+
+    recovery = PipelineRecovery(str(db), timeout_seconds=120)
+    assert recovery.recover_dead_workers_and_jobs() == 1
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE jobs SET next_attempt_at=NULL WHERE job_id='j1'")
+
+    assert store.claim("worker-2", ["STATISTICS"]) is not None
+    store.finish("j1", "worker-1", True, {"stale": True})
+
+    with sqlite3.connect(db) as conn:
+        row = conn.execute("SELECT status,result_json,worker_id FROM jobs WHERE job_id='j1'").fetchone()
+    assert row[0] == "CLAIMED"
+    assert row[1] is None
+    assert row[2] == "worker-2"
+
+
 def test_dead_worker_recovery_is_restart_safe(tmp_path):
     db = tmp_path / "recovery.db"
     store = JobStore(str(db))
