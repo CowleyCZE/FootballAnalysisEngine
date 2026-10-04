@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.crawler.crawler import EngineCrawler
 from app.research.engine import ResearchEngine
-from app.research.models import ResearchTask
+from app.research.models import ResearchStatus, ResearchTask
 
 
 class _NoopRepository:
-    """ResearchRepository boundary for orchestration jobs.
-
-    Pipeline job results are the transport for this worker. Persistent claim /
-    evidence storage is deliberately left to the pipeline database layer.
-    """
+    """Compatibility repository used until the DB research schema is unified."""
 
     def create_execution(self, *args):
         return 0
@@ -49,7 +46,11 @@ class _CrawlerAdapter:
             "title": document.title or "",
             "text": document.text or "",
             "published_at": document.published_at,
+            "retrieved_at": document.retrieved_at,
             "language": document.language,
+            "word_count": document.word_count,
+            "quality_score": document.quality_score,
+            "content_hash": document.content_hash,
         }
 
 
@@ -76,64 +77,66 @@ def _serialize_claim(claim: Any) -> Dict[str, Any]:
 
 
 class ResearchWorker:
-    @staticmethod
-    def execute(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Worker boundary between the job queue and one ResearchEngine task."""
+
+    def __init__(self, db_path: str = "database/football.db", engine: Optional[ResearchEngine] = None):
+        self.db_path = db_path
+        self.engine = engine or ResearchEngine(repository=_NoopRepository(), crawler=_CrawlerAdapter())
+
+    def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         match = payload.get("match") or {}
         match_id = int(payload.get("match_id") or match.get("id"))
-        domains = payload.get("domains") or ["MATCH_IDENTITY", "RECENT_FORM", "ABSENCES_HOME", "ABSENCES_AWAY", "WEATHER"]
-        cutoff = payload.get("cutoff_datetime") or match.get("cutoff_datetime") or match.get("scheduled_at")
-        scheduled_at = match.get("scheduled_at") or cutoff
-        if not cutoff or not scheduled_at:
-            raise ValueError("RESEARCH job requires cutoff_datetime and scheduled_at")
+        cutoff = self._parse_datetime(payload.get("cutoff_datetime") or match.get("cutoff_datetime") or match.get("scheduled_at"))
+        scheduled_at = self._parse_datetime(match.get("scheduled_at") or cutoff)
+        task_id = int(payload["task_id"])
 
-        if isinstance(cutoff, str):
-            cutoff = datetime.fromisoformat(cutoff.replace("Z", "+00:00"))
-        if isinstance(scheduled_at, str):
-            scheduled_at = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
-
-        common = dict(
-            run_id=0,
+        task = ResearchTask(
+            task_id=task_id,
+            run_id=int(payload.get("run_db_id") or 0),
             match_id=match_id,
-            task_type="NEWS_COLLECTION",
-            required=True,
-            priority=int(payload.get("priority", 80)),
+            domain=str(payload["domain"]),
+            task_type=str(payload.get("task_type") or "FACT_COLLECTION"),
+            description=str(payload.get("description") or ""),
+            required=bool(payload.get("required", False)),
+            priority=int(payload.get("priority", 50)),
             data_cutoff_at=cutoff,
             home_team=str(match.get("home_team") or ""),
             away_team=str(match.get("away_team") or ""),
             competition=str(match.get("competition") or ""),
             scheduled_at=scheduled_at,
+            venue=match.get("venue"),
+            attempt_number=int(payload.get("attempt_number", 1)),
         )
 
-        engine = ResearchEngine(repository=_NoopRepository(), crawler=_CrawlerAdapter())
-        results = []
-        for index, domain in enumerate(domains, start=1):
-            task = ResearchTask(
-                task_id=index,
-                domain=str(domain),
-                description=f"Research orchestration: {domain}",
-                **common,
-            )
-            result = engine.execute(task)
-            results.append(result)
+        result = self.engine.execute(task)
+        status = result.status.value if isinstance(result.status, ResearchStatus) else str(result.status)
+        self._update_task_status(task_id, status)
 
-        claims: List[Dict[str, Any]] = []
-        warnings: List[str] = []
-        metrics = {"tasks": len(results), "successful_tasks": 0, "claims": 0, "evidence": 0}
-        for result in results:
-            if result.status.value in {"SUCCESS", "PARTIAL", "CONFLICTED"}:
-                metrics["successful_tasks"] += 1
-            warnings.extend(result.warnings)
-            for claim in result.claims:
-                serialized = _serialize_claim(claim)
-                claims.append(serialized)
-                metrics["claims"] += 1
-                metrics["evidence"] += len(serialized["evidence"])
-
+        claims: List[Dict[str, Any]] = [_serialize_claim(claim) for claim in result.claims]
         return {
-            "status": "COMPLETED" if results and any(r.status.value == "SUCCESS" for r in results) else "NO_RESULT",
-            "match_id": match_id,
+            "status": status,
+            "task_id": task_id,
+            "execution_id": result.execution_id,
             "claims": claims,
-            "evidence_count": metrics["evidence"],
-            "warnings": warnings,
-            "metrics": metrics,
+            "evidence_count": result.evidence_count,
+            "sources_count": result.sources_count,
+            "documents_count": result.documents_count,
+            "conflicts_count": result.conflicts_count,
+            "warnings": result.warnings,
+            "metrics": result.metrics.__dict__,
         }
+
+    def _update_task_status(self, task_id: int, status: str) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE research_tasks SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (status, task_id),
+            )
+
+    @staticmethod
+    def _parse_datetime(value: Any) -> datetime:
+        if value is None:
+            raise ValueError("RESEARCH job requires a data cutoff and scheduled_at")
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
