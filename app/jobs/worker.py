@@ -10,6 +10,7 @@ from app.jobs.models import JobStatus
 
 logger = logging.getLogger(__name__)
 
+
 class BaseWorkerDaemon:
     def __init__(self, worker_id: str, capabilities: List[str], db_path: str = "database/football.db", poll_interval: int = 2):
         self.worker_id = worker_id
@@ -42,16 +43,16 @@ class BaseWorkerDaemon:
         handler = handlers.get(jtype)
 
         if not handler:
-            self.queue.update_job_status(job_id, JobStatus.FAILED, error=f"No handler registered for {jtype}")
+            self.queue.update_job_status(job_id, JobStatus.FAILED, error=f"No handler registered for {jtype}", worker_id=self.worker_id)
             return True
 
         self.queue.update_job_status(job_id, JobStatus.RUNNING)
         try:
-            self.queue.update_heartbeat(job_id)
+            self.queue.update_heartbeat(job_id, worker_id=self.worker_id)
             result = handler(job["payload"])
-            self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=result)
+            self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=result, worker_id=self.worker_id)
         except Exception as e:
             logger.error(f"Worker {self.worker_id} failed on job {job_id}: {e}")
-            self.queue.update_job_status(job_id, JobStatus.FAILED, error=str(e))
+            self.queue.update_job_status(job_id, JobStatus.FAILED, error=str(e), worker_id=self.worker_id)
 
         return True
