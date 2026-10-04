@@ -1,11 +1,16 @@
+from __future__ import annotations
+
+import asyncio
 import os
 from typing import Any, Dict
 
-import httpx
+from app.search.engine import SearchEngine
+from app.search.models import QuerySpec
+from app.search.searxng_client import SearXNGClient
 
 
 class SearchWorker:
-    """SearXNG worker. No fabricated search results are returned."""
+    """Compatibility worker backed by the unified SearchEngine pipeline."""
 
     @staticmethod
     def execute(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -13,33 +18,46 @@ class SearchWorker:
         if not query:
             raise ValueError("SEARCH job requires a non-empty query")
 
-        base_url = os.getenv("SEARXNG_URL", "http://127.0.0.1:8080").rstrip("/")
-        timeout = float(os.getenv("SEARXNG_TIMEOUT", "30"))
-        url = f"{base_url}/search"
-        params = {"q": query, "format": "json", "language": "en"}
+        client = SearXNGClient(
+            base_url=os.getenv("SEARXNG_URL", "http://127.0.0.1:8080"),
+            timeout=float(os.getenv("SEARXNG_TIMEOUT", "30")),
+        )
+        engine = SearchEngine(client=client)
+        spec = QuerySpec(
+            query=query,
+            language=str(payload.get("language") or "en"),
+            priority=int(payload.get("priority", 50)),
+            time_range=payload.get("time_range"),
+            reason=str(payload.get("reason") or ""),
+        )
 
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            response = client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
+        results = asyncio.run(
+            engine.search(
+                query=spec,
+                team=str(payload.get("team") or ""),
+                topic_terms=list(payload.get("topic_terms") or []),
+            )
+        )
 
-        results = []
-        for item in data.get("results", []):
-            result_url = item.get("url")
-            if not result_url:
-                continue
-            results.append({
-                "title": item.get("title", ""),
-                "url": result_url,
-                "snippet": item.get("content", ""),
-                "engine": item.get("engine"),
-                "publishedDate": item.get("publishedDate"),
-            })
+        serialized = [
+            {
+                "title": result.title,
+                "url": result.url,
+                "snippet": result.content,
+                "content": result.content,
+                "engine": result.engine,
+                "publishedDate": result.published_at,
+                "score": result.score,
+                "relevance": result.relevance,
+                "source_type": result.source_type,
+            }
+            for result in results
+        ]
 
         return {
             "status": "COMPLETED",
             "query": query,
-            "results": results,
-            "result_count": len(results),
+            "results": serialized,
+            "result_count": len(serialized),
             "source": "searxng",
         }
