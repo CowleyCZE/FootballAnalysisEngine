@@ -54,6 +54,12 @@ def test_recovery_requeues_research_job_and_updates_task(tmp_path):
     store = JobStore(db)
     store.create_job("research-job", "RESEARCH", 50, "run-1", {}, "fp-r", 80, 3)
     with store.connect() as conn:
+        conn.execute("INSERT INTO teams(id, name, normalized_name) VALUES (1, 'Home', 'home')")
+        conn.execute("INSERT INTO teams(id, name, normalized_name) VALUES (2, 'Away', 'away')")
+        conn.execute(
+            "INSERT INTO matches(id, competition, home_team_id, away_team_id, scheduled_at) "
+            "VALUES (50, 'League', 1, 2, '2026-10-04T15:00:00')"
+        )
         job = conn.execute("SELECT id FROM jobs WHERE job_id='research-job'").fetchone()
         task = conn.execute(
             "INSERT INTO research_tasks "
