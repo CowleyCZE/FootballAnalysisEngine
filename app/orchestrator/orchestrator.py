@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 class MasterOrchestrator:
     """Single source of truth for the autonomous match-analysis pipeline."""
 
+    INITIAL_RESEARCH_DOMAINS = [
+        "MATCH_IDENTITY",
+        "RECENT_FORM",
+        "ABSENCES_HOME",
+        "ABSENCES_AWAY",
+        "WEATHER",
+    ]
+
     def __init__(self, db_path: str = "database/football.db", config_path: str = "config/pipeline.yaml"):
         self.db_path = db_path
         self.config = PipelineConfig.load(config_path)
@@ -76,7 +84,10 @@ class MasterOrchestrator:
 
     def _event(self, event_type: str, run_id: Optional[str], job_id: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> None:
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT INTO system_events(event_type, run_id, job_id, payload_json) VALUES(?,?,?,?)", (event_type, run_id, job_id, json.dumps(payload or {}, sort_keys=True)))
+            conn.execute(
+                "INSERT INTO system_events(event_type, run_id, job_id, payload_json) VALUES(?,?,?,?)",
+                (event_type, run_id, job_id, json.dumps(payload or {}, sort_keys=True)),
+            )
 
     def _match_context(self, match_id: int) -> Dict[str, Any]:
         with sqlite3.connect(self.db_path) as conn:
@@ -106,7 +117,10 @@ class MasterOrchestrator:
         max_cycles = int(self.config["orchestrator"]["audit_max_cycles"])
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO runs(run_id,status,started_at,pipeline_version) VALUES(?,?,?,?)", (run_id, "RUNNING", now, "11.5"))
+            cursor.execute(
+                "INSERT INTO runs(run_id,status,started_at,pipeline_version) VALUES(?,?,?,?)",
+                (run_id, "RUNNING", now, "12.0"),
+            )
             run_db_id = cursor.lastrowid
             cursor.execute(
                 "INSERT INTO pipeline_runs(run_id,match_id,state,cycle,max_cycles,started_at,updated_at) VALUES(?,?,?,?,?,?,?)",
@@ -117,9 +131,16 @@ class MasterOrchestrator:
         self.state_machine.transition_to(run_id, MatchState.DISCOVERY, "Pipeline initialized")
 
         search_query = f"{match['home_team']} {match['away_team']} {match['competition']} lineup injuries form"
-        self.queue.create_job("SEARCH", match_id, {"query": search_query, "run_id": run_id}, priority=JobPriority.HIGH, run_id=run_id)
         self.queue.create_job(
-            "STATISTICS", match_id,
+            "SEARCH",
+            match_id,
+            {"query": search_query, "run_id": run_id},
+            priority=JobPriority.HIGH,
+            run_id=run_id,
+        )
+        self.queue.create_job(
+            "STATISTICS",
+            match_id,
             {
                 "match_id": match_id,
                 "run_id": run_id,
@@ -140,6 +161,7 @@ class MasterOrchestrator:
         run = self._get_run(run_id)
         if not run or run["state"] in (MatchState.COMPLETED, MatchState.UNRESOLVED, MatchState.FAILED):
             return
+
         jobs = self._jobs_for_run(run_id)
         state, match_id, cycle, max_cycles = run["state"], run["match_id"], run["cycle"], run["max_cycles"]
 
@@ -157,7 +179,7 @@ class MasterOrchestrator:
                     self._fail(run_id, "Search returned no crawlable URLs")
                     return
                 for url in urls:
-                    self.queue.create_job("CRAWL", match_id, {"url": url}, priority=JobPriority.HIGH, run_id=run_id)
+                    self.queue.create_job("CRAWL", match_id, {"url": url, "run_id": run_id}, priority=JobPriority.HIGH, run_id=run_id)
                 self.state_machine.transition_to(run_id, MatchState.COLLECTING, "Search complete; crawl jobs scheduled")
 
         elif state == MatchState.COLLECTING:
@@ -165,11 +187,20 @@ class MasterOrchestrator:
             if crawl_jobs and all(j["status"] == JobStatus.SUCCESS for j in crawl_jobs):
                 self.state_machine.transition_to(run_id, MatchState.NORMALIZING, "Crawling complete")
                 self.state_machine.transition_to(run_id, MatchState.CALCULATING, "Normalization complete")
+                self._schedule_initial_research(run_id, match_id)
 
         elif state == MatchState.CALCULATING:
-            if self._latest_success(jobs, "STATISTICS"):
-                self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
-                self.queue.create_job("AI_ANALYSIS", match_id, {"match_id": match_id, "run_id": run_id, "mode": "evidence_first"}, priority=JobPriority.HIGH, run_id=run_id)
+            stats_ready = self._latest_success(jobs, "STATISTICS")
+            research_ready = self._latest_success(jobs, "RESEARCH")
+            if stats_ready and research_ready:
+                self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics and research evidence ready")
+                self.queue.create_job(
+                    "AI_ANALYSIS",
+                    match_id,
+                    self._ai_payload(run_id, match_id, mode="evidence_first"),
+                    priority=JobPriority.HIGH,
+                    run_id=run_id,
+                )
 
         elif state == MatchState.ANALYZING:
             ai_job = self._latest_success(jobs, "AI_ANALYSIS")
@@ -177,9 +208,18 @@ class MasterOrchestrator:
                 self.state_machine.transition_to(run_id, MatchState.AUDITING, "AI analysis complete")
                 stats_job = self._latest_success(jobs, "STATISTICS")
                 self.queue.create_job(
-                    "AUDIT", match_id,
-                    {"match_id": match_id, "run_id": run_id, "cycle": cycle, "ai_analysis": self._result(ai_job), "statistics": self._result(stats_job) if stats_job else {}},
-                    priority=JobPriority.CRITICAL, run_id=run_id,
+                    "AUDIT",
+                    match_id,
+                    {
+                        "match_id": match_id,
+                        "run_id": run_id,
+                        "cycle": cycle,
+                        "ai_analysis": self._result(ai_job),
+                        "claims": self._claims(run_id),
+                        "statistics": self._result(stats_job) if stats_job else {},
+                    },
+                    priority=JobPriority.CRITICAL,
+                    run_id=run_id,
                 )
 
         elif state == MatchState.AUDITING:
@@ -194,20 +234,95 @@ class MasterOrchestrator:
                         self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Maximum audit cycles ({max_cycles}) reached")
                     else:
                         self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Audit requires research for cycle {cycle}")
-                        self.queue.create_job("RESEARCH", match_id, {"match_id": match_id, "run_id": run_id, "reason": audit.get("research_jobs") or audit.get("issues") or {"reason": "audit follow-up"}, "cycle": cycle + 1}, priority=JobPriority.HIGH, run_id=run_id)
+                        domains = self._research_domains_from_audit(audit)
+                        self.queue.create_job(
+                            "RESEARCH",
+                            match_id,
+                            self._research_payload(run_id, match_id, domains=domains, cycle=cycle + 1),
+                            priority=JobPriority.HIGH,
+                            run_id=run_id,
+                        )
                 else:
                     self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Audit did not produce a resolvable terminal state")
 
         elif state == MatchState.RESEARCHING:
             if self._latest_success(jobs, "RESEARCH"):
                 with sqlite3.connect(self.db_path) as conn:
-                    conn.execute("UPDATE pipeline_runs SET cycle=cycle+1, updated_at=? WHERE run_id=?", (self._now(), run_id))
+                    conn.execute(
+                        "UPDATE pipeline_runs SET cycle=cycle+1, updated_at=? WHERE run_id=?",
+                        (self._now(), run_id),
+                    )
                 self.state_machine.transition_to(run_id, MatchState.REANALYZING, "Research completed")
-                self.queue.create_job("AI_ANALYSIS", match_id, {"match_id": match_id, "run_id": run_id, "mode": "reanalysis"}, priority=JobPriority.HIGH, run_id=run_id)
+                self.queue.create_job(
+                    "AI_ANALYSIS",
+                    match_id,
+                    self._ai_payload(run_id, match_id, mode="reanalysis"),
+                    priority=JobPriority.HIGH,
+                    run_id=run_id,
+                )
                 self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Re-analysis scheduled")
 
         elif state == MatchState.FINALIZING and self._run_is_terminal_ready(run_id):
             self._finish(run_id, MatchState.COMPLETED, "All required jobs completed")
+
+    def _schedule_initial_research(self, run_id: str, match_id: int) -> None:
+        jobs = self._jobs_for_run(run_id)
+        if self._latest_success(jobs, "RESEARCH") or any(j["job_type"] == "RESEARCH" for j in jobs):
+            return
+        self.queue.create_job(
+            "RESEARCH",
+            match_id,
+            self._research_payload(run_id, match_id, domains=self.INITIAL_RESEARCH_DOMAINS, cycle=1),
+            priority=JobPriority.HIGH,
+            run_id=run_id,
+        )
+
+    def _research_payload(self, run_id: str, match_id: int, domains: list[str], cycle: int) -> Dict[str, Any]:
+        match = self._match_context(match_id)
+        return {
+            "run_id": run_id,
+            "match_id": match_id,
+            "match": match,
+            "domains": domains,
+            "cycle": cycle,
+            "cutoff_datetime": match["cutoff_datetime"],
+        }
+
+    def _ai_payload(self, run_id: str, match_id: int, mode: str) -> Dict[str, Any]:
+        stats_job = self._latest_success(self._jobs_for_run(run_id), "STATISTICS")
+        return {
+            "match_id": match_id,
+            "run_id": run_id,
+            "mode": mode,
+            "match": self._match_context(match_id),
+            "statistics": self._result(stats_job) if stats_job else {},
+            "claims": self._claims(run_id),
+            "conflicts": self._conflicts(run_id),
+        }
+
+    def _claims(self, run_id: str) -> list[Dict[str, Any]]:
+        jobs = self._jobs_for_run(run_id)
+        research_jobs = [j for j in jobs if j["job_type"] == "RESEARCH" and j["status"] == JobStatus.SUCCESS]
+        claims: list[Dict[str, Any]] = []
+        for job in research_jobs:
+            result = self._result(job)
+            claims.extend(result.get("claims") or [])
+        return claims
+
+    def _conflicts(self, run_id: str) -> list[Dict[str, Any]]:
+        claims = self._claims(run_id)
+        return [c for c in claims if str(c.get("status")) == "CONFLICTED"]
+
+    @staticmethod
+    def _research_domains_from_audit(audit: Dict[str, Any]) -> list[str]:
+        requested = audit.get("research_jobs") or audit.get("domains") or []
+        if isinstance(requested, dict):
+            requested = list(requested.keys())
+        if isinstance(requested, str):
+            requested = [requested]
+        valid = {"MATCH_IDENTITY", "RECENT_FORM", "ABSENCES_HOME", "ABSENCES_AWAY", "WEATHER", "EXPECTED_LINEUPS", "HEAD_TO_HEAD"}
+        domains = [str(item) for item in requested if str(item) in valid]
+        return domains or MasterOrchestrator.INITIAL_RESEARCH_DOMAINS
 
     def _get_run(self, run_id: str):
         with sqlite3.connect(self.db_path) as conn:
@@ -248,7 +363,10 @@ class MasterOrchestrator:
     def _finish_metadata(self, run_id: str, state: str, reason: str) -> None:
         now = self._now()
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("UPDATE pipeline_runs SET finished_at=?, updated_at=?, error_text=? WHERE run_id=?", (now, now, None if state == MatchState.COMPLETED else reason, run_id))
+            conn.execute(
+                "UPDATE pipeline_runs SET finished_at=?, updated_at=?, error_text=? WHERE run_id=?",
+                (now, now, None if state == MatchState.COMPLETED else reason, run_id),
+            )
             conn.execute("UPDATE runs SET status=?, finished_at=? WHERE run_id=?", (state, now, run_id))
         self._event("PIPELINE_FINISHED", run_id, payload={"state": state, "reason": reason})
 
