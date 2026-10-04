@@ -41,7 +41,7 @@ class JobStore:
         with self.connect() as conn:
             conn.execute("UPDATE workers SET status=?, last_heartbeat=?, current_job_id=? WHERE worker_id=?", ('BUSY' if current_job_id else 'IDLE', self.now(), current_job_id, worker_id))
             if current_job_id:
-                conn.execute("UPDATE jobs SET heartbeat_at=? WHERE job_id=?", (self.now(), current_job_id))
+                conn.execute("UPDATE jobs SET heartbeat_at=? WHERE job_id=? AND worker_id=? AND status IN ('CLAIMED','RUNNING')", (self.now(), current_job_id, worker_id))
 
     def _event(self, conn: sqlite3.Connection, event_type: str, job_id: Optional[str], worker_id: Optional[str], payload: Dict[str, Any]) -> None:
         run_id = None
@@ -52,7 +52,7 @@ class JobStore:
 
     def create_job(self, job_id: str, job_type: str, match_id: Optional[int], run_id: Optional[str], payload: Dict[str, Any], fingerprint: str, priority: int, max_attempts: int, parent_job_id: Optional[int] = None) -> Optional[str]:
         with self.connect() as conn:
-            existing = conn.execute("SELECT job_id FROM jobs WHERE fingerprint=? AND status IN ('PENDING','CLAIMED','RUNNING','BLOCKED','RETRY') LIMIT 1", (fingerprint,)).fetchone()
+            existing = conn.execute("SELECT job_id FROM jobs WHERE fingerprint=? LIMIT 1", (fingerprint,)).fetchone()
             if existing:
                 return None
             conn.execute("INSERT INTO jobs(job_id, run_id, match_id, parent_job_id, job_type, status, priority, payload_json, fingerprint, max_attempts, created_at) VALUES(?,?,?,?,?,'PENDING',?,?,?,?,?)", (job_id, run_id, match_id, parent_job_id, job_type, priority, json.dumps(payload, sort_keys=True), fingerprint, max_attempts, self.now()))
@@ -101,12 +101,12 @@ class JobStore:
     def finish(self, job_id: str, worker_id: str, success: bool, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None) -> None:
         now = self.now()
         with self.connect() as conn:
-            row = conn.execute("SELECT status, attempts, max_attempts, result_json FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            row = conn.execute("SELECT status, attempts, max_attempts, result_json, worker_id FROM jobs WHERE job_id=?", (job_id,)).fetchone()
             if not row:
                 raise KeyError(job_id)
             if row["status"] in {"SUCCESS", "FAILED"}:
-                # Terminal states are immutable. A duplicate worker callback must
-                # not overwrite an already accepted result.
+                return
+            if row["worker_id"] != worker_id:
                 return
             if success:
                 status, next_attempt = 'SUCCESS', None
@@ -117,7 +117,7 @@ class JobStore:
             else:
                 status, next_attempt = 'FAILED', None
             finished_at = now if status in ('SUCCESS', 'FAILED') else None
-            conn.execute("UPDATE jobs SET status=?, result_json=CASE WHEN ? IS NOT NULL THEN ? ELSE result_json END, error_text=?, finished_at=?, next_attempt_at=?, worker_id=NULL WHERE job_id=? AND status NOT IN ('SUCCESS','FAILED')", (status, json.dumps(result) if result is not None else None, json.dumps(result) if result is not None else None, error, finished_at, next_attempt, job_id))
+            conn.execute("UPDATE jobs SET status=?, result_json=CASE WHEN ? IS NOT NULL THEN ? ELSE result_json END, error_text=?, finished_at=?, next_attempt_at=?, worker_id=NULL WHERE job_id=? AND status NOT IN ('SUCCESS','FAILED') AND worker_id=?", (status, json.dumps(result) if result is not None else None, json.dumps(result) if result is not None else None, error, finished_at, next_attempt, job_id, worker_id))
             conn.execute("UPDATE workers SET status='IDLE', current_job_id=NULL, last_heartbeat=? WHERE worker_id=?", (now, worker_id))
             self._event(conn, "JOB_FINISHED" if status in ('SUCCESS', 'FAILED') else "JOB_RETRY_SCHEDULED", job_id, worker_id, {"status": status, "attempts": int(row["attempts"]), "error": error})
 
