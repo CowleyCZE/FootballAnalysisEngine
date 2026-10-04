@@ -66,8 +66,16 @@ class JobStore:
             for row in rows:
                 payload = json.loads(row["payload_json"] or "{}")
                 required = set(payload.get("capabilities_required") or [])
-                if required and not required.issubset(caps): continue
-                if not required and row["job_type"] not in caps and "generic" not in caps: continue
+                # RESEARCH is an orchestration-level capability. A Research
+                # worker owns the HTTP/browser/statistics tooling needed by the
+                # ResearchEngine, so its domain-specific tool requirements do
+                # not prevent the worker from claiming the research task.
+                if row["job_type"] == "RESEARCH" and "RESEARCH" in caps:
+                    pass
+                elif required and not required.issubset(caps):
+                    continue
+                elif not required and row["job_type"] not in caps and "generic" not in caps:
+                    continue
                 selected = row
                 break
             if not selected:
