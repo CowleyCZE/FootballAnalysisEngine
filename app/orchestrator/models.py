@@ -17,7 +17,7 @@ class MatchIdentity(BaseModel):
     match_id: int
     home_team_id: int
     away_team_id: int
-    competition_id: int
+    competition_id: Optional[int] = None
     scheduled_at: datetime
     data_cutoff_at: datetime
 
