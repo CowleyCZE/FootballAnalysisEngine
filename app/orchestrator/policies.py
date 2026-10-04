@@ -1,31 +1,24 @@
 class ResearchPolicy:
-    POLICY_VERSION = "1.0.0"
-    PLAN_VERSION = "1.0.0"
+    POLICY_VERSION = "1.1.0"
+    PLAN_VERSION = "1.1.0"
 
     DEFAULT_RECENT_MATCHES = 10
     MIN_COVERAGE_SCORE = 0.80
     MAX_RETRIES = 3
 
-    # Kriteriální gates pro spuštění analýzy
     REQUIRED_DOMAINS = [
         "MATCH_IDENTITY",
-        "TEAM_HOME",
-        "TEAM_AWAY",
         "FORM_HOME",
         "FORM_AWAY",
         "ABSENCES_HOME",
         "ABSENCES_AWAY",
-        "STATISTICS"
+        "STATISTICS",
     ]
 
     OPTIONAL_DOMAINS = [
         "HEAD_TO_HEAD",
         "EXPECTED_LINEUPS",
         "WEATHER",
-        "VENUE",
-        "REFEREE",
-        "RECENT_NEWS",
-        "REST_SCHEDULE"
     ]
 
     DOMAIN_PRIORITIES = {
@@ -38,13 +31,10 @@ class ResearchPolicy:
         "EXPECTED_LINEUPS": 80,
         "HEAD_TO_HEAD": 60,
         "WEATHER": 30,
-        "VENUE": 30,
-        "REFEREE": 30
     }
 
-    # Časové limity v sekundách
     TIMEOUTS = {
         "http_fetch": 30,
         "browser": 120,
-        "statistics": 60
+        "statistics": 60,
     }
