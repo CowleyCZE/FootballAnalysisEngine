@@ -1,6 +1,6 @@
 PRAGMA foreign_keys = ON;
 
--- Canonical research orchestration tables. Core provenance tables
+-- Research orchestration tables. Core provenance tables
 -- (runs, claims, evidence, documents, sources, claim_evidence) live in schema.sql.
 CREATE TABLE IF NOT EXISTS research_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS research_tasks (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(run_id, task_uuid),
-    FOREIGN KEY (run_db_id) REFERENCES runs(id)
+    FOREIGN KEY (run_db_id) REFERENCES runs(id),
+    FOREIGN KEY (job_id) REFERENCES jobs(job_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_research_tasks_run ON research_tasks(run_id);
