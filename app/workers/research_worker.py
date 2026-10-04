@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -19,40 +18,11 @@ class _CrawlerAdapter:
         result, document = asyncio.run(self.crawler.crawl_and_parse(url))
         if not result.success or document is None:
             return {"status": "error", "url": url, "error": result.error or "crawl failed"}
-        return {
-            "status": "success",
-            "url": document.url,
-            "title": document.title or "",
-            "text": document.text or "",
-            "published_at": document.published_at,
-            "retrieved_at": document.retrieved_at,
-            "language": document.language,
-            "word_count": document.word_count,
-            "quality_score": document.quality_score,
-            "content_hash": document.content_hash,
-        }
+        return {"status": "success", "url": document.url, "title": document.title or "", "text": document.text or "", "published_at": document.published_at, "retrieved_at": document.retrieved_at, "language": document.language, "word_count": document.word_count, "quality_score": document.quality_score, "content_hash": document.content_hash}
 
 
 def _serialize_claim(claim: Any) -> Dict[str, Any]:
-    return {
-        "claim_id": claim.claim_id,
-        "subject": claim.subject,
-        "predicate": claim.predicate,
-        "object": claim.object_value,
-        "normalized_value": claim.normalized_value,
-        "confidence": claim.confidence,
-        "status": claim.status.value if hasattr(claim.status, "value") else str(claim.status),
-        "source_date": claim.source_date.isoformat() if claim.source_date else None,
-        "evidence": [
-            {
-                "document_id": ev.document_id,
-                "source_url": ev.source_url,
-                "text_fragment": ev.text_fragment,
-                "published_at": ev.published_at.isoformat() if ev.published_at else None,
-            }
-            for ev in claim.evidence_list
-        ],
-    }
+    return {"claim_id": claim.claim_id, "subject": claim.subject, "predicate": claim.predicate, "object": claim.object_value, "normalized_value": claim.normalized_value, "confidence": claim.confidence, "status": claim.status.value if hasattr(claim.status, "value") else str(claim.status), "source_date": claim.source_date.isoformat() if claim.source_date else None, "evidence": [{"document_id": ev.document_id, "source_url": ev.source_url, "text_fragment": ev.text_fragment, "published_at": ev.published_at.isoformat() if ev.published_at else None} for ev in claim.evidence_list]}
 
 
 class ResearchWorker:
@@ -60,62 +30,29 @@ class ResearchWorker:
 
     def __init__(self, db_path: str = "database/football.db", engine: Optional[ResearchEngine] = None):
         self.db_path = db_path
-        if engine is None:
-            repository = ResearchRepository(db_path=db_path)
-            engine = ResearchEngine(repository=repository, crawler=_CrawlerAdapter())
-        self.engine = engine
+        self.repository = ResearchRepository(db_path=db_path)
+        self.engine = engine or ResearchEngine(repository=self.repository, crawler=_CrawlerAdapter())
 
     def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         match = payload.get("match") or {}
         match_id = int(payload.get("match_id") or match.get("id"))
-        cutoff = self._parse_datetime(
-            payload.get("cutoff_datetime") or match.get("cutoff_datetime") or match.get("scheduled_at")
-        )
+        cutoff = self._parse_datetime(payload.get("cutoff_datetime") or match.get("cutoff_datetime") or match.get("scheduled_at"))
         scheduled_at = self._parse_datetime(match.get("scheduled_at") or cutoff)
         task_id = int(payload["task_id"])
+        attempt_number = int(payload.get("_job_attempt_number") or payload.get("attempt_number") or self._task_attempt(task_id))
 
-        task = ResearchTask(
-            task_id=task_id,
-            run_id=int(payload.get("run_db_id") or 0),
-            match_id=match_id,
-            domain=str(payload["domain"]),
-            task_type=str(payload.get("task_type") or "FACT_COLLECTION"),
-            description=str(payload.get("description") or ""),
-            required=bool(payload.get("required", False)),
-            priority=int(payload.get("priority", 50)),
-            data_cutoff_at=cutoff,
-            home_team=str(match.get("home_team") or ""),
-            away_team=str(match.get("away_team") or ""),
-            competition=str(match.get("competition") or ""),
-            scheduled_at=scheduled_at,
-            venue=match.get("venue"),
-            attempt_number=int(payload.get("attempt_number", 1)),
-        )
+        task = ResearchTask(task_id=task_id, run_id=int(payload.get("run_db_id") or 0), match_id=match_id, domain=str(payload["domain"]), task_type=str(payload.get("task_type") or "FACT_COLLECTION"), description=str(payload.get("description") or ""), required=bool(payload.get("required", False)), priority=int(payload.get("priority", 50)), data_cutoff_at=cutoff, home_team=str(match.get("home_team") or ""), away_team=str(match.get("away_team") or ""), competition=str(match.get("competition") or ""), scheduled_at=scheduled_at, venue=match.get("venue"), attempt_number=attempt_number)
 
         result = self.engine.execute(task)
         status = result.status.value if isinstance(result.status, ResearchStatus) else str(result.status)
-        self._update_task_status(task_id, status)
-
         claims: List[Dict[str, Any]] = [_serialize_claim(claim) for claim in result.claims]
-        return {
-            "status": status,
-            "task_id": task_id,
-            "execution_id": result.execution_id,
-            "claims": claims,
-            "evidence_count": result.evidence_count,
-            "sources_count": result.sources_count,
-            "documents_count": result.documents_count,
-            "conflicts_count": result.conflicts_count,
-            "warnings": result.warnings,
-            "metrics": result.metrics.__dict__,
-        }
+        return {"status": status, "task_id": task_id, "execution_id": result.execution_id, "claims": claims, "evidence_count": result.evidence_count, "sources_count": result.sources_count, "documents_count": result.documents_count, "conflicts_count": result.conflicts_count, "warnings": result.warnings, "metrics": result.metrics.__dict__}
 
-    def _update_task_status(self, task_id: int, status: str) -> None:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "UPDATE research_tasks SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (status, task_id),
-            )
+    def _task_attempt(self, task_id: int) -> int:
+        row = self.repository.get_task(task_id)
+        if not row:
+            raise KeyError(task_id)
+        return int(row["attempt_number"] or 1)
 
     @staticmethod
     def _parse_datetime(value: Any) -> datetime:
