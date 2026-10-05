@@ -35,9 +35,14 @@ class AIValidator:
             return False, None, msg, None
 
         try:
-            validated_obj = schema_cls.model_validate(data_dict)
+            if hasattr(schema_cls, "model_validate"):
+                validated_obj = schema_cls.model_validate(data_dict)
+            elif hasattr(schema_cls, "parse_obj"):
+                validated_obj = schema_cls.parse_obj(data_dict)
+            else:
+                validated_obj = schema_cls(**data_dict)
             return True, validated_obj, "VALID", data_dict
-        except ValidationError as ve:
+        except Exception as ve:
             msg = f"Pydantic Validation Error: {ve}"
             logger.error(msg)
             return False, None, msg, data_dict

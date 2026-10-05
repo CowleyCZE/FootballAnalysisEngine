@@ -2,7 +2,12 @@ import os
 import hashlib
 import json
 import asyncio
-from playwright.async_api import async_playwright
+try:
+    from playwright.async_api import async_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+
 from app.crawler.models import CrawlResult, ParsedDocument
 from app.crawler.http_client import HTTPClient
 from app.crawler.rate_limiter import DomainRateLimiter
@@ -15,6 +20,8 @@ class EngineCrawler:
         self.parser = HTMLParser()
 
     async def fetch_with_playwright(self, url: str) -> CrawlResult:
+        if not PLAYWRIGHT_AVAILABLE:
+            return CrawlResult(url=url, success=False, error="Playwright is not installed")
         try:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
