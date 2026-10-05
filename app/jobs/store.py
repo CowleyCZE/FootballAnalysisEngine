@@ -83,10 +83,12 @@ class JobStore:
             selected = None
             for row in rows:
                 payload = json.loads(row["payload_json"] or "{}")
-                required = set(payload.get("capabilities_required") or [])
-                if required and not required.issubset(caps):
-                    continue
-                elif not required and row["job_type"] not in caps and "generic" not in caps:
+                # Worker capabilities are execution capabilities (job types).
+                # Research task capabilities such as http_fetch/statistics/browser
+                # are retained in the payload for the ResearchEngine and must not
+                # prevent a RESEARCH/STATISTICS worker from claiming the job.
+                worker_capability = str(payload.get("worker_capability") or row["job_type"])
+                if worker_capability not in caps and "generic" not in caps:
                     continue
                 selected = row
                 break
