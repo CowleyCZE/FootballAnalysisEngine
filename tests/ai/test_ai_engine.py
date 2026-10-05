@@ -38,7 +38,8 @@ def test_json_validator_valid():
 def test_hallucination_and_missing_data():
     builder = ContextBuilder()
     match_info = {"match_id": 1, "home": "Arsenal", "away": "Chelsea"}
-    # Prázdné claims i statistiky
+    # Prázdné claims/statistiky jsou explicitně prázdný vstup; ContextBuilder
+    # nesmí kvůli nim číst produkční DB.
     context = builder.build_context(match_info, claims=[], statistics={})
     assert "claims" in context["data_quality"]["missing_data"]
     assert "statistics" in context["data_quality"]["missing_data"]
@@ -108,3 +109,51 @@ def test_synthesizer_reproducibility_and_db(tmp_path):
     # Stejná data -> stejný input_hash
     assert rows[0][1] == rows[1][1]
     assert rows[0][3] == "SUCCESS"
+
+
+def test_context_builder_does_not_implicitly_load_database(tmp_path):
+    db_file = str(tmp_path / "context.db")
+    builder = ContextBuilder(db_path=db_file)
+    context = builder.build_context(
+        {"match_id": 1, "home": "Arsenal", "away": "Chelsea"},
+        claims=[],
+        statistics={},
+    )
+    assert context["claims"] == []
+    assert context["statistics"] == {}
+    assert context["data_quality"]["missing_data"] == ["claims", "statistics"]
+
+
+def test_context_builder_counts_independent_publishers_and_real_freshness():
+    builder = ContextBuilder()
+    context = builder.build_context(
+        {"match_id": 1, "home": "Arsenal", "away": "Chelsea"},
+        claims=[
+            {
+                "id": 1,
+                "subject": "Saka",
+                "predicate": "status",
+                "object": "injured",
+                "confidence": 0.9,
+                "evidence": [
+                    {
+                        "id": 10,
+                        "url": "https://arsenal.com/news/1",
+                        "published_at": "2026-10-05T10:00:00Z",
+                        "source_type": "official_club",
+                    },
+                    {
+                        "id": 11,
+                        "url": "https://www.bbc.com/sport/football/1",
+                        "published_at": "2026-10-04T10:00:00Z",
+                        "source_type": "major_news",
+                    },
+                ],
+            }
+        ],
+        statistics={"xg_home": 1.2},
+    )
+    assert context["data_quality"]["source_count"] == 2
+    assert context["data_quality"]["independent_sources"] == 2
+    assert context["data_quality"]["official_sources"] == 1
+    assert 0.0 < context["data_quality"]["freshness_score"] <= 1.0
