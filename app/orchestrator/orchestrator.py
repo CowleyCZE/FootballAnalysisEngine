@@ -71,23 +71,34 @@ class MasterOrchestrator:
             conn.close()
 
     def _dispatch_research_tasks(self, tasks: List[TaskRequirement], match_id: int, run_id: str, match_identity: MatchIdentity) -> List[str]:
-        """Create canonical ResearchTask rows and bound queue jobs."""
+        """Persist ResearchTasks and jobs in one SQLite transaction."""
         created = []
-        with sqlite3.connect(self.db_path) as conn:
-            run_db_id = conn.execute("SELECT id FROM runs WHERE run_id=?", (run_id,)).fetchone()[0]
+        with sqlite3.connect(self.db_path, timeout=30) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT id FROM runs WHERE run_id=?", (run_id,)).fetchone()
+            if not row:
+                raise KeyError(run_id)
+            run_db_id = int(row["id"])
             for task in tasks:
-                row = conn.execute("SELECT id FROM research_tasks WHERE run_id=? AND task_uuid=?", (run_id, task.task_uuid)).fetchone()
+                row = conn.execute("SELECT id, job_id FROM research_tasks WHERE run_id=? AND task_uuid=?", (run_id, task.task_uuid)).fetchone()
+                if row and row["job_id"]:
+                    created.append(row["job_id"])
+                    continue
                 if row:
-                    task_id = int(row[0])
+                    task_id = int(row["id"])
                 else:
-                    conn.execute("""INSERT INTO research_tasks(run_id, run_db_id, match_id, task_uuid, domain, task_type, description, required, priority, capabilities_json, data_cutoff_at, home_team, away_team, competition, scheduled_at, venue, status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (run_id, run_db_id, match_id, task.task_uuid, task.domain, task.task_type, task.description, 1 if task.required else 0, task.priority, json.dumps(task.capabilities_required), match_identity.data_cutoff_at.isoformat(), str(match_identity.home_team_id), str(match_identity.away_team_id), str(match_identity.competition_id or ""), match_identity.scheduled_at.isoformat(), None, "PLANNED"))
-                    task_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
-                job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type, "RESEARCH")
-                payload = {"task_id": task_id, "task_uuid": task.task_uuid, "domain": task.domain, "description": task.description, "run_id": run_id, "run_db_id": run_db_id, "match_id": match_id, "home_team_id": match_identity.home_team_id, "away_team_id": match_identity.away_team_id, "cutoff_datetime": match_identity.data_cutoff_at.isoformat(), "query": task.description}
-                job_id = self.queue.create_job(job_type=job_type, match_id=match_id, payload=payload, priority=task.priority, run_id=run_id)
-                if job_id:
-                    conn.execute("UPDATE research_tasks SET job_id=?, status='QUEUED', updated_at=CURRENT_TIMESTAMP WHERE id=?", (job_id, task_id))
-                    created.append(job_id)
+                    cur = conn.execute("INSERT INTO research_tasks(run_id,run_db_id,match_id,task_uuid,domain,task_type,description,required,priority,capabilities_json,data_cutoff_at,home_team,away_team,competition,scheduled_at,venue,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id,run_db_id,match_id,task.task_uuid,task.domain,task.task_type,task.description,1 if task.required else 0,task.priority,json.dumps(task.capabilities_required),match_identity.data_cutoff_at.isoformat(),str(match_identity.home_team_id),str(match_identity.away_team_id),str(match_identity.competition_id or ""),match_identity.scheduled_at.isoformat(),None,"PLANNED"))
+                    task_id = int(cur.lastrowid)
+                payload = {"task_id":task_id,"task_uuid":task.task_uuid,"domain":task.domain,"description":task.description,"run_id":run_id,"run_db_id":run_db_id,"match_id":match_id,"home_team_id":match_identity.home_team_id,"away_team_id":match_identity.away_team_id,"cutoff_datetime":match_identity.data_cutoff_at.isoformat(),"capabilities_required":task.capabilities_required}
+                job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type,"RESEARCH")
+                job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "football-analysis:%s:%s" % (run_id,task.task_uuid)))
+                fingerprint = self.queue.generate_fingerprint(job_type, match_id, payload, run_id)
+                self.queue.store.create_job_on_connection(conn,job_id,job_type,match_id,run_id,payload,fingerprint,int(task.priority),3)
+                conn.execute("UPDATE research_tasks SET job_id=?,status='QUEUED',updated_at=CURRENT_TIMESTAMP WHERE id=?",(job_id,task_id))
+                created.append(job_id)
+            conn.commit()
         return created
     def start_pipeline(self, match_id: int) -> str:
         """Spustí pipeline pro existující zápas: Match Identity → Research Planner → Jobs."""
