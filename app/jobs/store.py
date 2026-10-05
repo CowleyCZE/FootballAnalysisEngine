@@ -45,19 +45,14 @@ class JobStore:
             existing = conn.execute("SELECT job_id FROM jobs WHERE fingerprint=? LIMIT 1", (fingerprint,)).fetchone()
             if existing:
                 return None
-            db_run_id = None
             if run_id:
-                row = conn.execute("SELECT id FROM runs WHERE run_id=?", (run_id,)).fetchone()
-                if row:
-                    db_run_id = int(row["id"])
-                else:
-                    now = self.now()
+                row = conn.execute("SELECT run_id FROM runs WHERE run_id=?", (run_id,)).fetchone()
+                if not row:
                     conn.execute(
                         "INSERT INTO runs(run_id,status,started_at,pipeline_version) VALUES(?,?,?,?)",
-                        (run_id, "RUNNING", now, "job-store"),
+                        (run_id, "RUNNING", self.now(), "job-store"),
                     )
-                    db_run_id = int(conn.execute("SELECT id FROM runs WHERE run_id=?", (run_id,)).fetchone()["id"])
-            conn.execute("INSERT INTO jobs(job_id, run_id, match_id, parent_job_id, job_type, status, priority, payload_json, fingerprint, max_attempts, created_at) VALUES(?,?,?,?,?,'PENDING',?,?,?,?,?)", (job_id, db_run_id, match_id, parent_job_id, job_type, priority, json.dumps(payload, sort_keys=True), fingerprint, max_attempts, self.now()))
+            conn.execute("INSERT INTO jobs(job_id, run_id, match_id, parent_job_id, job_type, status, priority, payload_json, fingerprint, max_attempts, created_at) VALUES(?,?,?,?,?,'PENDING',?,?,?,?,?)", (job_id, run_id, match_id, parent_job_id, job_type, priority, json.dumps(payload, sort_keys=True), fingerprint, max_attempts, self.now()))
             self._event(conn, "JOB_CREATED", job_id, None, {"job_type": job_type, "fingerprint": fingerprint})
             return job_id
 
@@ -74,7 +69,7 @@ class JobStore:
         self.register_worker(worker_id, caps)
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            rows = conn.execute("""SELECT * FROM jobs WHERE status IN ('PENDING','RETRY') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND NOT EXISTS (SELECT 1 FROM job_dependencies d JOIN jobs dep ON dep.id=d.depends_on_job_id WHERE d.job_id=jobs.id AND dep.status!='SUCCESS') ORDER BY priority DESC, id ASC""", (self.now(),)).fetchall()
+            rows = conn.execute("SELECT * FROM jobs WHERE status IN ('PENDING','RETRY') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND NOT EXISTS (SELECT 1 FROM job_dependencies d JOIN jobs dep ON dep.id=d.depends_on_job_id WHERE d.job_id=jobs.id AND dep.status!='SUCCESS') ORDER BY priority DESC, id ASC", (self.now(),)).fetchall()
             selected = None
             for row in rows:
                 payload = json.loads(row["payload_json"] or "{}")
