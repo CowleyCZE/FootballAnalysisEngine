@@ -101,9 +101,8 @@ def initialize_database(db_path: str) -> None:
     with sqlite3.connect(db_path, timeout=30) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
 
-        # Create/migrate the base schema before dependent indexes/FKs are used.
-        _migrate_legacy_schema(conn)
         conn.executescript(schema_path.read_text(encoding="utf-8"))
+        _migrate_legacy_schema(conn)
         conn.executescript(research_schema_path.read_text(encoding="utf-8"))
 
         # Runtime compatibility objects required by orchestration.
