@@ -215,7 +215,13 @@ class MasterOrchestrator:
                         self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Research required — cycle {cycle}")
                         research_tasks_payload = audit_res.get("required_research", [{"domain": "GENERAL", "reason": "audit_required"}])
                         for rt in research_tasks_payload:
-                            self.queue.create_job("RESEARCH", match_id, {**rt, "run_id": run_id, "cycle": cycle}, priority=JobPriority.HIGH)
+                            self.queue.create_job(
+                                "RESEARCH",
+                                match_id,
+                                {**rt, "run_id": run_id, "cycle": cycle},
+                                priority=JobPriority.HIGH,
+                                run_id=run_id,
+                            )
                     else:
                         self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Max cycles ({max_cycles}) reached")
                 else:
@@ -330,6 +336,7 @@ class MatchOrchestrator:
                 match_id=match_identity.match_id,
                 payload=payload,
                 priority=task.priority,
+                run_id=run_id,
             )
             if job_id:
                 created_jobs.append(job_id)
