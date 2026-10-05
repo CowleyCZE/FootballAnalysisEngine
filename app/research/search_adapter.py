@@ -40,14 +40,14 @@ class SearchAdapter:
             reason=reason,
         )
         terms = get_topic_terms(domain)
-        return self._run(
-            self.search_engine.search(
-                query=spec,
-                team=team,
-                topic_terms=terms,
-                data_cutoff_at=data_cutoff_at,
-            )
-        )
+        kwargs = {
+            "query": spec,
+            "team": team,
+            "topic_terms": terms,
+        }
+        if data_cutoff_at is not None:
+            kwargs["data_cutoff_at"] = data_cutoff_at
+        return self._run(self.search_engine.search(**kwargs))
 
     def search_many(
         self,
@@ -70,14 +70,14 @@ class SearchAdapter:
             for query in queries
         ]
         terms = get_topic_terms(domain)
-        return self._run(
-            self.search_engine.search_many(
-                queries=specs,
-                team=team,
-                topic_terms=terms,
-                data_cutoff_at=data_cutoff_at,
-            )
-        )
+        kwargs = {
+            "queries": specs,
+            "team": team,
+            "topic_terms": terms,
+        }
+        if data_cutoff_at is not None:
+            kwargs["data_cutoff_at"] = data_cutoff_at
+        return self._run(self.search_engine.search_many(**kwargs))
 
     @staticmethod
     def _build_query_spec(
