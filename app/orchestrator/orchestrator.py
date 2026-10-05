@@ -115,7 +115,9 @@ class MasterOrchestrator:
                 "INSERT INTO runs(run_id,status,started_at,pipeline_version,config_hash) VALUES(?,?,?,?,?)",
                 (run_id, "RUNNING", now_iso, "part-11", None),
             )
-            run_db_id = conn.execute("SELECT id FROM runs WHERE run_id=?", (run_id,)).fetchone()[0]
+            run_db_id = conn.execute(
+                "SELECT id FROM runs WHERE run_id=?", (run_id,)
+            ).fetchone()[0]
             conn.execute(
                 "INSERT INTO pipeline_runs(run_id,match_id,state,cycle,max_cycles,started_at,updated_at) VALUES(?,?,?,?,?,?,?)",
                 (run_id, match_id, MatchState.NEW, 1, max_cycles, now_iso, now_iso),
