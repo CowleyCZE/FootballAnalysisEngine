@@ -123,15 +123,6 @@ def initialize_database(db_path: str) -> None:
                 ON system_events(run_id);
             CREATE INDEX IF NOT EXISTS idx_system_events_job
                 ON system_events(job_id);
-
-            CREATE TABLE IF NOT EXISTS pipeline_state_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id TEXT NOT NULL,
-                old_state TEXT,
-                new_state TEXT NOT NULL,
-                reason TEXT,
-                created_at TEXT NOT NULL
-            );
             """
         )
 
