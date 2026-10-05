@@ -25,7 +25,7 @@ class JobStore:
     def register_worker(self, worker_id: str, capabilities: Iterable[str], worker_type: str = "generic", metadata: Optional[Dict[str, Any]] = None) -> None:
         now = self.now()
         with self.connect() as conn:
-            conn.execute("INSERT INTO workers(worker_id, worker_type, status, capabilities_json, last_heartbeat, metadata_json) VALUES(?, ?, 'IDLE', ?, ?, ?) ON CONFLICT(worker_id) DO UPDATE SET worker_type=excluded.worker_type, status='IDLE', capabilities_json=excluded.capabilities_json, last_heartbeat=excluded.last_heartbeat, metadata_json=excluded.metadata_json", (worker_id, worker_type, json.dumps(sorted(set(capabilities))), now, json.dumps(metadata or {})))
+            conn.execute("INSERT INTO workers(worker_id, worker_type, status, capabilities_json, last_heartbeat, metadata_json, registered_at) VALUES(?, ?, 'IDLE', ?, ?, ?, ?) ON CONFLICT(worker_id) DO UPDATE SET worker_type=excluded.worker_type, status='IDLE', capabilities_json=excluded.capabilities_json, last_heartbeat=excluded.last_heartbeat, metadata_json=excluded.metadata_json", (worker_id, worker_type, json.dumps(sorted(set(capabilities))), now, json.dumps(metadata or {}), now))
 
     def heartbeat(self, worker_id: str, current_job_id: Optional[str] = None) -> None:
         with self.connect() as conn:
