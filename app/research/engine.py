@@ -123,6 +123,7 @@ class ResearchEngine:
                     "score": getattr(result, "relevance", result.score),
                     "relevance": getattr(result, "relevance", 0),
                     "source_type": result.source_type,
+                    "published_at": result.published_at,
                 }
                 for result in search_results
             ]
