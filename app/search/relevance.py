@@ -6,6 +6,7 @@ def calculate_relevance(
     team: str,
     topic_terms: list[str],
     source_priority: int = 0,
+    source_authority: float = 0.0,
     data_cutoff_at: Optional[datetime] = None
 ) -> float:
     score = 0.0
