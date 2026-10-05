@@ -58,6 +58,11 @@ class SearchEngine:
         normalized = [normalize_searx_result(item) for item in raw_results]
         unique = deduplicate(normalized)
         filtered = filter_sports_results(unique)
+        if data_cutoff_at is not None:
+            filtered = [
+                result for result in filtered
+                if self._is_at_or_before_cutoff(result, data_cutoff_at)
+            ]
         terms = topic_terms or []
 
         for result in filtered:
@@ -80,6 +85,22 @@ class SearchEngine:
             reverse=True,
         )
         return filtered
+
+    @staticmethod
+    def _is_at_or_before_cutoff(result: SearchResult, cutoff) -> bool:
+        published_at = getattr(result, "published_at", None)
+        if not published_at:
+            return False
+        try:
+            from datetime import datetime
+            published = datetime.fromisoformat(str(published_at).replace("Z", "+00:00"))
+            if published.tzinfo is None and getattr(cutoff, "tzinfo", None) is not None:
+                published = published.replace(tzinfo=cutoff.tzinfo)
+            elif getattr(cutoff, "tzinfo", None) is None and published.tzinfo is not None:
+                cutoff = cutoff.replace(tzinfo=published.tzinfo)
+            return published <= cutoff
+        except (TypeError, ValueError):
+            return False
 
     async def search_many(
         self,
