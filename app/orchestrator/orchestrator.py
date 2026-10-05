@@ -130,6 +130,11 @@ class MasterOrchestrator:
                 "run_db_id": run_db_id,
                 "capabilities_required": task.capabilities_required,
                 "cutoff": match_identity.data_cutoff_at.isoformat(),
+                "match_id": match_id,
+                "home_team_id": match_identity.home_team_id,
+                "away_team_id": match_identity.away_team_id,
+                "cutoff_datetime": match_identity.data_cutoff_at.isoformat(),
+                "query": task.description,
             }
             job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type, "RESEARCH")
             job_id = self.queue.create_job(
