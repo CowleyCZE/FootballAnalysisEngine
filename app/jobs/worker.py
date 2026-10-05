@@ -46,7 +46,7 @@ class BaseWorkerDaemon:
             self.queue.update_job_status(job_id, JobStatus.FAILED, error=f"No handler registered for {jtype}", worker_id=self.worker_id)
             return True
 
-        self.queue.update_job_status(job_id, JobStatus.RUNNING)
+        self.queue.update_job_status(job_id, JobStatus.RUNNING, worker_id=self.worker_id)
         try:
             self.queue.update_heartbeat(job_id, worker_id=self.worker_id)
             result = handler(job["payload"])
