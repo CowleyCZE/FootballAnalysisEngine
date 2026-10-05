@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS pipeline_state_history (
 CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id TEXT NOT NULL UNIQUE,
-    run_id INTEGER,
+    run_id TEXT,
     match_id INTEGER,
     job_type TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at TEXT,
     finished_at TEXT,
-    FOREIGN KEY (run_id) REFERENCES runs(id)
+    FOREIGN KEY (run_id) REFERENCES runs(run_id)
 );
 
 -- Závislosti úloh
@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS claims (
     valid_until TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (run_id) REFERENCES runs(id),
+    FOREIGN KEY (run_id) REFERENCES runs(run_id),
     FOREIGN KEY (match_id) REFERENCES matches(id)
 );
 
@@ -255,7 +255,7 @@ CREATE TABLE IF NOT EXISTS match_statistics (
 -- TABULKA PRO STATISTICKÉ SNAPSHOTY (VÝSLEDKY ENGINE)
 CREATE TABLE IF NOT EXISTS statistical_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
     match_id INTEGER,
     team_id INTEGER,
     metric TEXT NOT NULL,
