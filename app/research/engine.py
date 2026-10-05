@@ -129,10 +129,11 @@ class ResearchEngine:
             strategy = self.source_policy.get_strategy(task.domain)
             candidates = self.source_selector.select_candidates(selector_results)
             metrics.sources_selected = len(candidates)
-            source_domains = {c["domain"] for c in candidates if c.get("domain")}
+            source_domains = {c.get("domain") for c in candidates if c.get("domain")}
+            publisher_ids = {c.get("publisher_id") for c in candidates if c.get("publisher_id")}
             min_sources = int(strategy.get("min_sources", 1))
             min_independent = int(strategy.get("min_independent_sources", 1))
-            if len(candidates) < min_sources or len(source_domains) < min_independent:
+            if len(candidates) < min_sources or len(publisher_ids) < min_independent:
                 self.repository.complete_execution(exec_id, "NO_RESULT")
                 metrics.duration_ms = int((time.time() - start_time) * 1000)
                 return ResearchResult(
@@ -141,7 +142,7 @@ class ResearchEngine:
                     status=ResearchStatus.NO_RESULT,
                     warnings=[
                         f"Source policy not satisfied: {len(candidates)}/{min_sources} sources, "
-                        f"{len(source_domains)}/{min_independent} independent publishers"
+                        f"{len(publisher_ids)}/{min_independent} independent publishers"
                     ],
                     sources_count=len(candidates),
                     metrics=metrics,
