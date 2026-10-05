@@ -15,15 +15,15 @@ class ResearchPlanner:
             # Stanovení typu a nároků podle domény
             if domain == "MATCH_IDENTITY":
                 task_type = "FACT_COLLECTION"
-                caps = []
+                caps = ["http_fetch"]
                 desc = f"Ověř identitu zápasu #{match_identity.match_id}."
             elif domain in ["FORM_HOME", "FORM_AWAY", "STATISTICS", "HEAD_TO_HEAD"]:
                 task_type = "STAT_COLLECTION"
-                caps = []
+                caps = ["statistics"]
                 desc = f"Získej statistická data pro doménu {domain} před časem {match_identity.data_cutoff_at.isoformat()}."
             elif domain in ["ABSENCES_HOME", "ABSENCES_AWAY", "EXPECTED_LINEUPS"]:
                 task_type = "NEWS_COLLECTION"
-                caps = []
+                caps = ["http_fetch", "browser"]
                 desc = f"Získej aktuální novinky a absence pro {domain} před časem {match_identity.data_cutoff_at.isoformat()}."
             else:
                 task_type = "FACT_COLLECTION"
