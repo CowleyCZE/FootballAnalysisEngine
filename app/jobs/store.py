@@ -22,6 +22,20 @@ class JobStore:
     def init_db(self) -> None:
         initialize_database(self.db_path)
 
+
+    def create_job_on_connection(self, conn, job_id, job_type, match_id, run_id, payload, fingerprint, priority, max_attempts, parent_job_id=None):
+        existing = conn.execute("SELECT job_id FROM jobs WHERE fingerprint=? LIMIT 1", (fingerprint,)).fetchone()
+        if existing:
+            return None
+        if run_id and not conn.execute("SELECT 1 FROM runs WHERE run_id=?", (run_id,)).fetchone():
+            raise ValueError(f"Run {run_id} must exist before creating a job")
+        conn.execute(
+            "INSERT INTO jobs(job_id, run_id, match_id, parent_job_id, job_type, status, priority, payload_json, fingerprint, max_attempts, created_at) VALUES(?,?,?,?,?,'PENDING',?,?,?,?,?)",
+            (job_id, run_id, match_id, parent_job_id, job_type, priority, json.dumps(payload, sort_keys=True), fingerprint, max_attempts, self.now()),
+        )
+        self._event(conn, "JOB_CREATED", job_id, None, {"job_type": job_type, "fingerprint": fingerprint})
+        return job_id
+
     def register_worker(self, worker_id: str, capabilities: Iterable[str], worker_type: str = "generic", metadata: Optional[Dict[str, Any]] = None) -> None:
         now = self.now()
         with self.connect() as conn:
