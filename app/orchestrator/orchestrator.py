@@ -70,32 +70,25 @@ class MasterOrchestrator:
         finally:
             conn.close()
 
-    def _dispatch_research_tasks(self, tasks: List[TaskRequirement], match_id: int, run_id: str) -> List[str]:
-        """
-        Vytvoří joby ve frontě pro každý TaskRequirement z ResearchPlaneru.
-        Vrátí seznam vytvořených job_id.
-        """
+    def _dispatch_research_tasks(self, tasks: List[TaskRequirement], match_id: int, run_id: str, match_identity: MatchIdentity) -> List[str]:
+        """Create canonical ResearchTask rows and bound queue jobs."""
         created = []
-        for task in tasks:
-            job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type, "RESEARCH")
-            payload = {
-                "task_uuid": task.task_uuid,
-                "domain": task.domain,
-                "description": task.description,
-                "run_id": run_id,
-            }
-            job_id = self.queue.create_job(
-                job_type=job_type,
-                match_id=match_id,
-                payload=payload,
-                priority=task.priority,
-                run_id=run_id,
-            )
-            if job_id:
-                created.append(job_id)
-                logger.info(f"[ORCHESTRATOR] Vytvořen job {job_id} ({job_type}) pro doménu {task.domain}")
+        with sqlite3.connect(self.db_path) as conn:
+            run_db_id = conn.execute("SELECT id FROM runs WHERE run_id=?", (run_id,)).fetchone()[0]
+            for task in tasks:
+                row = conn.execute("SELECT id FROM research_tasks WHERE run_id=? AND task_uuid=?", (run_id, task.task_uuid)).fetchone()
+                if row:
+                    task_id = int(row[0])
+                else:
+                    conn.execute("""INSERT INTO research_tasks(run_id, run_db_id, match_id, task_uuid, domain, task_type, description, required, priority, capabilities_json, data_cutoff_at, home_team, away_team, competition, scheduled_at, venue, status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (run_id, run_db_id, match_id, task.task_uuid, task.domain, task.task_type, task.description, 1 if task.required else 0, task.priority, json.dumps(task.capabilities_required), match_identity.data_cutoff_at.isoformat(), str(match_identity.home_team_id), str(match_identity.away_team_id), str(match_identity.competition_id or ""), match_identity.scheduled_at.isoformat(), None, "PLANNED"))
+                    task_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+                job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type, "RESEARCH")
+                payload = {"task_id": task_id, "task_uuid": task.task_uuid, "domain": task.domain, "description": task.description, "run_id": run_id, "run_db_id": run_db_id, "match_id": match_id, "home_team_id": match_identity.home_team_id, "away_team_id": match_identity.away_team_id, "cutoff_datetime": match_identity.data_cutoff_at.isoformat(), "query": task.description}
+                job_id = self.queue.create_job(job_type=job_type, match_id=match_id, payload=payload, priority=task.priority, run_id=run_id)
+                if job_id:
+                    conn.execute("UPDATE research_tasks SET job_id=?, status='QUEUED', updated_at=CURRENT_TIMESTAMP WHERE id=?", (job_id, task_id))
+                    created.append(job_id)
         return created
-
     def start_pipeline(self, match_id: int) -> str:
         """Spustí pipeline pro existující zápas: Match Identity → Research Planner → Jobs."""
         match_identity = self._get_match_identity_from_id(match_id)
@@ -120,33 +113,7 @@ class MasterOrchestrator:
         self.state_machine.transition_to(run_id, MatchState.DISCOVERY, "Match Identity resolved")
 
         tasks = self.planner.create_plan(match_identity)
-        created = []
-        for task in tasks:
-            payload = {
-                "task_uuid": task.task_uuid,
-                "domain": task.domain,
-                "description": task.description,
-                "run_id": run_id,
-                "run_db_id": run_db_id,
-                "capabilities_required": task.capabilities_required,
-                "cutoff": match_identity.data_cutoff_at.isoformat(),
-                "match_id": match_id,
-                "home_team_id": match_identity.home_team_id,
-                "away_team_id": match_identity.away_team_id,
-                "cutoff_datetime": match_identity.data_cutoff_at.isoformat(),
-                "query": task.description,
-            }
-            job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type, "RESEARCH")
-            job_id = self.queue.create_job(
-                job_type=job_type,
-                match_id=match_id,
-                payload=payload,
-                priority=task.priority,
-                run_id=run_id,
-            )
-            if job_id:
-                created.append(job_id)
-
+        self._dispatch_research_tasks(tasks, match_id, run_id, match_identity)
         return run_id
 
     def tick(self, run_id: str):
