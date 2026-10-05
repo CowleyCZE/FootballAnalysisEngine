@@ -16,6 +16,10 @@ class FakeRegistry:
             },
         }
 
+    def get_publisher_id(self, url):
+        domain = url.split("//", 1)[1].split("/", 1)[0]
+        return {"official.example": "official-publisher", "news.example": "news-publisher"}.get(domain, domain)
+
     def get_domain_info(self, url):
         domain = url.split("//", 1)[1].split("/", 1)[0]
         return self.data.get(
@@ -71,3 +75,16 @@ def test_selector_normalizes_tracking_parameters_before_selection():
     selected = selector.select_candidates(results)
 
     assert selected[0]["url"] == "https://official.example/article"
+
+
+def test_selector_exposes_publisher_identity():
+    selector = SourceSelector(FakeRegistry(), max_per_domain=3)
+    selected = selector.select_candidates([
+        {
+            "url": "https://official.example/article",
+            "title": "Official",
+            "content": "",
+            "relevance": 80,
+        }
+    ])
+    assert selected[0]["publisher_id"] == "official-publisher"
