@@ -89,6 +89,7 @@ class MasterOrchestrator:
                 match_id=match_id,
                 payload=payload,
                 priority=task.priority,
+                run_id=run_id,
             )
             if job_id:
                 created.append(job_id)
@@ -292,9 +293,13 @@ class MatchOrchestrator:
         now_iso = datetime.now(timezone.utc).isoformat()
         max_cycles = self.config["orchestrator"].get("audit_max_cycles", 3)
 
-        # Krok 2: Zápis pipeline_run
+        # Krok 2: Zápis canonical run + pipeline_run
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO runs (run_id, status, started_at, pipeline_version) VALUES (?, ?, ?, ?)",
+            (run_id, "RUNNING", now_iso, "part-11"),
+        )
         cursor.execute(
             "INSERT INTO pipeline_runs (run_id, match_id, state, cycle, max_cycles, started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (run_id, match_identity.match_id, MatchState.NEW, 1, max_cycles, now_iso, now_iso)
