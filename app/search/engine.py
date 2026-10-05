@@ -38,6 +38,7 @@ class SearchEngine:
         query: QuerySpec,
         team: str = "",
         topic_terms: list[str] | None = None,
+        data_cutoff_at=None,
     ) -> list[SearchResult]:
         data = await self.client.search(
             query.query,
@@ -68,6 +69,7 @@ class SearchEngine:
                 topic_terms=terms,
                 source_priority=query.priority,
                 source_authority=info["authority"],
+                data_cutoff_at=data_cutoff_at,
             )
 
         filtered.sort(
@@ -84,10 +86,11 @@ class SearchEngine:
         queries: Iterable[QuerySpec],
         team: str = "",
         topic_terms: list[str] | None = None,
+        data_cutoff_at=None,
     ) -> list[SearchResult]:
         all_results: list[SearchResult] = []
         for query in queries:
             all_results.extend(
-                await self.search(query=query, team=team, topic_terms=topic_terms)
+                await self.search(query=query, team=team, topic_terms=topic_terms, data_cutoff_at=data_cutoff_at)
             )
         return deduplicate(all_results)
