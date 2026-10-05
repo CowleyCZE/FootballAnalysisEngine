@@ -34,10 +34,7 @@ class ResearchRepository:
 
     def bind_job(self, task_id: int, job_id: str) -> None:
         with self.get_connection() as conn:
-            conn.execute(
-                "UPDATE research_tasks SET job_id=?, status=CASE WHEN status IN ('PLANNED','QUEUED') THEN 'QUEUED' ELSE status END, updated_at=? WHERE id=?",
-                (job_id, self._now(), int(task_id)),
-            )
+            conn.execute("UPDATE research_tasks SET job_id=?, status=CASE WHEN status IN ('PLANNED','QUEUED') THEN 'QUEUED' ELSE status END, updated_at=? WHERE id=?", (job_id, self._now(), int(task_id)))
 
     def mark_task_running(self, task_id: int, attempt_number: int) -> None:
         with self.get_connection() as conn:
@@ -46,10 +43,7 @@ class ResearchRepository:
                 raise KeyError(task_id)
             if row["status"] in self.TERMINAL_TASK_STATUSES:
                 raise RuntimeError(f"Research task {task_id} is already terminal: {row['status']}")
-            conn.execute(
-                "UPDATE research_tasks SET status='RUNNING', attempt_number=?, updated_at=? WHERE id=?",
-                (int(attempt_number), self._now(), int(task_id)),
-            )
+            conn.execute("UPDATE research_tasks SET status='RUNNING', attempt_number=?, updated_at=? WHERE id=?", (int(attempt_number), self._now(), int(task_id)))
 
     def get_task(self, task_id: int) -> Optional[sqlite3.Row]:
         with self.get_connection() as conn:
@@ -84,7 +78,11 @@ class ResearchRepository:
     def create_session(self, session_uuid: str, run_id: int, task_id: int, strategy: str) -> int:
         now = self._now()
         with self.get_connection() as conn:
-            cur = conn.execute("INSERT INTO research_sessions(session_uuid, run_id, task_id, strategy, started_at, status) VALUES (?, ?, ?, ?, ?, 'RUNNING')", (session_uuid, int(run_id), int(task_id), strategy, now))
+            run = conn.execute("SELECT run_id FROM runs WHERE id=?", (int(run_id),)).fetchone()
+            if not run:
+                raise KeyError(f"run {run_id}")
+            # research_sessions historically stores the canonical run string FK.
+            cur = conn.execute("INSERT INTO research_sessions(session_uuid, run_id, task_id, strategy, started_at, status) VALUES (?, ?, ?, ?, ?, 'RUNNING')", (session_uuid, run["run_id"], int(task_id), strategy, now))
             return int(cur.lastrowid)
 
     def save_query(self, session_id: int, query: str, query_type: str, query_hash: str, result_count: int = 0) -> None:
@@ -121,10 +119,8 @@ class ResearchRepository:
         return int(cur.lastrowid)
 
     def _ensure_document(self, conn: sqlite3.Connection, url: str, text: str, published_at: Optional[str], document_id: Optional[int] = None) -> int:
-        if document_id is not None:
-            row = conn.execute("SELECT id FROM documents WHERE id=?", (int(document_id),)).fetchone()
-            if row:
-                return int(row["id"])
+        if document_id is not None and conn.execute("SELECT 1 FROM documents WHERE id=?", (int(document_id),)).fetchone():
+            return int(document_id)
         canonical_url = url.split("#", 1)[0]
         content_hash = self._content_hash(url, text)
         row = conn.execute("SELECT id FROM documents WHERE content_hash=? LIMIT 1", (content_hash,)).fetchone()
