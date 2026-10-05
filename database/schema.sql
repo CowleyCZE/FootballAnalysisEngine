@@ -348,3 +348,23 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match ON jobs(match_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_match_statistics_match ON match_statistics(match_id);
 CREATE INDEX IF NOT EXISTS idx_matches_scheduled_at ON matches(scheduled_at);
+
+
+-- Orchestration event/audit log
+CREATE TABLE IF NOT EXISTS system_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    run_id TEXT,
+    job_id TEXT,
+    worker_id TEXT,
+    payload_json TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Worker capability registry/runtime metadata
+ALTER TABLE workers ADD COLUMN capabilities_json TEXT;
+ALTER TABLE workers ADD COLUMN current_job_id TEXT;
+ALTER TABLE workers ADD COLUMN metadata_json TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_system_events_run ON system_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_system_events_job ON system_events(job_id);
