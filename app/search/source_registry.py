@@ -49,6 +49,10 @@ class SearchSourceRegistry:
 
         return "unknown"
 
+    def get_publisher_id(self, url: str) -> str:
+        """Stable publisher identity used for source-independence checks."""
+        return self.get_domain(url)
+
     def get_authority(self, url: str) -> float:
         source_type = self.get_source_type(url)
         return self.SOURCE_TYPES.get(
