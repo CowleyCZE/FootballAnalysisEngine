@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS research_sessions (
     started_at TEXT NOT NULL,
     completed_at TEXT,
     status TEXT NOT NULL,
-    FOREIGN KEY (run_id) REFERENCES runs(id),
+    FOREIGN KEY (run_id) REFERENCES runs(run_id),
     FOREIGN KEY (task_id) REFERENCES research_tasks(id) ON DELETE CASCADE
 );
 
