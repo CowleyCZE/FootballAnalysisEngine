@@ -96,50 +96,50 @@ class MasterOrchestrator:
         return created
 
     def start_pipeline(self, match_id: int) -> str:
-        """
-        Spustí pipeline pro zadaný match_id.
-        Tok: Match Identity → Research Planner → Research Tasks (jako joby ve frontě)
-        """
+        """Spustí pipeline pro existující zápas: Match Identity → Research Planner → Jobs."""
+        match_identity = self._get_match_identity_from_id(match_id)
+        if not match_identity:
+            raise ValueError(f"Match {match_id} does not exist")
+
         run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_M{match_id}_{uuid.uuid4().hex[:4]}"
         now_iso = datetime.now(timezone.utc).isoformat()
+        max_cycles = self.config["orchestrator"]["audit_max_cycles"]
 
-        # 1. Zápis pipeline_run
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO pipeline_runs (run_id, match_id, state, cycle, max_cycles, started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (run_id, match_id, MatchState.NEW, 1, self.config["orchestrator"]["audit_max_cycles"], now_iso, now_iso)
-        )
-        conn.commit()
-        conn.close()
-
-        self.state_machine.transition_to(run_id, MatchState.DISCOVERY, "Start: Match Identity lookup")
-
-        # 2. Získání MatchIdentity z DB (neblokuje při chybějící identitě — vytvoříme fallback)
-        match_identity = self._get_match_identity_from_id(match_id)
-
-        if match_identity:
-            # 3. Research Planner → seznam TaskRequirement
-            tasks = self.planner.create_plan(match_identity)
-            logger.info(f"[ORCHESTRATOR] ResearchPlanner vytvořil {len(tasks)} tasků pro match_id={match_id}")
-
-            # 4. Dispatch tasků jako joby ve frontě
-            self._dispatch_research_tasks(tasks, match_id, run_id)
-        else:
-            # Zápas není v DB → vytvoříme základní RESEARCH job pro identifikaci zápasu
-            logger.warning(f"[ORCHESTRATOR] match_id={match_id} nenalezen v DB — spouštím RESEARCH job pro identifikaci")
-            self.queue.create_job(
-                "RESEARCH",
-                match_id,
-                {"domain": "MATCH_IDENTITY", "description": f"Identifikuj zápas #{match_id}", "run_id": run_id},
-                priority=JobPriority.CRITICAL,
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO runs(run_id,status,started_at,pipeline_version,config_hash) VALUES(?,?,?,?,?)",
+                (run_id, "RUNNING", now_iso, "part-11", None),
             )
-            self.queue.create_job(
-                "STATISTICS",
-                match_id,
-                {"domain": "STATISTICS", "description": "Základní statistiky", "run_id": run_id},
-                priority=JobPriority.NORMAL,
+            run_db_id = conn.execute("SELECT id FROM runs WHERE run_id=?", (run_id,)).fetchone()[0]
+            conn.execute(
+                "INSERT INTO pipeline_runs(run_id,match_id,state,cycle,max_cycles,started_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                (run_id, match_id, MatchState.NEW, 1, max_cycles, now_iso, now_iso),
             )
+
+        self.state_machine.transition_to(run_id, MatchState.DISCOVERY, "Match Identity resolved")
+
+        tasks = self.planner.create_plan(match_identity)
+        created = []
+        for task in tasks:
+            payload = {
+                "task_uuid": task.task_uuid,
+                "domain": task.domain,
+                "description": task.description,
+                "run_id": run_id,
+                "run_db_id": run_db_id,
+                "capabilities_required": task.capabilities_required,
+                "cutoff": match_identity.data_cutoff_at.isoformat(),
+            }
+            job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type, "RESEARCH")
+            job_id = self.queue.create_job(
+                job_type=job_type,
+                match_id=match_id,
+                payload=payload,
+                priority=task.priority,
+                run_id=run_id,
+            )
+            if job_id:
+                created.append(job_id)
 
         return run_id
 
@@ -164,8 +164,8 @@ class MasterOrchestrator:
         max_cycles = run["max_cycles"]
 
         cursor.execute(
-            "SELECT id, job_type, status, result_json FROM jobs WHERE match_id = ?",
-            (match_id,),
+            "SELECT id, job_type, status, result_json FROM jobs WHERE match_id = ? AND run_id = (SELECT id FROM runs WHERE run_id = ?)",
+            (match_id, run_id),
         )
         jobs = cursor.fetchall()
         conn.close()
@@ -241,7 +241,7 @@ class MasterOrchestrator:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT status FROM jobs WHERE match_id = (SELECT match_id FROM pipeline_runs WHERE run_id = ?)",
+            "SELECT status FROM jobs WHERE run_id = (SELECT id FROM runs WHERE run_id = ?)",
             (run_id,),
         )
         rows = cursor.fetchall()
