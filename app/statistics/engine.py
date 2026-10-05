@@ -1,4 +1,4 @@
-from typing import Dict, Any
+import sqlite3\nfrom typing import Dict, Any
 from app.statistics.repository import StatisticsRepository
 from app.statistics.validators import StatisticsValidator
 from app.statistics.form import FormEngine
@@ -55,18 +55,32 @@ class StatisticalEngine:
         if home_xg_agg["coverage"] < 1.0:
             warnings.append(f"xG coverage pro domácí je {home_xg_agg['coverage']*100:.0f}%.")
 
-        # 5. Uložení výsledného snapshotu
-        self.repo.save_snapshot(
-            run_id=run_id,
-            match_id=match_id,
-            team_id=home_team_id,
-            metric="form_points",
-            value=float(home_form["points"]),
-            sample_size=home_form["sample_size"],
-            coverage=1.0,
-            data_cutoff_at=cutoff_datetime,
-            calculation_version=self.CALCULATION_VERSION
-        )
+        # 5. Uložení výsledného snapshotu. Provenance is mandatory;
+        # if the canonical run row is unavailable, return a safe partial
+        # result instead of turning a provider/data problem into a worker crash.
+        try:
+            self.repo.save_snapshot(
+                run_id=run_id,
+                match_id=match_id,
+                team_id=home_team_id,
+                metric="form_points",
+                value=float(home_form["points"]),
+                sample_size=home_form["sample_size"],
+                coverage=1.0,
+                data_cutoff_at=cutoff_datetime,
+                calculation_version=self.CALCULATION_VERSION
+            )
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            warnings.append(f"STATISTICS snapshot nebyl uložen: {exc}")
+            return {
+                "match_id": match_id,
+                "run_id": run_id,
+                "status": "PARTIAL",
+                "home_team": {"id": home_team_id, "form": home_form, "xg_aggregate": home_xg_agg},
+                "away_team": {"id": away_team_id, "form": away_form},
+                "warnings": warnings,
+                "errors": errors,
+            }
 
         return {
             "match_id": match_id,
