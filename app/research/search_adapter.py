@@ -30,6 +30,7 @@ class SearchAdapter:
         language: str = "all",
         time_range: str | None = None,
         reason: str = "",
+        data_cutoff_at=None,
     ) -> List[SearchResult]:
         spec = self._build_query_spec(
             query,
@@ -44,6 +45,7 @@ class SearchAdapter:
                 query=spec,
                 team=team,
                 topic_terms=terms,
+                data_cutoff_at=data_cutoff_at,
             )
         )
 
@@ -56,6 +58,7 @@ class SearchAdapter:
         priority: int = 50,
         language: str = "all",
         time_range: str | None = None,
+        data_cutoff_at=None,
     ) -> List[SearchResult]:
         specs = [
             self._build_query_spec(
@@ -72,6 +75,7 @@ class SearchAdapter:
                 queries=specs,
                 team=team,
                 topic_terms=terms,
+                data_cutoff_at=data_cutoff_at,
             )
         )
 
