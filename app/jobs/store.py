@@ -74,9 +74,7 @@ class JobStore:
             for row in rows:
                 payload = json.loads(row["payload_json"] or "{}")
                 required = set(payload.get("capabilities_required") or [])
-                if row["job_type"] == "RESEARCH" and "RESEARCH" in caps:
-                    pass
-                elif required and not required.issubset(caps):
+                if required and not required.issubset(caps):
                     continue
                 elif not required and row["job_type"] not in caps and "generic" not in caps:
                     continue
