@@ -45,7 +45,7 @@ def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
         _ensure_column(conn, "matches", column, definition)
 
     for column, definition in (
-        ("run_id", "INTEGER"),
+        ("run_id", "TEXT"),
         ("match_id", "INTEGER"),
         ("parent_job_id", "INTEGER"),
         ("job_type", "TEXT"),
