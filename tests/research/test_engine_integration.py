@@ -191,7 +191,23 @@ def test_research_engine_blocks_when_source_policy_not_satisfied(tmp_path):
         }
     ]
 
-    result = engine.execute(dummy_task)
+    task = ResearchTask(
+        task_id=1,
+        run_id=101,
+        match_id=50,
+        domain="ABSENCES_HOME",
+        task_type="NEWS_COLLECTION",
+        description="Absence Arsenal",
+        required=True,
+        priority=90,
+        data_cutoff_at=datetime(2026, 10, 3, 12, 0, 0),
+        home_team="Arsenal",
+        away_team="Chelsea",
+        competition="Premier League",
+        scheduled_at=datetime(2026, 10, 3, 15, 0, 0),
+    )
+
+    result = engine.execute(task)
     assert result.status == ResearchStatus.NO_RESULT
     assert "1/2 sources" in result.warnings[0]
     assert "1/2 independent publishers" in result.warnings[0]
