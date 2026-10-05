@@ -32,7 +32,11 @@ def calculate_relevance(
     # Freshness calculation
     if data_cutoff_at and getattr(result, "published_at", None):
         try:
-            pub_date = datetime.fromisoformat(str(result.published_at))
+            pub_date = datetime.fromisoformat(str(result.published_at).replace("Z", "+00:00"))
+            if pub_date.tzinfo is None and getattr(data_cutoff_at, "tzinfo", None) is not None:
+                pub_date = pub_date.replace(tzinfo=data_cutoff_at.tzinfo)
+            elif data_cutoff_at.tzinfo is None and pub_date.tzinfo is not None:
+                data_cutoff_at = data_cutoff_at.replace(tzinfo=pub_date.tzinfo)
             if pub_date > data_cutoff_at:
                 # Penalty for post-cutoff items if not filtered out
                 score -= 100.0
