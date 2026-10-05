@@ -8,6 +8,7 @@ from app.search.normalizer import normalize_searx_result
 from app.search.relevance import calculate_relevance
 from app.search.searxng_client import SearXNGClient
 from app.search.source_registry import SearchSourceRegistry
+from app.search.sport_filter import filter_sports_results
 
 
 class SearchEngine:
@@ -55,9 +56,10 @@ class SearchEngine:
 
         normalized = [normalize_searx_result(item) for item in raw_results]
         unique = deduplicate(normalized)
+        filtered = filter_sports_results(unique)
         terms = topic_terms or []
 
-        for result in unique:
+        for result in filtered:
             info = self.source_registry.get_info(result.url)
             result.source_type = info["source_type"]
             result.relevance = calculate_relevance(
@@ -68,14 +70,14 @@ class SearchEngine:
                 source_authority=info["authority"],
             )
 
-        unique.sort(
+        filtered.sort(
             key=lambda result: (
                 getattr(result, "relevance", 0),
                 result.score,
             ),
             reverse=True,
         )
-        return unique
+        return filtered
 
     async def search_many(
         self,

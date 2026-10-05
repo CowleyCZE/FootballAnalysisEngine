@@ -40,16 +40,20 @@ class AIWorker:
     @staticmethod
     def execute(payload: Dict[str, Any]) -> Dict[str, Any]:
         match_id = int(payload.get("match_id"))
+        run_db_id = payload.get("run_db_id")
+        db_path = payload.get("db_path", "database/football.db")
         statistics = payload.get("statistics") or {}
         claims = payload.get("claims") or []
         conflicts = payload.get("conflicts") or []
         match_info = payload.get("match") or {"match_id": match_id}
 
-        context = ContextBuilder().build_context(
+        context_builder = ContextBuilder(db_path=db_path)
+        context = context_builder.build_context(
             match_info=match_info,
             claims=claims,
             statistics=statistics,
             conflicts=conflicts,
+            run_db_id=int(run_db_id) if run_db_id is not None else None,
         )
         prompt = (
             "Analyze the football match using ONLY the supplied context. "

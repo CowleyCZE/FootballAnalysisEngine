@@ -1,10 +1,12 @@
 import sqlite3
 from typing import List, Dict, Any, Optional
 from app.statistics.models import MatchStatistics
+from app.database.schema import initialize_database
 
 class StatisticsRepository:
     def __init__(self, db_path: str = "database/football.db"):
         self.db_path = db_path
+        initialize_database(self.db_path)
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -70,18 +72,22 @@ class StatisticsRepository:
         finally:
             conn.close()
 
-    def save_snapshot(self, run_id: int, match_id: Optional[int], team_id: Optional[int],
+    def save_snapshot(self, run_id: Any, match_id: Optional[int], team_id: Optional[int],
                       metric: str, value: Optional[float], sample_size: int,
                       coverage: float, data_cutoff_at: str, calculation_version: str = "1.0.0") -> int:
         conn = self._get_connection()
         try:
             # statistical_snapshots.run_id references runs.id (INTEGER).
-            run_row = conn.execute(
-                "SELECT id FROM runs WHERE id = ?",
-                (int(run_id),),
-            ).fetchone()
+            # Handle both integer runs.id and string run_id
+            if isinstance(run_id, int):
+                run_row = conn.execute("SELECT id FROM runs WHERE id = ?", (run_id,)).fetchone()
+            else:
+                run_row = conn.execute("SELECT id FROM runs WHERE run_id = ?", (str(run_id),)).fetchone()
+                if not run_row and str(run_id).isdigit():
+                    run_row = conn.execute("SELECT id FROM runs WHERE id = ?", (int(run_id),)).fetchone()
+
             if not run_row:
-                raise ValueError(f"Run database id {run_id} does not exist")
+                raise ValueError(f"Run {run_id} does not exist in runs table")
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO statistical_snapshots (
