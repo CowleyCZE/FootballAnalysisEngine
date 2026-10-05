@@ -157,26 +157,32 @@ class MasterOrchestrator:
         if state == MatchState.DISCOVERY:
             research_jobs = [j for j in jobs if j["job_type"] in ("RESEARCH", "STATISTICS")]
             if research_jobs and all(j["status"] in terminal for j in research_jobs):
-                self.state_machine.transition_to(
-                    run_id, MatchState.COLLECTING, "Research tasks complete"
-                )
-                self.queue.create_job(
-                    "CRAWL",
-                    match_id,
-                    {"phase": "evidence_crawl", "run_id": run_id},
-                    priority=JobPriority.HIGH,
-                    run_id=run_id,
-                )
+                if any(j["status"] == JobStatus.SUCCESS for j in research_jobs):
+                    self.state_machine.transition_to(
+                        run_id, MatchState.COLLECTING, "Research tasks complete"
+                    )
+                    self.state_machine.transition_to(
+                        run_id, MatchState.NORMALIZING, "Research evidence collected"
+                    )
+                    self.state_machine.transition_to(
+                        run_id, MatchState.CALCULATING, "Data normalized"
+                    )
+                else:
+                    self.state_machine.transition_to(
+                        run_id, MatchState.UNRESOLVED, "Research produced no usable result"
+                    )
             return
 
         if state == MatchState.COLLECTING:
-            crawl_jobs = [j for j in jobs if j["job_type"] == "CRAWL"]
-            if crawl_jobs and all(j["status"] in terminal for j in crawl_jobs):
-                if any(j["status"] == JobStatus.SUCCESS for j in crawl_jobs):
-                    self.state_machine.transition_to(run_id, MatchState.NORMALIZING, "Crawling complete")
+            # Legacy state retained for persisted runs. ResearchEngine owns
+            # source crawling; the orchestrator must not fabricate a CRAWL URL.
+            research_jobs = [j for j in jobs if j["job_type"] in ("RESEARCH", "STATISTICS")]
+            if research_jobs and all(j["status"] in terminal for j in research_jobs):
+                if any(j["status"] == JobStatus.SUCCESS for j in research_jobs):
+                    self.state_machine.transition_to(run_id, MatchState.NORMALIZING, "Research evidence collected")
                     self.state_machine.transition_to(run_id, MatchState.CALCULATING, "Data normalized")
                 else:
-                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Crawling produced no usable result")
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Research produced no usable result")
             return
 
         if state == MatchState.CALCULATING:
