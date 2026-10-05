@@ -8,7 +8,7 @@ def normalize_searx_result(item: dict) -> SearchResult:
         content=str(item.get("content", "")).strip(),
         engine=item.get("engine"),
         category=item.get("category"),
-        published_at=item.get("publishedDate"),
+        published_at=item.get("publishedDate") or item.get("published_at"),
         score=float(item.get("score", 0.0) or 0.0),
         source_type="search",
         retrieved_at=datetime.now(timezone.utc).isoformat(),
