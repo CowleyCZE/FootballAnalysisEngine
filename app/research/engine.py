@@ -128,7 +128,20 @@ class ResearchEngine:
                 for result in search_results
             ]
             strategy = self.source_policy.get_strategy(task.domain)
-            candidates = self.source_selector.select_candidates(selector_results)
+
+            # Search may return the same URL multiple times across query variants.
+            # Source policy counts unique source documents, so deduplicate by the
+            # normalized selector URL before checking minimum source thresholds.
+            unique_selector_results = {}
+            for result in selector_results:
+                url = self.source_selector.normalize_url(result.get("url", ""))
+                if not url:
+                    continue
+                existing = unique_selector_results.get(url)
+                if existing is None or result.get("relevance", 0) > existing.get("relevance", 0):
+                    unique_selector_results[url] = result
+
+            candidates = self.source_selector.select_candidates(list(unique_selector_results.values()))
             metrics.sources_selected = len(candidates)
             publisher_ids = {c.get("publisher_id") for c in candidates if c.get("publisher_id")}
             min_sources = int(strategy.get("min_sources", 1))
