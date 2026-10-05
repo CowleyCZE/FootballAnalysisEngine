@@ -1,4 +1,5 @@
-import sqlite3\nfrom typing import Dict, Any
+import sqlite3
+from typing import Dict, Any
 from app.statistics.repository import StatisticsRepository
 from app.statistics.validators import StatisticsValidator
 from app.statistics.form import FormEngine
