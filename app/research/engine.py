@@ -99,7 +99,14 @@ class ResearchEngine:
             search_results = []
             for q in queries[: self.source_policy.get_strategy(task.domain).get("max_queries", len(queries))]:
                 team_name = task.home_team if "HOME" in task.domain else task.away_team if "AWAY" in task.domain else ""
-                res = self.search_adapter.search(q["query"], team=team_name, domain=task.domain, priority=task.priority, reason=q.get("type", ""))
+                res = self.search_adapter.search(
+                    q["query"],
+                    team=team_name,
+                    domain=task.domain,
+                    priority=task.priority,
+                    reason=q.get("type", ""),
+                    data_cutoff_at=task.data_cutoff_at,
+                )
                 search_results.extend(res)
                 self.repository.save_query(session_id, q["query"], q["type"], q["hash"], len(res))
 
@@ -119,8 +126,26 @@ class ResearchEngine:
                 }
                 for result in search_results
             ]
+            strategy = self.source_policy.get_strategy(task.domain)
             candidates = self.source_selector.select_candidates(selector_results)
             metrics.sources_selected = len(candidates)
+            source_domains = {c["domain"] for c in candidates if c.get("domain")}
+            min_sources = int(strategy.get("min_sources", 1))
+            min_independent = int(strategy.get("min_independent_sources", 1))
+            if len(candidates) < min_sources or len(source_domains) < min_independent:
+                self.repository.complete_execution(exec_id, "NO_RESULT")
+                metrics.duration_ms = int((time.time() - start_time) * 1000)
+                return ResearchResult(
+                    task_id=task.task_id,
+                    execution_id=exec_uuid,
+                    status=ResearchStatus.NO_RESULT,
+                    warnings=[
+                        f"Source policy not satisfied: {len(candidates)}/{min_sources} sources, "
+                        f"{len(source_domains)}/{min_independent} independent publishers"
+                    ],
+                    sources_count=len(candidates),
+                    metrics=metrics,
+                )
             crawled_docs = []
             for cand in candidates:
                 self.repository.save_source_candidate(session_id, cand["url"], cand["domain"], cand["source_type"], cand["score"], True)
