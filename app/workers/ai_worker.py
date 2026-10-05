@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from typing import Any, Dict
@@ -9,6 +10,33 @@ from app.ai.validator import AIValidator
 
 
 class AIWorker:
+    @staticmethod
+    def _insufficient_data_result(match_id: int, reason: str, prompt: str = "") -> Dict[str, Any]:
+        """Return an explicit safe fallback without fabricating football facts."""
+        input_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest() if prompt else ""
+        result = AnalysisResult(
+            match_id=match_id,
+            status="insufficient_data",
+            data_quality={
+                "score": 0.0,
+                "source_count": 0,
+                "independent_sources": 0,
+                "official_sources": 0,
+                "conflicts": 0,
+                "freshness_score": 0.0,
+                "missing_data": [reason],
+            },
+            home_team_analysis=None,
+            away_team_analysis=None,
+            key_factors=[],
+            uncertainties=[reason],
+            conflicts_noted=[],
+            conclusion="AI analýzu nelze bezpečně dokončit, protože lokální AI služba není dostupná nebo její výstup nebyl validní. Nebyla doplněna žádná náhradní fotbalová data.",
+        ).model_dump(by_alias=True)
+        result["input_hash"] = input_hash
+        result["output_hash"] = hashlib.sha256(json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        return result
+
     @staticmethod
     def execute(payload: Dict[str, Any]) -> Dict[str, Any]:
         match_id = int(payload.get("match_id"))
@@ -36,12 +64,27 @@ class AIWorker:
             temperature=float(os.getenv("OLLAMA_TEMPERATURE", "0.1")),
             timeout=float(os.getenv("OLLAMA_TIMEOUT", "180")),
         )
-        raw = client.generate(prompt, require_json=True)
-        ok, validated, error, raw_data = AIValidator.validate(raw, AnalysisResult)
-        if not ok or validated is None:
-            raise ValueError(f"AI output validation failed: {error}")
+
+        try:
+            raw = client.generate(prompt, require_json=True)
+            ok, validated, error, raw_data = AIValidator.validate(raw, AnalysisResult)
+            if not ok or validated is None:
+                return AIWorker._insufficient_data_result(
+                    match_id,
+                    f"AI výstup nebyl validní: {error}",
+                    prompt,
+                )
+        except Exception as exc:
+            # External AI availability is not a reason to fabricate data or leave
+            # the pipeline permanently stuck in ANALYZING. Return an explicit
+            # insufficient-data result; AuditWorker converts it to UNRESOLVED.
+            return AIWorker._insufficient_data_result(
+                match_id,
+                f"Lokální Ollama služba není dostupná: {exc}",
+                prompt,
+            )
 
         result = validated.model_dump(by_alias=True)
-        result["input_hash"] = __import__("hashlib").sha256(prompt.encode("utf-8")).hexdigest()
-        result["output_hash"] = __import__("hashlib").sha256(raw.encode("utf-8")).hexdigest()
+        result["input_hash"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        result["output_hash"] = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         return result
