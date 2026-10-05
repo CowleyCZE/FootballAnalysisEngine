@@ -83,13 +83,19 @@ class JobStore:
             selected = None
             for row in rows:
                 payload = json.loads(row["payload_json"] or "{}")
-                # Worker capabilities are execution capabilities (job types).
-                # Research task capabilities such as http_fetch/statistics/browser
-                # are retained in the payload for the ResearchEngine and must not
-                # prevent a RESEARCH/STATISTICS worker from claiming the job.
-                worker_capability = str(payload.get("worker_capability") or row["job_type"])
-                if worker_capability not in caps and "generic" not in caps:
-                    continue
+                explicit_worker_capability = payload.get("worker_capability")
+                if explicit_worker_capability:
+                    worker_capability = str(explicit_worker_capability)
+                    if worker_capability not in caps and "generic" not in caps:
+                        continue
+                else:
+                    # Legacy jobs may use capabilities_required directly.
+                    required = set(payload.get("capabilities_required") or [])
+                    if required:
+                        if not required.issubset(caps):
+                            continue
+                    elif row["job_type"] not in caps and "generic" not in caps:
+                        continue
                 selected = row
                 break
             if not selected:
