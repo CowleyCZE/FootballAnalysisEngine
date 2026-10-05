@@ -75,12 +75,19 @@ class StatisticsRepository:
                       coverage: float, data_cutoff_at: str, calculation_version: str = "1.0.0") -> int:
         conn = self._get_connection()
         try:
+            # statistical_snapshots.run_id references runs.id (INTEGER).
+            run_row = conn.execute(
+                "SELECT id FROM runs WHERE id = ?",
+                (int(run_id),),
+            ).fetchone()
+            if not run_row:
+                raise ValueError(f"Run database id {run_id} does not exist")
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO statistical_snapshots (
                     run_id, match_id, team_id, metric, value, sample_size, coverage, data_cutoff_at, calculation_version
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (run_id, match_id, team_id, metric, value, sample_size, coverage, data_cutoff_at, calculation_version))
+            """, (int(run_row["id"]), match_id, team_id, metric, value, sample_size, coverage, data_cutoff_at, calculation_version))
             conn.commit()
             return cursor.lastrowid
         finally:
