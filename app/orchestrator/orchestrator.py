@@ -150,110 +150,173 @@ class MasterOrchestrator:
         return run_id
 
     def tick(self, run_id: str):
-        """Provede jeden tik stavového automatu pro daný run."""
+        """Provede jeden deterministický krok pipeline a řídí joby pouze daného runu."""
         self.recovery.recover_dead_workers_and_jobs()
         self.scheduler.update_blocked_jobs()
 
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            run = conn.execute(
+                "SELECT match_id, state, cycle, max_cycles FROM pipeline_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if not run:
+                return
 
-        cursor.execute("SELECT match_id, state, cycle, max_cycles FROM pipeline_runs WHERE run_id = ?", (run_id,))
-        run = cursor.fetchone()
-        if not run:
-            conn.close()
-            return
+            match_id = run["match_id"]
+            state = run["state"]
+            cycle = int(run["cycle"])
+            max_cycles = int(run["max_cycles"])
 
-        match_id = run["match_id"]
-        state = run["state"]
-        cycle = run["cycle"]
-        max_cycles = run["max_cycles"]
+            jobs = conn.execute(
+                "SELECT id, job_type, status, result_json, payload_json "
+                "FROM jobs WHERE match_id = ? AND run_id = ? ORDER BY id",
+                (match_id, run_id),
+            ).fetchall()
 
-        cursor.execute(
-            "SELECT id, job_type, status, result_json FROM jobs WHERE match_id = ? AND run_id = ?",
-            (match_id, run_id),
-        )
-        jobs = cursor.fetchall()
-        conn.close()
+        terminal = {JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.CANCELLED}
 
         if state == MatchState.DISCOVERY:
-            initial_jobs = [j for j in jobs if j["job_type"] in ("RESEARCH", "STATISTICS")]
-            if initial_jobs:
-                terminal = {JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.CANCELLED}
-                if all(j["status"] in terminal for j in initial_jobs):
-                    self.state_machine.transition_to(run_id, MatchState.COLLECTING, "Research tasks complete")
+            research_jobs = [j for j in jobs if j["job_type"] in ("RESEARCH", "STATISTICS")]
+            if research_jobs and all(j["status"] in terminal for j in research_jobs):
+                self.state_machine.transition_to(
+                    run_id, MatchState.COLLECTING, "Research tasks complete"
+                )
+                self.queue.create_job(
+                    "CRAWL",
+                    match_id,
+                    {"phase": "evidence_crawl", "run_id": run_id},
+                    priority=JobPriority.HIGH,
+                    run_id=run_id,
+                )
+            return
+
+        if state == MatchState.COLLECTING:
+            crawl_jobs = [j for j in jobs if j["job_type"] == "CRAWL"]
+            if crawl_jobs and all(j["status"] in terminal for j in crawl_jobs):
+                if any(j["status"] == JobStatus.SUCCESS for j in crawl_jobs):
+                    self.state_machine.transition_to(run_id, MatchState.NORMALIZING, "Crawling complete")
+                    self.state_machine.transition_to(run_id, MatchState.CALCULATING, "Data normalized")
+                else:
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Crawling produced no usable result")
+            return
+
+        if state == MatchState.CALCULATING:
+            statistics_jobs = [j for j in jobs if j["job_type"] == "STATISTICS"]
+            if statistics_jobs and all(j["status"] in terminal for j in statistics_jobs):
+                successful = [j for j in statistics_jobs if j["status"] == JobStatus.SUCCESS]
+                if successful:
+                    self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
                     self.queue.create_job(
-                        "CRAWL",
+                        "AI_ANALYSIS",
                         match_id,
-                        {"phase": "evidence_crawl", "run_id": run_id},
+                        {
+                            "phase": "analysis",
+                            "run_id": run_id,
+                            "match_id": match_id,
+                            "run_db_id": self._get_run_db_id(run_id),
+                        },
                         priority=JobPriority.HIGH,
                         run_id=run_id,
                     )
-
-        elif state == MatchState.COLLECTING:
-            if any(j["job_type"] == "CRAWL" and j["status"] == JobStatus.SUCCESS for j in jobs):
-                self.state_machine.transition_to(run_id, MatchState.NORMALIZING, "Crawling complete")
-                self.state_machine.transition_to(run_id, MatchState.CALCULATING, "Data normalized")
-
-        elif state == MatchState.CALCULATING:
-            if any(j["job_type"] == "STATISTICS" and j["status"] == JobStatus.SUCCESS for j in jobs):
-                self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
-                self.queue.create_job("AI_ANALYSIS", match_id, {"phase": "analysis", "run_id": run_id}, priority=JobPriority.HIGH, run_id=run_id)
-
-        elif state == MatchState.ANALYZING:
-            ai_job = next((j for j in jobs if j["job_type"] == "AI_ANALYSIS" and j["status"] == JobStatus.SUCCESS), None)
-            if ai_job:
-                self.state_machine.transition_to(run_id, MatchState.AUDITING, "AI Analysis complete")
-                ai_res = json.loads(ai_job["result_json"]) if ai_job["result_json"] else {}
-                self.queue.create_job("AUDIT", match_id, {
-                    "match_id": match_id,
-                    "ai_analysis": ai_res,
-                    "run_id": run_id,
-                    "cycle": cycle,
-                    "db_path": self.db_path,
-                }, priority=JobPriority.CRITICAL, run_id=run_id)
-
-        elif state == MatchState.AUDITING:
-            audit_job = next((j for j in jobs if j["job_type"] == "AUDIT" and j["status"] == JobStatus.SUCCESS), None)
-            if audit_job:
-                audit_res = json.loads(audit_job["result_json"]) if audit_job["result_json"] else {}
-                audit_status = audit_res.get("status")
-
-                if audit_status == "AUDIT_COMPLETE":
-                    self.state_machine.transition_to(run_id, MatchState.FINALIZING, "Audit passed")
-                    self.state_machine.transition_to(run_id, MatchState.COMPLETED, "Pipeline successful")
-                elif audit_status == "RESEARCH_REQUIRED":
-                    if cycle < max_cycles:
-                        self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Research required — cycle {cycle}")
-                        research_tasks_payload = audit_res.get("required_research", [{"domain": "GENERAL", "reason": "audit_required"}])
-                        for rt in research_tasks_payload:
-                            self.queue.create_job(
-                                "RESEARCH",
-                                match_id,
-                                {**rt, "run_id": run_id, "cycle": cycle},
-                                priority=JobPriority.HIGH,
-                                run_id=run_id,
-                            )
-                    else:
-                        self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Max cycles ({max_cycles}) reached")
                 else:
-                    # Audit selhání nebo neznámý stav → UNRESOLVED
-                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Audit finished with status: {audit_status}")
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Statistics unavailable")
+            return
 
-        elif state == MatchState.RESEARCHING:
-            research_jobs = [j for j in jobs if j["job_type"] == "RESEARCH" and j["status"] == JobStatus.SUCCESS]
+        if state == MatchState.ANALYZING:
+            ai_job = next(
+                (j for j in jobs if j["job_type"] == "AI_ANALYSIS" and j["status"] == JobStatus.SUCCESS),
+                None,
+            )
+            if ai_job:
+                ai_res = json.loads(ai_job["result_json"]) if ai_job["result_json"] else {}
+                self.state_machine.transition_to(run_id, MatchState.AUDITING, "AI Analysis complete")
+                self.queue.create_job(
+                    "AUDIT",
+                    match_id,
+                    {
+                        "match_id": match_id,
+                        "ai_analysis": ai_res,
+                        "run_id": run_id,
+                        "cycle": cycle,
+                        "db_path": self.db_path,
+                    },
+                    priority=JobPriority.CRITICAL,
+                    run_id=run_id,
+                )
+            return
+
+        if state == MatchState.AUDITING:
+            audit_job = next(
+                (j for j in jobs if j["job_type"] == "AUDIT" and j["status"] == JobStatus.SUCCESS),
+                None,
+            )
+            if not audit_job:
+                return
+            audit_res = json.loads(audit_job["result_json"]) if audit_job["result_json"] else {}
+            audit_status = audit_res.get("status")
+            if audit_status in {"AUDIT_COMPLETE", "PASS", "OK", "COMPLETED"}:
+                self.state_machine.transition_to(run_id, MatchState.FINALIZING, "Audit passed")
+                self.state_machine.transition_to(run_id, MatchState.COMPLETED, "Pipeline successful")
+            elif audit_status == "RESEARCH_REQUIRED":
+                if cycle < max_cycles:
+                    self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Research required - cycle {cycle}")
+                    required_research = audit_res.get("required_research") or audit_res.get("research_jobs") or []
+                    if not required_research:
+                        required_research = [{"domain": "GENERAL", "reason": "audit_required"}]
+                    for item in required_research:
+                        self.queue.create_job(
+                            "RESEARCH",
+                            match_id,
+                            {**item, "run_id": run_id, "cycle": cycle},
+                            priority=JobPriority.HIGH,
+                            run_id=run_id,
+                        )
+                else:
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Max cycles ({max_cycles}) reached")
+            else:
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Audit finished with status: {audit_status}")
+            return
+
+        if state == MatchState.RESEARCHING:
+            research_jobs = [
+                j for j in jobs
+                if j["job_type"] == "RESEARCH"
+                and j["status"] in terminal
+            ]
             if research_jobs:
-                conn2 = sqlite3.connect(self.db_path)
-                conn2.execute("UPDATE pipeline_runs SET cycle = cycle + 1 WHERE run_id = ?", (run_id,))
-                conn2.commit()
-                conn2.close()
                 self.state_machine.transition_to(run_id, MatchState.REANALYZING, "Research data collected")
-                self.queue.create_job("AI_ANALYSIS", match_id, {"phase": "re_analysis", "run_id": run_id, "cycle": cycle + 1}, priority=JobPriority.HIGH, run_id=run_id)
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.execute(
+                        "UPDATE pipeline_runs SET cycle = cycle + 1, updated_at = ? WHERE run_id = ?",
+                        (datetime.now(timezone.utc).isoformat(), run_id),
+                    )
+                    conn.commit()
+                self.queue.create_job(
+                    "AI_ANALYSIS",
+                    match_id,
+                    {
+                        "phase": "re_analysis",
+                        "run_id": run_id,
+                        "match_id": match_id,
+                        "run_db_id": self._get_run_db_id(run_id),
+                        "cycle": cycle + 1,
+                    },
+                    priority=JobPriority.HIGH,
+                    run_id=run_id,
+                )
                 self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Re-running AI Analysis")
+            return
 
-        elif state == MatchState.FINALIZING:
-            if self._are_all_jobs_completed(run_id):
-                self.state_machine.transition_to(run_id, MatchState.COMPLETED, "All jobs completed")
+        if state == MatchState.FINALIZING and self._are_all_jobs_completed(run_id):
+            self.state_machine.transition_to(run_id, MatchState.COMPLETED, "All jobs completed")
+
+    def _get_run_db_id(self, run_id: str) -> int:
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT id FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if not row:
+            raise KeyError(run_id)
+        return int(row[0])
 
     def _are_all_jobs_completed(self, run_id: str) -> bool:
         conn = sqlite3.connect(self.db_path)
