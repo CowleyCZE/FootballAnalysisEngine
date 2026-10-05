@@ -95,7 +95,7 @@ class MasterOrchestrator:
                 job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type,"RESEARCH")
                 job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "football-analysis:%s:%s" % (run_id,task.task_uuid)))
                 fingerprint = self.queue.generate_fingerprint(job_type, match_id, payload, run_id)
-                self.queue.store.create_job_on_connection(conn,job_id,job_type,match_id,run_id,payload,fingerprint,int(task.priority),3)
+                self.queue.store.create_job_on_connection(conn, job_id, job_type, match_id, run_id, payload, fingerprint, int(task.priority), 3)
                 conn.execute("UPDATE research_tasks SET job_id=?,status='QUEUED',updated_at=CURRENT_TIMESTAMP WHERE id=?",(job_id,task_id))
                 created.append(job_id)
             conn.commit()
