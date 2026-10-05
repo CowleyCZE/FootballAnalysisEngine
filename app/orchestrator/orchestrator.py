@@ -165,7 +165,7 @@ class MasterOrchestrator:
         max_cycles = run["max_cycles"]
 
         cursor.execute(
-            "SELECT id, job_type, status, result_json FROM jobs WHERE match_id = ? AND run_id = (SELECT id FROM runs WHERE run_id = ?)",
+            "SELECT id, job_type, status, result_json FROM jobs WHERE match_id = ? AND run_id = ?",
             (match_id, run_id),
         )
         jobs = cursor.fetchall()
@@ -176,7 +176,7 @@ class MasterOrchestrator:
             research_jobs = [j for j in jobs if j["job_type"] in ("RESEARCH", "STATISTICS")]
             if research_jobs and all(j["status"] in (JobStatus.SUCCESS, JobStatus.FAILED) for j in research_jobs):
                 self.state_machine.transition_to(run_id, MatchState.COLLECTING, "Research tasks complete")
-                self.queue.create_job("CRAWL", match_id, {"phase": "evidence_crawl", "run_id": run_id}, priority=JobPriority.HIGH)
+                self.queue.create_job("CRAWL", match_id, {"phase": "evidence_crawl", "run_id": run_id}, priority=JobPriority.HIGH, run_id=run_id)
 
         elif state == MatchState.COLLECTING:
             if any(j["job_type"] == "CRAWL" and j["status"] == JobStatus.SUCCESS for j in jobs):
@@ -186,7 +186,7 @@ class MasterOrchestrator:
         elif state == MatchState.CALCULATING:
             if any(j["job_type"] == "STATISTICS" and j["status"] == JobStatus.SUCCESS for j in jobs):
                 self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
-                self.queue.create_job("AI_ANALYSIS", match_id, {"phase": "analysis", "run_id": run_id}, priority=JobPriority.HIGH)
+                self.queue.create_job("AI_ANALYSIS", match_id, {"phase": "analysis", "run_id": run_id}, priority=JobPriority.HIGH, run_id=run_id)
 
         elif state == MatchState.ANALYZING:
             ai_job = next((j for j in jobs if j["job_type"] == "AI_ANALYSIS" and j["status"] == JobStatus.SUCCESS), None)
@@ -199,7 +199,7 @@ class MasterOrchestrator:
                     "run_id": run_id,
                     "cycle": cycle,
                     "db_path": self.db_path,
-                }, priority=JobPriority.CRITICAL)
+                }, priority=JobPriority.CRITICAL, run_id=run_id)
 
         elif state == MatchState.AUDITING:
             audit_job = next((j for j in jobs if j["job_type"] == "AUDIT" and j["status"] == JobStatus.SUCCESS), None)
@@ -230,7 +230,7 @@ class MasterOrchestrator:
                 conn2.commit()
                 conn2.close()
                 self.state_machine.transition_to(run_id, MatchState.REANALYZING, "Research data collected")
-                self.queue.create_job("AI_ANALYSIS", match_id, {"phase": "re_analysis", "run_id": run_id, "cycle": cycle + 1}, priority=JobPriority.HIGH)
+                self.queue.create_job("AI_ANALYSIS", match_id, {"phase": "re_analysis", "run_id": run_id, "cycle": cycle + 1}, priority=JobPriority.HIGH, run_id=run_id)
                 self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Re-running AI Analysis")
 
         elif state == MatchState.FINALIZING:
@@ -242,7 +242,7 @@ class MasterOrchestrator:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT status FROM jobs WHERE run_id = (SELECT id FROM runs WHERE run_id = ?)",
+            "SELECT status FROM jobs WHERE run_id = ?",
             (run_id,),
         )
         rows = cursor.fetchall()
