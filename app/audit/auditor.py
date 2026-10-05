@@ -35,6 +35,22 @@ class AdversarialAuditor:
         run_id = str(uuid.uuid4())
         issues = []
 
+        # An unavailable/invalid AI result is a terminal safety condition for
+        # this run. The system must never turn an infrastructure failure into a
+        # successful football analysis or invent replacement data.
+        if ai_analysis.get("status") == "insufficient_data":
+            reason = "AI analytická vrstva neposkytla použitelný výstup."
+            missing_data = ai_analysis.get("data_quality", {}).get("missing_data") or []
+            if missing_data:
+                reason = f"{reason} {' '.join(str(item) for item in missing_data)}"
+            issues.append({
+                "type": "ai_analysis_unavailable",
+                "severity": "CRITICAL",
+                "description": reason,
+                "evidence_ids": [],
+                "requires_research": False,
+            })
+
         # 1. Evidence Audit & Hallucination Check
         available_ev_ids = []
         for c in claims:
@@ -84,8 +100,12 @@ class AdversarialAuditor:
         # Tvorba výzkumných úloh
         research_jobs = RepairQueue.generate_research_jobs(match_id, issues)
 
-        # Stanovení statusu
-        if current_cycle >= max_cycles and len(research_jobs) > 0:
+        # Stanovení statusu. Nedostupná AI není výzkumný problém; nelze ji
+        # bezpečně vyřešit dalším research cyklem, proto končí běh UNRESOLVED.
+        if ai_analysis.get("status") == "insufficient_data":
+            status = "UNRESOLVED"
+            research_jobs = []
+        elif current_cycle >= max_cycles and len(research_jobs) > 0:
             status = "UNRESOLVED"
         elif len(research_jobs) > 0:
             status = "RESEARCH_REQUIRED"
