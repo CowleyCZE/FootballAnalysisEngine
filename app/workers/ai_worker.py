@@ -74,13 +74,13 @@ class AIWorker:
                     f"AI výstup nebyl validní: {error}",
                     prompt,
                 )
-        except Exception as exc:
-            # External AI availability is not a reason to fabricate data or leave
-            # the pipeline permanently stuck in ANALYZING. Return an explicit
-            # insufficient-data result; AuditWorker converts it to UNRESOLVED.
+        except (RuntimeError, ValueError) as exc:
+            # External AI availability or response validation must never cause
+            # fabricated football data or a permanently stuck ANALYZING state.
+            # The explicit insufficient-data result is audited as UNRESOLVED.
             return AIWorker._insufficient_data_result(
                 match_id,
-                f"Lokální Ollama služba není dostupná: {exc}",
+                f"Lokální AI služba neposkytla použitelný výstup: {exc}",
                 prompt,
             )
 
