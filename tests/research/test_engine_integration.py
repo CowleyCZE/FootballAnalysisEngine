@@ -18,6 +18,13 @@ def mock_search_client():
             "title": "Arsenal Team News",
             "url": "https://www.bbc.com/sport/football/12345",
             "content": "Bukayo Saka is ruled out of Saturday match due to injury.",
+            "published_at": "2026-10-02T10:00:00Z",
+        },
+        {
+            "title": "Arsenal Official Team News",
+            "url": "https://www.arsenal.com/news/injury-update",
+            "content": "Bukayo Saka is unavailable for selection.",
+            "published_at": "2026-10-02T11:00:00Z",
         }
     ]
     return client
@@ -142,3 +149,49 @@ def test_research_engine_execution(mock_search_client, mock_crawler, dummy_task,
         document = conn.execute("SELECT * FROM documents WHERE id=?", (evidence["document_id"],)).fetchone()
         assert document is not None
         assert document["url"] == "https://www.bbc.com/sport/football/12345"
+
+
+def test_research_engine_blocks_when_source_policy_not_satisfied(tmp_path):
+    db_file = str(tmp_path / "policy.db")
+    from app.database.research_repository import ResearchRepository
+
+    repo = ResearchRepository(db_path=db_file)
+    with sqlite3.connect(db_file) as conn:
+        conn.execute(
+            "INSERT INTO runs(id, run_id, status, started_at) VALUES (101, 'RUN-101', 'RUNNING', '2026-10-03T10:00:00')"
+        )
+        conn.execute("INSERT INTO teams(id, name, normalized_name) VALUES (1, 'Arsenal', 'arsenal')")
+        conn.execute("INSERT INTO teams(id, name, normalized_name) VALUES (2, 'Chelsea', 'chelsea')")
+        conn.execute(
+            "INSERT INTO matches(id, competition, home_team_id, away_team_id, scheduled_at) VALUES (50, 'Premier League', 1, 2, '2026-10-03T15:00:00')"
+        )
+        conn.execute(
+            """INSERT INTO research_tasks(
+                id, run_id, run_db_id, match_id, task_uuid, domain, task_type, description,
+                required, priority, capabilities_json, data_cutoff_at, home_team, away_team,
+                competition, scheduled_at, status
+            ) VALUES (1, 'RUN-101', 101, 50, 'TASK-50-ABSENCES_HOME-C1', 'ABSENCES_HOME',
+                      'NEWS_COLLECTION', 'Absence Arsenal', 1, 90, '[]',
+                      '2026-10-03T12:00:00', 'Arsenal', 'Chelsea', 'Premier League',
+                      '2026-10-03T15:00:00', 'RUNNING')"""
+        )
+        conn.commit()
+
+    engine = ResearchEngine(
+        search_client=MagicMock(),
+        crawler=MagicMock(),
+        repository=repo,
+    )
+    engine.search_client.search.return_value = [
+        {
+            "title": "Arsenal Team News",
+            "url": "https://www.bbc.com/sport/football/12345",
+            "content": "Saka unavailable.",
+            "published_at": "2026-10-02T10:00:00Z",
+        }
+    ]
+
+    result = engine.execute(dummy_task)
+    assert result.status == ResearchStatus.NO_RESULT
+    assert "1/2 sources" in result.warnings[0]
+    assert "1/2 independent publishers" in result.warnings[0]
