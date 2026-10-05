@@ -332,7 +332,10 @@ CREATE TABLE IF NOT EXISTS workers (
     worker_id TEXT NOT NULL UNIQUE,
     worker_type TEXT,
     status TEXT NOT NULL DEFAULT 'IDLE',
+    capabilities_json TEXT,
     last_heartbeat TEXT,
+    current_job_id TEXT,
+    metadata_json TEXT,
     registered_at TEXT NOT NULL
 );
 
@@ -362,9 +365,6 @@ CREATE TABLE IF NOT EXISTS system_events (
 );
 
 -- Worker capability registry/runtime metadata
-ALTER TABLE workers ADD COLUMN capabilities_json TEXT;
-ALTER TABLE workers ADD COLUMN current_job_id TEXT;
-ALTER TABLE workers ADD COLUMN metadata_json TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_system_events_run ON system_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_system_events_job ON system_events(job_id);
