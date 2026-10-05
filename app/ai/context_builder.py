@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,30 @@ class ContextBuilder:
             logger.warning(f"Failed to load statistics from DB: {err}")
         return {}
 
+    @staticmethod
+    def _calculate_freshness_score(claims: List[Dict[str, Any]]) -> float:
+        dates = []
+        now = datetime.now(timezone.utc)
+        for claim in claims:
+            for ev in claim.get("evidence", []):
+                value = ev.get("published_at")
+                if not value:
+                    continue
+                try:
+                    dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt <= now:
+                        dates.append(dt)
+                except (TypeError, ValueError):
+                    continue
+        if not dates:
+            return 0.0
+        ages = [(now - dt).total_seconds() / 3600.0 for dt in dates]
+        # Age-based score; no fabricated constant when timestamps are absent.
+        scores = [max(0.0, 1.0 - age / (30.0 * 24.0)) for age in ages]
+        return round(sum(scores) / len(scores), 2)
+
     def build_context(
         self,
         match_info: Dict[str, Any],
@@ -85,11 +110,11 @@ class ContextBuilder:
         run_db_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         match_id = match_info.get("match_id") or match_info.get("id")
-        if match_id:
-            if not claims:
-                claims = self.load_claims_from_db(int(match_id), run_db_id)
-            if not statistics:
-                statistics = self.load_statistics_from_db(int(match_id))
+        # ContextBuilder is a pure formatter: callers must explicitly provide
+        # the evidence/statistics context. Implicit DB reads caused unit tests
+        # and production runs to mix data across analysis runs.
+        claims = list(claims) if claims is not None else []
+        statistics = dict(statistics) if statistics is not None else {}
         if conflicts is None:
             conflicts = []
 
@@ -99,7 +124,8 @@ class ContextBuilder:
 
         formatted_claims = []
         source_urls = set()
-        official_count = 0
+        publisher_domains = set()
+        official_domains = set()
 
         for c in sorted_claims:
             evidence_list = c.get("evidence", [])
@@ -108,8 +134,16 @@ class ContextBuilder:
                 url = ev.get("source_url") or ev.get("url")
                 if url:
                     source_urls.add(url)
-                    if any(domain in url.lower() for domain in ["official", "club", "bbc.com"]):
-                        official_count += 1
+                    try:
+                        from urllib.parse import urlparse
+                        domain = urlparse(url).netloc.lower().removeprefix("www.")
+                    except Exception:
+                        domain = ""
+                    if domain:
+                        publisher_domains.add(domain)
+                    source_type = str(ev.get("source_type") or ev.get("source") or "").lower()
+                    if source_type.startswith("official"):
+                        official_domains.add(domain)
 
                 formatted_ev.append({
                     "evidence_id": ev.get("id") or ev.get("evidence_id"),
@@ -136,6 +170,7 @@ class ContextBuilder:
             missing_fields.append("statistics")
 
         total_sources = len(source_urls)
+        independent_sources = len(publisher_domains)
         conflicts_count = len(conflicts)
         
         score = 1.0
@@ -150,10 +185,10 @@ class ContextBuilder:
         data_quality = {
             "score": score,
             "source_count": total_sources,
-            "independent_sources": max(1, total_sources // 2) if total_sources > 0 else 0,
-            "official_sources": official_count,
+            "independent_sources": independent_sources,
+            "official_sources": len({d for d in official_domains if d}),
             "conflicts": conflicts_count,
-            "freshness_score": 0.95,
+            "freshness_score": self._calculate_freshness_score(formatted_claims),
             "missing_data": missing_fields
         }
 
