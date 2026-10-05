@@ -130,7 +130,6 @@ class ResearchEngine:
             strategy = self.source_policy.get_strategy(task.domain)
             candidates = self.source_selector.select_candidates(selector_results)
             metrics.sources_selected = len(candidates)
-            source_domains = {c.get("domain") for c in candidates if c.get("domain")}
             publisher_ids = {c.get("publisher_id") for c in candidates if c.get("publisher_id")}
             min_sources = int(strategy.get("min_sources", 1))
             min_independent = int(strategy.get("min_independent_sources", 1))
