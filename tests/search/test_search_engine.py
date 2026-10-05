@@ -116,3 +116,58 @@ def test_search_engine_normalizes_deduplicates_and_ranks():
     assert results[0].title == "Sparta Praha injury update"
     assert results[0].relevance > results[1].relevance
     assert results[0].source_type == "official_club"
+
+
+def test_search_engine_excludes_results_after_cutoff():
+    from app.search.engine import SearchEngine
+    import asyncio
+    from datetime import datetime
+
+    class CutoffClient:
+        async def search(self, query, language="all", time_range=None):
+            return {
+                "results": [
+                    {
+                        "title": "Arsenal squad news",
+                        "url": "https://news.example/before",
+                        "content": "injury update",
+                        "published_at": "2026-10-01T10:00:00Z",
+                        "score": 1.0,
+                    },
+                    {
+                        "title": "Arsenal squad news",
+                        "url": "https://news.example/after",
+                        "content": "injury update",
+                        "published_at": "2026-10-04T10:00:00Z",
+                        "score": 2.0,
+                    },
+                ]
+            }
+
+    engine = SearchEngine(client=CutoffClient())
+    results = asyncio.run(
+        engine.search(
+            QuerySpec(query="Arsenal injuries"),
+            team="Arsenal",
+            topic_terms=["injury"],
+            data_cutoff_at=datetime.fromisoformat("2026-10-03T12:00:00+00:00"),
+        )
+    )
+    assert [r.url for r in results] == ["https://news.example/before"]
+
+
+def test_relevance_handles_zulu_cutoff_dates():
+    from datetime import datetime, timezone
+    result = SearchResult(
+        title="Arsenal news",
+        url="https://news.example/article",
+        content="injury",
+        published_at="2026-10-03T11:00:00Z",
+    )
+    score = calculate_relevance(
+        result,
+        "Arsenal",
+        ["injury"],
+        data_cutoff_at=datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc),
+    )
+    assert score > 0
