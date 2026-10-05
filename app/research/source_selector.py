@@ -41,10 +41,12 @@ class SourceSelector:
 
             info = self.registry.get_domain_info(url)
             score = self._calculate_score(info["authority"], res)
+            publisher_id = self.registry.get_publisher_id(url) if hasattr(self.registry, "get_publisher_id") else info["domain"]
 
             candidate = {
                 "url": url,
                 "domain": info["domain"],
+                "publisher_id": publisher_id,
                 "source_type": info["source_type"],
                 "score": score,
                 "search_relevance": res.get("relevance", 0),
