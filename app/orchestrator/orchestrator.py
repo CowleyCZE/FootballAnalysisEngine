@@ -177,17 +177,18 @@ class MasterOrchestrator:
         conn.close()
 
         if state == MatchState.DISCOVERY:
-            research_jobs = [j for j in jobs if j["job_type"] in ("RESEARCH", "STATISTICS")]
-            terminal = {JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.CANCELLED}
-            if research_jobs and all(j["status"] in terminal for j in research_jobs):
-                self.state_machine.transition_to(run_id, MatchState.COLLECTING, "Research tasks complete")
-                self.queue.create_job(
-                    "CRAWL",
-                    match_id,
-                    {"phase": "evidence_crawl", "run_id": run_id, "url": "https://example.com"},
-                    priority=JobPriority.HIGH,
-                    run_id=run_id,
-                )
+            initial_jobs = [j for j in jobs if j["job_type"] in ("RESEARCH", "STATISTICS")]
+            if initial_jobs:
+                terminal = {JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.CANCELLED}
+                if all(j["status"] in terminal for j in initial_jobs):
+                    self.state_machine.transition_to(run_id, MatchState.COLLECTING, "Research tasks complete")
+                    self.queue.create_job(
+                        "CRAWL",
+                        match_id,
+                        {"phase": "evidence_crawl", "run_id": run_id},
+                        priority=JobPriority.HIGH,
+                        run_id=run_id,
+                    )
 
         elif state == MatchState.COLLECTING:
             if any(j["job_type"] == "CRAWL" and j["status"] == JobStatus.SUCCESS for j in jobs):
