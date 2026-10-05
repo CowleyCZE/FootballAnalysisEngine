@@ -190,8 +190,7 @@ class MasterOrchestrator:
         if state == MatchState.CALCULATING:
             statistics_jobs = [j for j in jobs if j["job_type"] == "STATISTICS"]
             if statistics_jobs and all(j["status"] in terminal for j in statistics_jobs):
-                successful = [j for j in statistics_jobs if j["status"] == JobStatus.SUCCESS]
-                if successful:
+                if any(j["status"] == JobStatus.SUCCESS for j in statistics_jobs):
                     self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
                     self.queue.create_job(
                         "AI_ANALYSIS",
@@ -201,12 +200,13 @@ class MasterOrchestrator:
                             "run_id": run_id,
                             "match_id": match_id,
                             "run_db_id": self._get_run_db_id(run_id),
+                            "db_path": self.db_path,
                         },
                         priority=JobPriority.HIGH,
                         run_id=run_id,
                     )
                 else:
-                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Statistics unavailable")
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Statistics failed")
             return
 
         if state == MatchState.ANALYZING:

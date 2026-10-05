@@ -11,7 +11,8 @@ class StatisticsWorker:
         if missing:
             raise ValueError(f"STATISTICS job missing fields: {', '.join(missing)}")
 
-        engine = StatisticalEngine()
+        db_path = payload.get("db_path", "database/football.db")
+        engine = StatisticalEngine(db_path=db_path)
         return engine.run_match_statistics(
             match_id=int(payload["match_id"]),
             run_id=int(payload["run_db_id"]),

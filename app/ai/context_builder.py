@@ -4,9 +4,76 @@ from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
+import sqlite3
+
 class ContextBuilder:
-    def __init__(self, repository=None):
+    def __init__(self, repository=None, db_path: str = "database/football.db"):
         self.repository = repository
+        self.db_path = db_path
+
+    def load_claims_from_db(self, match_id: int, run_db_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Load real claims and their supporting evidence from database."""
+        claims_list = []
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                query = "SELECT * FROM claims WHERE match_id = ?"
+                params = [match_id]
+                if run_db_id is not None:
+                    query += " AND run_id = ?"
+                    params.append(run_db_id)
+                claim_rows = conn.execute(query, params).fetchall()
+
+                for c_row in claim_rows:
+                    claim_id = c_row["id"]
+                    ev_rows = conn.execute("""
+                        SELECT e.*, d.url as source_url, d.published_at
+                        FROM claim_evidence ce
+                        JOIN evidence e ON ce.evidence_id = e.id
+                        JOIN documents d ON e.document_id = d.id
+                        WHERE ce.claim_id = ?
+                    """, (claim_id,)).fetchall()
+
+                    evidence_list = []
+                    for ev in ev_rows:
+                        evidence_list.append({
+                            "evidence_id": ev["id"],
+                            "source_url": ev["source_url"],
+                            "text_fragment": ev["quoted_text"] or ev["extracted_value"],
+                            "published_at": ev["published_at"],
+                            "confidence": ev["confidence"]
+                        })
+
+                    parts = (c_row["claim_text"] or "").split(" ", 2)
+                    subject = parts[0] if parts else ""
+                    predicate = parts[1] if len(parts) > 1 else c_row["claim_type"] or ""
+                    obj = parts[2] if len(parts) > 2 else c_row["normalized_claim"] or ""
+
+                    claims_list.append({
+                        "claim_id": claim_id,
+                        "subject": subject,
+                        "predicate": predicate,
+                        "object": obj,
+                        "normalized_value": c_row["normalized_claim"],
+                        "confidence": c_row["confidence"] or 0.5,
+                        "status": c_row["status"] or "VALID",
+                        "evidence": evidence_list
+                    })
+        except Exception as err:
+            logger.warning(f"Failed to load claims from DB: {err}")
+        return claims_list
+
+    def load_statistics_from_db(self, match_id: int) -> Dict[str, Any]:
+        """Load statistics from database if available."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("SELECT * FROM match_statistics WHERE match_id = ?", (match_id,)).fetchone()
+                if row:
+                    return dict(row)
+        except Exception as err:
+            logger.warning(f"Failed to load statistics from DB: {err}")
+        return {}
 
     def build_context(
         self,
@@ -15,7 +82,14 @@ class ContextBuilder:
         statistics: Dict[str, Any],
         conflicts: List[Dict[str, Any]] = None,
         max_claims: int = 30,
+        run_db_id: Optional[int] = None,
     ) -> Dict[str, Any]:
+        match_id = match_info.get("match_id") or match_info.get("id")
+        if match_id:
+            if not claims:
+                claims = self.load_claims_from_db(int(match_id), run_db_id)
+            if not statistics:
+                statistics = self.load_statistics_from_db(int(match_id))
         if conflicts is None:
             conflicts = []
 
