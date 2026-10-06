@@ -1,7 +1,5 @@
-from fastapi import FastAPI
+from app.api.server import app
 from app.orchestrator.router import router as orchestrator_router
 
-app = FastAPI(title="Football Research Orchestrator")
-
-# Připojení routeru
+# Připojení routeru k hlavní FastAPI aplikaci
 app.include_router(orchestrator_router)

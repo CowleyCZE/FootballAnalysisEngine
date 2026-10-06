@@ -35,6 +35,7 @@ class JobStore:
     def register_worker(self, worker_id: str, capabilities: Iterable[str], worker_type: str = "generic", metadata: Optional[Dict[str, Any]] = None, worker_name: Optional[str] = None) -> None:
         now = self.now()
         name = worker_name or worker_id
+        w_type = worker_type or "generic"
         with self.connect() as conn:
             conn.execute(
                 """
@@ -48,7 +49,7 @@ class JobStore:
                     last_heartbeat=excluded.last_heartbeat,
                     metadata_json=excluded.metadata_json
                 """,
-                (worker_id, name, worker_type, json.dumps(sorted(set(capabilities))), now, json.dumps(metadata or {}), now)
+                (worker_id, name, w_type, json.dumps(sorted(set(capabilities))), now, json.dumps(metadata or {}), now)
             )
 
     def heartbeat(self, worker_id: str, current_job_id: Optional[str] = None) -> None:
@@ -125,7 +126,7 @@ class JobStore:
             self._event(conn, "JOB_CLAIMED", selected["job_id"], worker_id, {"attempt_number": attempt, "capabilities": sorted(caps)})
             return dict(selected) | {"payload": payload, "attempt_number": attempt}
 
-    def finish(self, job_id: str, worker_id: str, success: bool, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None) -> None:
+    def finish(self, job_id: str, worker_id: str, success: bool, result: Optional[Any] = None, error: Optional[str] = None) -> None:
         now = self.now()
         with self.connect() as conn:
             row = conn.execute("SELECT status, attempts, max_attempts, result_json, worker_id FROM jobs WHERE job_id=?", (job_id,)).fetchone()
@@ -133,8 +134,10 @@ class JobStore:
                 raise KeyError(job_id)
             if row["status"] in {"SUCCESS", "FAILED"}:
                 return
-            if row["worker_id"] != worker_id:
+
+            if row["worker_id"] is not None and worker_id is not None and worker_id != "system" and row["worker_id"] != worker_id:
                 return
+
             if success:
                 status, next_attempt = 'SUCCESS', None
             elif row['attempts'] < row['max_attempts']:
@@ -144,7 +147,27 @@ class JobStore:
             else:
                 status, next_attempt = 'FAILED', None
             finished_at = now if status in ('SUCCESS', 'FAILED') else None
-            conn.execute("UPDATE jobs SET status=?, result_json=CASE WHEN ? IS NOT NULL THEN ? ELSE result_json END, error_text=?, finished_at=?, next_attempt_at=?, worker_id=NULL WHERE job_id=? AND status NOT IN ('SUCCESS','FAILED') AND worker_id=?", (status, json.dumps(result) if result is not None else None, json.dumps(result) if result is not None else None, error, finished_at, next_attempt, job_id, worker_id))
+
+            result_str = None
+            if result is not None:
+                if isinstance(result, str):
+                    result_str = result
+                else:
+                    result_str = json.dumps(result)
+
+            conn.execute(
+                """
+                UPDATE jobs
+                SET status=?,
+                    result_json=CASE WHEN ? IS NOT NULL THEN ? ELSE result_json END,
+                    error_text=?,
+                    finished_at=?,
+                    next_attempt_at=?,
+                    worker_id=NULL
+                WHERE job_id=? AND status NOT IN ('SUCCESS','FAILED')
+                """,
+                (status, result_str, result_str, error, finished_at, next_attempt, job_id)
+            )
             conn.execute("UPDATE workers SET status='IDLE', current_job_id=NULL, last_heartbeat=? WHERE worker_id=?", (now, worker_id))
             self._event(conn, "JOB_FINISHED" if status in ('SUCCESS', 'FAILED') else "JOB_RETRY_SCHEDULED", job_id, worker_id, {"status": status, "attempts": int(row["attempts"]), "error": error})
 

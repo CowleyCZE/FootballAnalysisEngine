@@ -34,6 +34,12 @@ class ResearchWorker:
         self.repository = ResearchRepository(db_path=db_path)
         self.engine = engine or ResearchEngine(repository=self.repository, crawler=_CrawlerAdapter())
 
+    @classmethod
+    def execute(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
+        db_path = payload.get("db_path") or "database/football.db"
+        worker = cls(db_path=db_path)
+        return worker.run_execute(payload)
+
     def _resolve_match_context(self, match_id: int, payload: Dict[str, Any], match: Dict[str, Any]) -> Dict[str, Any]:
         home_team = payload.get("home_team") or match.get("home_team")
         away_team = payload.get("away_team") or match.get("away_team")
@@ -80,7 +86,7 @@ class ResearchWorker:
             "data_cutoff_at": cutoff,
         }
 
-    def execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def run_execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         match = payload.get("match") or {}
         match_id = int(payload.get("match_id") or match.get("id") or 0)
         ctx = self._resolve_match_context(match_id, payload, match)

@@ -79,8 +79,11 @@ class MasterOrchestrator:
             conn.close()
 
     def _dispatch_research_tasks(self, tasks: List[TaskRequirement], match_id: int, run_id: str, match_identity: MatchIdentity) -> List[str]:
-        """Persist ResearchTasks and jobs in one SQLite transaction."""
+        """Persist ResearchTasks and jobs in one SQLite transaction with explicit job dependencies."""
         created = []
+        task_uuid_to_job_id = {}
+        task_uuid_to_job_pk = {}
+
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA foreign_keys = ON")
@@ -89,17 +92,23 @@ class MasterOrchestrator:
             if not row:
                 raise KeyError(run_id)
             run_db_id = int(row["id"])
+
             for task in tasks:
                 row = conn.execute("SELECT id, job_id FROM research_tasks WHERE run_id=? AND task_uuid=?", (run_id, task.task_uuid)).fetchone()
                 if row and row["job_id"]:
                     created.append(row["job_id"])
+                    job_pk = conn.execute("SELECT id FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()[0]
+                    task_uuid_to_job_id[task.task_uuid] = row["job_id"]
+                    task_uuid_to_job_pk[task.task_uuid] = int(job_pk)
                     continue
+
                 if row:
                     task_id = int(row["id"])
                 else:
                     cur = conn.execute("INSERT INTO research_tasks(run_id,run_db_id,match_id,task_uuid,domain,task_type,description,required,priority,capabilities_json,data_cutoff_at,home_team,away_team,competition,scheduled_at,venue,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id,run_db_id,match_id,task.task_uuid,task.domain,task.task_type,task.description,1 if task.required else 0,task.priority,json.dumps(task.capabilities_required),match_identity.data_cutoff_at.isoformat(),match_identity.home_team,match_identity.away_team,match_identity.competition,match_identity.scheduled_at.isoformat(),match_identity.venue,"PLANNED"))
                     task_id = int(cur.lastrowid)
-                job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type,"RESEARCH")
+
+                job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type, "RESEARCH")
                 payload = {
                     "task_id": task_id,
                     "task_uuid": task.task_uuid,
@@ -120,13 +129,36 @@ class MasterOrchestrator:
                     "capabilities_required": task.capabilities_required,
                     "worker_capability": job_type,
                 }
-                job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "football-analysis:%s:%s" % (run_id,task.task_uuid)))
+                job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "football-analysis:%s:%s" % (run_id, task.task_uuid)))
                 fingerprint = self.queue.generate_fingerprint(job_type, match_id, payload, run_id)
                 self.queue.store.create_job_on_connection(conn, job_id, job_type, match_id, run_id, payload, fingerprint, int(task.priority), 3)
-                conn.execute("UPDATE research_tasks SET job_id=?,status='QUEUED',updated_at=CURRENT_TIMESTAMP WHERE id=?",(job_id,task_id))
+
+                job_pk = conn.execute("SELECT id FROM jobs WHERE job_id=?", (job_id,)).fetchone()[0]
+                task_uuid_to_job_id[task.task_uuid] = job_id
+                task_uuid_to_job_pk[task.task_uuid] = int(job_pk)
+
+                conn.execute("UPDATE research_tasks SET job_id=?,status='QUEUED',updated_at=CURRENT_TIMESTAMP WHERE id=?", (job_id, task_id))
                 created.append(job_id)
+
+            # Record task dependencies in job_dependencies
+            for task in tasks:
+                if task.depends_on:
+                    job_id = task_uuid_to_job_id[task.task_uuid]
+                    job_pk = task_uuid_to_job_pk[task.task_uuid]
+                    has_deps = False
+                    for dep_uuid in task.depends_on:
+                        parent_job_pk = task_uuid_to_job_pk.get(dep_uuid)
+                        if parent_job_pk and parent_job_pk != job_pk:
+                            conn.execute("INSERT OR IGNORE INTO job_dependencies(job_id, depends_on_job_id) VALUES(?, ?)", (job_pk, parent_job_pk))
+                            has_deps = True
+
+                    if has_deps:
+                        conn.execute("UPDATE jobs SET status='BLOCKED' WHERE id=? AND status='PENDING'", (job_pk,))
+                        conn.execute("UPDATE research_tasks SET status='BLOCKED' WHERE job_id=? AND status='QUEUED'", (job_id,))
+
             conn.commit()
         return created
+
     def start_pipeline(self, match_id: int) -> str:
         """Spustí pipeline pro existující zápas: Match Identity → Research Planner → Jobs."""
         match_identity = self._get_match_identity_from_id(match_id)
@@ -155,6 +187,12 @@ class MasterOrchestrator:
         tasks = self.planner.create_plan(match_identity)
         self._dispatch_research_tasks(tasks, match_id, run_id, match_identity)
         return run_id
+
+    def start_pipeline_from_request(self, request: AnalysisRequest) -> str:
+        """Vyhledá nebo založí zápas v DB a spustí pro něj kanonickou pipeline."""
+        resolver = MatchResolver(db_path=self.db_path)
+        match_identity = resolver.resolve_or_create(request)
+        return self.start_pipeline(match_identity.match_id)
 
     def tick(self, run_id: str):
         """Provede jeden deterministický krok pipeline a řídí joby pouze daného runu."""
@@ -203,8 +241,6 @@ class MasterOrchestrator:
             return
 
         if state == MatchState.COLLECTING:
-            # Legacy state retained for persisted runs. ResearchEngine owns
-            # source crawling; the orchestrator must not fabricate a CRAWL URL.
             research_jobs = [j for j in jobs if j["job_type"] in ("RESEARCH", "STATISTICS")]
             if research_jobs and all(j["status"] in terminal for j in research_jobs):
                 if any(j["status"] == JobStatus.SUCCESS for j in research_jobs):
@@ -217,7 +253,7 @@ class MasterOrchestrator:
         if state == MatchState.CALCULATING:
             statistics_jobs = [j for j in jobs if j["job_type"] == "STATISTICS"]
             if statistics_jobs and all(j["status"] in terminal for j in statistics_jobs):
-                if any(j["status"] == JobStatus.SUCCESS for j in statistics_jobs) or True:
+                if any(j["status"] == JobStatus.SUCCESS for j in statistics_jobs):
                     match_ident = self._get_match_identity_from_id(match_id)
                     self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
                     self.queue.create_job(
@@ -254,6 +290,8 @@ class MasterOrchestrator:
             )
             if ai_job:
                 ai_res = json.loads(ai_job["result_json"]) if ai_job["result_json"] else {}
+                match_ident = self._get_match_identity_from_id(match_id)
+                run_db_id = self._get_run_db_id(run_id)
                 self.state_machine.transition_to(run_id, MatchState.AUDITING, "AI Analysis complete")
                 self.queue.create_job(
                     "AUDIT",
@@ -262,6 +300,8 @@ class MasterOrchestrator:
                         "match_id": match_id,
                         "ai_analysis": ai_res,
                         "run_id": run_id,
+                        "run_db_id": run_db_id,
+                        "data_cutoff_at": match_ident.data_cutoff_at.isoformat() if match_ident else None,
                         "cycle": cycle,
                         "db_path": self.db_path,
                     },
@@ -277,11 +317,30 @@ class MasterOrchestrator:
             )
             if not audit_job:
                 return
-            audit_res = json.loads(audit_job["result_json"]) if audit_job["result_json"] else {}
+
+            if not audit_job["result_json"]:
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Audit job completed without result_json")
+                return
+
+            try:
+                audit_res = json.loads(audit_job["result_json"])
+            except Exception as e:
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Failed to parse audit result_json: {e}")
+                return
+
+            if not isinstance(audit_res, dict) or not audit_res:
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Audit result_json is empty")
+                return
+
             audit_status = audit_res.get("status")
+            audit_score = audit_res.get("audit_score", 1.0)
+
             if audit_status in {"AUDIT_COMPLETE", "PASS", "OK", "COMPLETED"}:
-                self.state_machine.transition_to(run_id, MatchState.FINALIZING, "Audit passed")
-                self.state_machine.transition_to(run_id, MatchState.COMPLETED, "Pipeline successful")
+                if audit_score is not None and float(audit_score) < 0.3:
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Audit score too low ({audit_score})")
+                else:
+                    self.state_machine.transition_to(run_id, MatchState.FINALIZING, "Audit passed")
+                    self.state_machine.transition_to(run_id, MatchState.COMPLETED, "Pipeline successful")
             elif audit_status == "RESEARCH_REQUIRED":
                 if cycle < max_cycles:
                     self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Research required - cycle {cycle}")
@@ -374,7 +433,7 @@ class MatchOrchestrator:
         """
         Spustí nový analytický běh delegací na MasterOrchestrator.
         """
-        match_identity = self.resolver.resolve(request)
+        match_identity = self.resolver.resolve_or_create(request)
         run_id = self.master.start_pipeline(match_identity.match_id)
 
         with sqlite3.connect(self.db_path) as conn:

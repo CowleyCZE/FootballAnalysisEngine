@@ -56,7 +56,9 @@ def test_start_pipeline_creates_run_and_initial_jobs(test_db):
     assert run["match_id"] == 100
     assert run["state"] == MatchState.DISCOVERY
     assert {job["job_type"] for job in jobs} == {"RESEARCH", "STATISTICS"}
-    assert all(job["status"] == "PENDING" for job in jobs)
+    assert all(job["status"] in ("PENDING", "BLOCKED") for job in jobs)
+    assert any(job["status"] == "PENDING" for job in jobs)
+    assert any(job["status"] == "BLOCKED" for job in jobs)
     assert all(job["run_id"] == run_id for job in jobs)
 
 
