@@ -19,6 +19,8 @@ env/
 
 # Logs
 logs/*.log
+logs/*.json
+logs/audit/
 
 # Raw data
 data/raw/*

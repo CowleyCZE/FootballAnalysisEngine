@@ -2,6 +2,20 @@ import re
 from typing import List, Dict, Any, Optional
 from app.research.models import Evidence
 
+
+_DOMAIN_KEYWORDS = {
+    "ABSENCES_HOME": ["injured", "injury", "miss", "unavailable", "ruled out", "doubt", "suspended", "sidelined", "fitness", "knock", "hamstring", "acl"],
+    "ABSENCES_AWAY": ["injured", "injury", "miss", "unavailable", "ruled out", "doubt", "suspended", "sidelined", "fitness", "knock", "hamstring", "acl"],
+    "MATCH_IDENTITY": ["vs", "versus", "kick-off", "kickoff", "stadium", "venue", "scheduled", "round", "matchday", "referee", "fixture", "derby"],
+    "FORM_HOME": ["win", "won", "loss", "lost", "draw", "drew", "streak", "form", "unbeaten", "scored", "conceded", "points", "recent"],
+    "FORM_AWAY": ["win", "won", "loss", "lost", "draw", "drew", "streak", "form", "unbeaten", "scored", "conceded", "points", "recent"],
+    "STATISTICS": ["xg", "possession", "shots", "corners", "goals", "clean sheet", "pass accuracy", "tackles", "cards", "stats", "average"],
+    "HEAD_TO_HEAD": ["head to head", "h2h", "previous meeting", "last meeting", "historic", "against each other", "record"],
+    "EXPECTED_LINEUPS": ["lineup", "predicted", "starting xi", "formation", "probable", "squad", "bench", "xi", "4-3-3", "4-2-3-1", "3-5-2"],
+    "WEATHER": ["weather", "rain", "temperature", "degrees", "celsius", "wind", "pitch", "forecast", "condition", "humidity", "storm"],
+}
+
+
 class EvidenceExtractor:
     def extract_evidence(self, doc: Dict[str, Any], domain: str) -> List[Evidence]:
         text = doc.get("text", "")
@@ -9,17 +23,43 @@ class EvidenceExtractor:
         pub_at = doc.get("published_at")
         doc_id = doc.get("document_id")
 
-        evidence_list = []
+        if not text:
+            return []
 
-        if domain in ["ABSENCES_HOME", "ABSENCES_AWAY"]:
-            sentences = re.split(r'(?<=[.!?]) +', text)
-            for sent in sentences:
-                if any(w in sent.lower() for w in ["injured", "injury", "miss", "unavailable", "ruled out", "doubt"]):
+        evidence_list = []
+        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+|\n+', text) if len(s.strip()) > 15]
+        keywords = _DOMAIN_KEYWORDS.get(domain, [])
+
+        for sent in sentences:
+            sent_lower = sent.lower()
+            if keywords:
+                if any(kw in sent_lower for kw in keywords):
                     evidence_list.append(Evidence(
                         source_url=url,
-                        text_fragment=sent.strip(),
+                        text_fragment=sent,
                         document_id=doc_id,
-                        published_at=pub_at
+                        published_at=pub_at,
+                        domain=domain
                     ))
+            else:
+                # Default domain extraction
+                evidence_list.append(Evidence(
+                    source_url=url,
+                    text_fragment=sent,
+                    document_id=doc_id,
+                    published_at=pub_at,
+                    domain=domain
+                ))
+
+        # Fallback if no specific sentence matched keywords but document text exists
+        if not evidence_list and sentences:
+            first_fragment = " ".join(sentences[:3])
+            evidence_list.append(Evidence(
+                source_url=url,
+                text_fragment=first_fragment[:500],
+                document_id=doc_id,
+                published_at=pub_at,
+                domain=domain
+            ))
 
         return evidence_list

@@ -54,6 +54,7 @@ class Evidence:
     published_at: Optional[datetime] = None
     start_offset: Optional[int] = None
     end_offset: Optional[int] = None
+    domain: Optional[str] = None
 
 @dataclass
 class Claim:
