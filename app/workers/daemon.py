@@ -8,6 +8,7 @@ from app.jobs.models import JobStatus
 from app.workers.ai_worker import AIWorker
 from app.workers.audit_worker import AuditWorker
 from app.workers.crawler_worker import CrawlerWorker
+from app.workers.research_worker import ResearchWorker
 from app.workers.search_worker import SearchWorker
 from app.workers.statistics_worker import StatisticsWorker
 
@@ -23,6 +24,7 @@ class WorkerDaemon:
     """
 
     HANDLERS: Dict[str, Callable] = {
+        "RESEARCH": ResearchWorker.execute,
         "SEARCH": SearchWorker.execute,
         "CRAWL": CrawlerWorker.execute,
         "STATISTICS": StatisticsWorker.execute,
