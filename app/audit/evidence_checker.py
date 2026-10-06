@@ -1,5 +1,6 @@
 from typing import List, Dict, Any
 
+
 class EvidenceChecker:
     @staticmethod
     def check_ai_evidence(analysis_dict: Dict[str, Any], available_evidence_ids: List[int]) -> List[Dict[str, Any]]:

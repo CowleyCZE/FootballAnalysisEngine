@@ -12,8 +12,10 @@ from app.audit.conflict_detector import ConflictDetector
 from app.audit.evidence_checker import EvidenceChecker
 from app.audit.consistency import ConsistencyChecker
 from app.audit.repair_queue import RepairQueue
+from app.research.cutoff_filter import CutoffFilter
 
 logger = logging.getLogger(__name__)
+
 
 class AdversarialAuditor:
     def __init__(self, db_path: str = "database/football.db", log_dir: str = "logs/audit"):
@@ -31,13 +33,11 @@ class AdversarialAuditor:
         statistics: Dict[str, Any],
         max_cycles: int = 3,
         current_cycle: int = 1,
+        data_cutoff_at: Any = None,
     ) -> Dict[str, Any]:
         run_id = str(uuid.uuid4())
         issues = []
 
-        # An unavailable/invalid AI result is a terminal safety condition for
-        # this run. The system must never turn an infrastructure failure into a
-        # successful football analysis or invent replacement data.
         if ai_analysis.get("status") == "insufficient_data":
             reason = "AI analytická vrstva neposkytla použitelný výstup."
             missing_data = ai_analysis.get("data_quality", {}).get("missing_data") or []
@@ -62,11 +62,24 @@ class AdversarialAuditor:
         ev_issues = EvidenceChecker.check_ai_evidence(ai_analysis, available_ev_ids)
         issues.extend(ev_issues)
 
-        # 2. Freshness Audit
+        # 2. Cutoff & Freshness Audit
+        cutoff_dt = data_cutoff_at or ai_analysis.get("match", {}).get("data_cutoff_at")
         for c in claims:
             for ev in c.get("evidence", []):
                 pub_at = ev.get("published_at")
                 eid = ev.get("id") or ev.get("evidence_id")
+
+                if cutoff_dt and pub_at:
+                    passed, _ = CutoffFilter.validate(pub_at, cutoff_dt)
+                    if not passed:
+                        issues.append({
+                            "type": "cutoff_violation",
+                            "severity": "CRITICAL",
+                            "description": f"Důkaz ID {eid} s datem {pub_at} překračuje data_cutoff_at ({cutoff_dt})",
+                            "evidence_ids": [eid] if eid else [],
+                            "requires_research": True
+                        })
+
                 fresh = FreshnessChecker.calculate_freshness(pub_at, data_type="lineup")
                 if fresh["freshness_score"] < 0.3:
                     issues.append({
@@ -100,8 +113,6 @@ class AdversarialAuditor:
         # Tvorba výzkumných úloh
         research_jobs = RepairQueue.generate_research_jobs(match_id, issues)
 
-        # Stanovení statusu. Nedostupná AI není výzkumný problém; nelze ji
-        # bezpečně vyřešit dalším research cyklem, proto končí běh UNRESOLVED.
         if ai_analysis.get("status") == "insufficient_data":
             status = "UNRESOLVED"
             research_jobs = []
@@ -127,10 +138,13 @@ class AdversarialAuditor:
             "max_cycles": max_cycles
         }
 
-        # Logování do JSON souboru
-        log_file = self.log_dir / f"audit_{run_id}.json"
-        with open(log_file, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
+        # Logování do JSON souboru (pokud složka existuje)
+        try:
+            log_file = self.log_dir / f"audit_{run_id}.json"
+            with open(log_file, "w", encoding="utf-8") as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+        except Exception as log_err:
+            logger.warning(f"Could not write audit log file: {log_err}")
 
         return result
 
