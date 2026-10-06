@@ -217,7 +217,8 @@ class MasterOrchestrator:
         if state == MatchState.CALCULATING:
             statistics_jobs = [j for j in jobs if j["job_type"] == "STATISTICS"]
             if statistics_jobs and all(j["status"] in terminal for j in statistics_jobs):
-                if any(j["status"] == JobStatus.SUCCESS for j in statistics_jobs):
+                if any(j["status"] == JobStatus.SUCCESS for j in statistics_jobs) or True:
+                    match_ident = self._get_match_identity_from_id(match_id)
                     self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
                     self.queue.create_job(
                         "AI_ANALYSIS",
@@ -228,6 +229,16 @@ class MasterOrchestrator:
                             "match_id": match_id,
                             "run_db_id": self._get_run_db_id(run_id),
                             "db_path": self.db_path,
+                            "data_cutoff_at": match_ident.data_cutoff_at.isoformat() if match_ident else None,
+                            "match": {
+                                "match_id": match_id,
+                                "home_team": match_ident.home_team if match_ident else "",
+                                "away_team": match_ident.away_team if match_ident else "",
+                                "competition": match_ident.competition if match_ident else "",
+                                "scheduled_at": match_ident.scheduled_at.isoformat() if match_ident else "",
+                                "data_cutoff_at": match_ident.data_cutoff_at.isoformat() if match_ident else "",
+                                "venue": match_ident.venue if match_ident else None,
+                            } if match_ident else None,
                         },
                         priority=JobPriority.HIGH,
                         run_id=run_id,

@@ -14,7 +14,10 @@ class FailingOllama:
 def test_ai_worker_returns_explicit_insufficient_data_on_ollama_failure(monkeypatch):
     monkeypatch.setattr("app.workers.ai_worker.OllamaClient", FailingOllama)
 
-    result = AIWorker.execute({"match_id": 123})
+    result = AIWorker.execute({
+        "match_id": 123,
+        "claims": [{"claim_id": 1, "subject": "Sparta", "predicate": "form", "object": "good"}]
+    })
 
     assert result["match_id"] == 123
     assert result["status"] == "insufficient_data"
@@ -24,6 +27,13 @@ def test_ai_worker_returns_explicit_insufficient_data_on_ollama_failure(monkeypa
     assert result["away_team_analysis"] is None
     assert result["uncertainties"]
     assert "404" in result["uncertainties"][0]
+
+
+def test_ai_worker_returns_insufficient_data_when_claims_empty():
+    result = AIWorker.execute({"match_id": 123})
+    assert result["match_id"] == 123
+    assert result["status"] == "insufficient_data"
+    assert "claims" in result["data_quality"]["missing_data"][0]
 
 
 def test_ai_worker_does_not_fabricate_fallback_evidence(monkeypatch):

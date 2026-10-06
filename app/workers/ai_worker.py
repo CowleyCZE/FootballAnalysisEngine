@@ -31,7 +31,7 @@ class AIWorker:
             key_factors=[],
             uncertainties=[reason],
             conflicts_noted=[],
-            conclusion="AI analýzu nelze bezpečně dokončit, protože lokální AI služba není dostupná nebo její výstup nebyl validní. Nebyla doplněna žádná náhradní fotbalová data.",
+            conclusion="AI analýzu nelze bezpečně dokončit z důvodu nedostatku ověřených dat nebo nedostupnosti AI služby. Nebyla doplněna žádná náhradní fotbalová data.",
         ).model_dump(by_alias=True)
         result["input_hash"] = input_hash
         result["output_hash"] = hashlib.sha256(json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -39,7 +39,7 @@ class AIWorker:
 
     @staticmethod
     def execute(payload: Dict[str, Any]) -> Dict[str, Any]:
-        match_id = int(payload.get("match_id"))
+        match_id = int(payload.get("match_id") or 0)
         run_db_id = payload.get("run_db_id")
         db_path = payload.get("db_path", "database/football.db")
         statistics = payload.get("statistics") or {}
@@ -55,7 +55,17 @@ class AIWorker:
             conflicts=conflicts,
             run_db_id=int(run_db_id) if run_db_id is not None else None,
         )
+
+        # Zero-hallucination check: if no claims available, return insufficient_data immediately
+        if not context.get("claims"):
+            return AIWorker._insufficient_data_result(
+                match_id,
+                "Chybí ověřená tvrzení (claims) z výzkumné pipeline pro tento zápas",
+            )
+
+        cutoff = context.get("match", {}).get("data_cutoff_at", "N/A")
         prompt = (
+            f"STRICT DATA CUTOFF: {cutoff}\n"
             "Analyze the football match using ONLY the supplied context. "
             "Do not invent facts, statistics, players, injuries, sources or evidence. "
             "Every key factor must reference evidence_ids that exist in the context. "
@@ -79,9 +89,6 @@ class AIWorker:
                     prompt,
                 )
         except (RuntimeError, ValueError) as exc:
-            # External AI availability or response validation must never cause
-            # fabricated football data or a permanently stuck ANALYZING state.
-            # The explicit insufficient-data result is audited as UNRESOLVED.
             return AIWorker._insufficient_data_result(
                 match_id,
                 f"Lokální AI služba neposkytla použitelný výstup: {exc}",

@@ -1,28 +1,76 @@
 import json
 import logging
+import sqlite3
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-import sqlite3
 
 class ContextBuilder:
     def __init__(self, repository=None, db_path: str = "database/football.db"):
         self.repository = repository
         self.db_path = db_path
 
+    def enrich_match_info(self, match_info: Dict[str, Any], match_id: Optional[int]) -> Dict[str, Any]:
+        info = dict(match_info or {})
+        if not match_id and ("match_id" in info or "id" in info):
+            match_id = info.get("match_id") or info.get("id")
+
+        if match_id and self.db_path:
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("""
+                        SELECT m.id as match_id, m.scheduled_at, m.venue,
+                               th.name as home_team, ta.name as away_team, COALESCE(c.name, m.competition, '') as competition
+                        FROM matches m
+                        LEFT JOIN teams th ON m.home_team_id = th.id
+                        LEFT JOIN teams ta ON m.away_team_id = ta.id
+                        LEFT JOIN competitions c ON m.competition_id = c.id
+                        WHERE m.id = ?
+                    """, (match_id,)).fetchone()
+                    if row:
+                        if not info.get("home_team"):
+                            info["home_team"] = row["home_team"] or f"Team_{row['home_team_id'] if 'home_team_id' in row.keys() else match_id}"
+                        if not info.get("away_team"):
+                            info["away_team"] = row["away_team"] or f"Team_{row['away_team_id'] if 'away_team_id' in row.keys() else match_id}"
+                        if not info.get("competition"):
+                            info["competition"] = row["competition"] or "Unknown Competition"
+                        if not info.get("scheduled_at") and row["scheduled_at"]:
+                            info["scheduled_at"] = row["scheduled_at"]
+                        if not info.get("venue") and row["venue"]:
+                            info["venue"] = row["venue"]
+            except Exception as err:
+                logger.warning(f"Failed to enrich match_info from DB: {err}")
+
+        if not info.get("data_cutoff_at"):
+            if info.get("cutoff_datetime"):
+                info["data_cutoff_at"] = info["cutoff_datetime"]
+            elif info.get("cutoff"):
+                info["data_cutoff_at"] = info["cutoff"]
+            elif info.get("scheduled_at"):
+                info["data_cutoff_at"] = info["scheduled_at"]
+
+        info["match_id"] = match_id
+        return info
+
     def load_claims_from_db(self, match_id: int, run_db_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Load real claims and their supporting evidence from database."""
         claims_list = []
+        if not match_id or not self.db_path:
+            return claims_list
+
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                query = "SELECT * FROM claims WHERE match_id = ?"
-                params = [match_id]
+                query = "SELECT * FROM claims WHERE match_id = ? AND status IN ('VALID', 'VERIFIED')"
+                params: List[Any] = [match_id]
                 if run_db_id is not None:
                     query += " AND run_id = ?"
                     params.append(run_db_id)
+
                 claim_rows = conn.execute(query, params).fetchall()
 
                 for c_row in claim_rows:
@@ -62,10 +110,14 @@ class ContextBuilder:
                     })
         except Exception as err:
             logger.warning(f"Failed to load claims from DB: {err}")
+
         return claims_list
 
     def load_statistics_from_db(self, match_id: int) -> Dict[str, Any]:
         """Load statistics from database if available."""
+        if not match_id or not self.db_path:
+            return {}
+
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -74,6 +126,7 @@ class ContextBuilder:
                     return dict(row)
         except Exception as err:
             logger.warning(f"Failed to load statistics from DB: {err}")
+
         return {}
 
     @staticmethod
@@ -96,25 +149,31 @@ class ContextBuilder:
         if not dates:
             return 0.0
         ages = [(now - dt).total_seconds() / 3600.0 for dt in dates]
-        # Age-based score; no fabricated constant when timestamps are absent.
         scores = [max(0.0, 1.0 - age / (30.0 * 24.0)) for age in ages]
         return round(sum(scores) / len(scores), 2)
 
     def build_context(
         self,
         match_info: Dict[str, Any],
-        claims: List[Dict[str, Any]],
-        statistics: Dict[str, Any],
-        conflicts: List[Dict[str, Any]] = None,
+        claims: Optional[List[Dict[str, Any]]] = None,
+        statistics: Optional[Dict[str, Any]] = None,
+        conflicts: Optional[List[Dict[str, Any]]] = None,
         max_claims: int = 30,
         run_db_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         match_id = match_info.get("match_id") or match_info.get("id")
-        # ContextBuilder is a pure formatter: callers must explicitly provide
-        # the evidence/statistics context. Implicit DB reads caused unit tests
-        # and production runs to mix data across analysis runs.
-        claims = list(claims) if claims is not None else []
-        statistics = dict(statistics) if statistics is not None else {}
+        enriched_match_info = self.enrich_match_info(match_info, match_id)
+
+        if not claims and match_id and self.db_path:
+            claims = self.load_claims_from_db(int(match_id), run_db_id)
+        else:
+            claims = list(claims) if claims is not None else []
+
+        if not statistics and match_id and self.db_path:
+            statistics = self.load_statistics_from_db(int(match_id))
+        else:
+            statistics = dict(statistics) if statistics is not None else {}
+
         if conflicts is None:
             conflicts = []
 
@@ -135,7 +194,6 @@ class ContextBuilder:
                 if url:
                     source_urls.add(url)
                     try:
-                        from urllib.parse import urlparse
                         domain = urlparse(url).netloc.lower().removeprefix("www.")
                     except Exception:
                         domain = ""
@@ -172,7 +230,7 @@ class ContextBuilder:
         total_sources = len(source_urls)
         independent_sources = len(publisher_domains)
         conflicts_count = len(conflicts)
-        
+
         score = 1.0
         if not claims:
             score -= 0.4
@@ -193,7 +251,7 @@ class ContextBuilder:
         }
 
         return {
-            "match": match_info,
+            "match": enriched_match_info,
             "statistics": statistics,
             "claims": formatted_claims,
             "conflicts": conflicts,
