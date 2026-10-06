@@ -1,0 +1,19 @@
+{
+  "run_id": "bfd137ae-a28f-404d-b9c2-dbdc45bf18cb",
+  "match_id": 123,
+  "ai_run_id": "ai-run-1",
+  "audit_score": 0.7,
+  "status": "UNRESOLVED",
+  "issues": [
+    {
+      "type": "ai_analysis_unavailable",
+      "severity": "CRITICAL",
+      "description": "AI analytická vrstva neposkytla použitelný výstup. Lokální AI služba neposkytla použitelný výstup: Ollama API request failed after 3 retries: [Errno 111] Connection refused",
+      "evidence_ids": [],
+      "requires_research": false
+    }
+  ],
+  "research_jobs": [],
+  "current_cycle": 1,
+  "max_cycles": 3
+}

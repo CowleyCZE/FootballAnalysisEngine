@@ -50,8 +50,12 @@ class MasterOrchestrator:
         try:
             cursor.execute("""
                 SELECT m.id as match_id, m.home_team_id, m.away_team_id,
-                       COALESCE(m.competition_id, 0) as competition_id, m.scheduled_at
+                       m.competition_id, m.scheduled_at, m.venue,
+                       th.name as home_team, ta.name as away_team, COALESCE(c.name, m.competition, '') as competition
                 FROM matches m
+                LEFT JOIN teams th ON m.home_team_id = th.id
+                LEFT JOIN teams ta ON m.away_team_id = ta.id
+                LEFT JOIN competitions c ON m.competition_id = c.id
                 WHERE m.id = ?
             """, (match_id,))
             row = cursor.fetchone()
@@ -64,8 +68,12 @@ class MasterOrchestrator:
                 home_team_id=row["home_team_id"],
                 away_team_id=row["away_team_id"],
                 competition_id=row["competition_id"],
+                home_team=row["home_team"] or f"Team_{row['home_team_id']}",
+                away_team=row["away_team"] or f"Team_{row['away_team_id']}",
+                competition=row["competition"] or "Unknown Competition",
                 scheduled_at=scheduled_dt,
                 data_cutoff_at=scheduled_dt,
+                venue=row["venue"] if "venue" in row.keys() else None,
             )
         finally:
             conn.close()
@@ -89,10 +97,29 @@ class MasterOrchestrator:
                 if row:
                     task_id = int(row["id"])
                 else:
-                    cur = conn.execute("INSERT INTO research_tasks(run_id,run_db_id,match_id,task_uuid,domain,task_type,description,required,priority,capabilities_json,data_cutoff_at,home_team,away_team,competition,scheduled_at,venue,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id,run_db_id,match_id,task.task_uuid,task.domain,task.task_type,task.description,1 if task.required else 0,task.priority,json.dumps(task.capabilities_required),match_identity.data_cutoff_at.isoformat(),str(match_identity.home_team_id),str(match_identity.away_team_id),str(match_identity.competition_id or ""),match_identity.scheduled_at.isoformat(),None,"PLANNED"))
+                    cur = conn.execute("INSERT INTO research_tasks(run_id,run_db_id,match_id,task_uuid,domain,task_type,description,required,priority,capabilities_json,data_cutoff_at,home_team,away_team,competition,scheduled_at,venue,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id,run_db_id,match_id,task.task_uuid,task.domain,task.task_type,task.description,1 if task.required else 0,task.priority,json.dumps(task.capabilities_required),match_identity.data_cutoff_at.isoformat(),match_identity.home_team,match_identity.away_team,match_identity.competition,match_identity.scheduled_at.isoformat(),match_identity.venue,"PLANNED"))
                     task_id = int(cur.lastrowid)
                 job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type,"RESEARCH")
-                payload = {"task_id":task_id,"task_uuid":task.task_uuid,"domain":task.domain,"description":task.description,"run_id":run_id,"run_db_id":run_db_id,"match_id":match_id,"home_team_id":match_identity.home_team_id,"away_team_id":match_identity.away_team_id,"cutoff_datetime":match_identity.data_cutoff_at.isoformat(),"capabilities_required":task.capabilities_required,"worker_capability":job_type}
+                payload = {
+                    "task_id": task_id,
+                    "task_uuid": task.task_uuid,
+                    "domain": task.domain,
+                    "description": task.description,
+                    "run_id": run_id,
+                    "run_db_id": run_db_id,
+                    "match_id": match_id,
+                    "home_team_id": match_identity.home_team_id,
+                    "away_team_id": match_identity.away_team_id,
+                    "home_team": match_identity.home_team,
+                    "away_team": match_identity.away_team,
+                    "competition": match_identity.competition,
+                    "scheduled_at": match_identity.scheduled_at.isoformat(),
+                    "venue": match_identity.venue,
+                    "cutoff_datetime": match_identity.data_cutoff_at.isoformat(),
+                    "cutoff": match_identity.data_cutoff_at.isoformat(),
+                    "capabilities_required": task.capabilities_required,
+                    "worker_capability": job_type,
+                }
                 job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "football-analysis:%s:%s" % (run_id,task.task_uuid)))
                 fingerprint = self.queue.generate_fingerprint(job_type, match_id, payload, run_id)
                 self.queue.store.create_job_on_connection(conn, job_id, job_type, match_id, run_id, payload, fingerprint, int(task.priority), 3)
@@ -322,93 +349,31 @@ class MasterOrchestrator:
 
 class MatchOrchestrator:
     """
-    Fasáda pro spuštění analýzy na základě AnalysisRequest.
+    Fasáda delegující na MasterOrchestrator.
     Přijme AnalysisRequest, vyřeší identitu zápasu přes MatchResolver,
-    pak deleguje na MasterOrchestrator.
-
-    Tok: AnalysisRequest → MatchResolver → MatchIdentity → ResearchPlanner → Jobs
+    a spustí kanonickou pipeline přes MasterOrchestrator.
     """
 
     def __init__(self, db_path: str = "database/football.db", config_path: str = "config/pipeline.yaml"):
         self.db_path = db_path
         self.resolver = MatchResolver(db_path=db_path)
-        self.planner = ResearchPlanner()
-        self.queue = JobQueue(db_path=db_path)
-        self.state_machine = MatchStateMachine(db_path=db_path)
-        try:
-            self.config = PipelineConfig.load(config_path)
-        except Exception:
-            self.config = {"orchestrator": {"audit_max_cycles": 3, "worker_timeout": 120}}
-        init_database_schema(db_path)
+        self.master = MasterOrchestrator(db_path=db_path, config_path=config_path)
 
     def start_analysis_run(self, request: AnalysisRequest) -> Dict[str, Any]:
         """
-        Spustí nový analytický běh.
-        1. Resolves match identity from DB
-        2. Creates pipeline_run record
-        3. Calls ResearchPlanner to get task list
-        4. Dispatches tasks as jobs into queue
-
-        Raises:
-            MatchNotFoundException: pokud zápas není v DB
-            AmbiguousMatchException: pokud bylo nalezeno více kandidátů
+        Spustí nový analytický běh delegací na MasterOrchestrator.
         """
-        # Krok 1: Resolve identity (může vyhodit MatchNotFoundException / AmbiguousMatchException)
         match_identity = self.resolver.resolve(request)
+        run_id = self.master.start_pipeline(match_identity.match_id)
 
-        run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_M{match_identity.match_id}_{uuid.uuid4().hex[:4]}"
-        now_iso = datetime.now(timezone.utc).isoformat()
-        max_cycles = self.config["orchestrator"].get("audit_max_cycles", 3)
-
-        # Krok 2: Zápis canonical run + pipeline_run
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO runs (run_id, status, started_at, pipeline_version) VALUES (?, ?, ?, ?)",
-            (run_id, "RUNNING", now_iso, "part-11"),
-        )
-        cursor.execute(
-            "INSERT INTO pipeline_runs (run_id, match_id, state, cycle, max_cycles, started_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (run_id, match_identity.match_id, MatchState.NEW, 1, max_cycles, now_iso, now_iso)
-        )
-        conn.commit()
-        conn.close()
-
-        # Přechod do stavu DISCOVERY
-        self.state_machine.transition_to(run_id, MatchState.DISCOVERY, "Match resolved — creating research plan")
-
-        # Krok 3: ResearchPlanner vytvoří seznam tasků
-        tasks = self.planner.create_plan(match_identity)
-        logger.info(f"[MatchOrchestrator] ResearchPlanner vytvořil {len(tasks)} tasků pro {request.home_team} vs {request.away_team}")
-
-        # Krok 4: Dispatch tasků jako joby
-        created_jobs = []
-        for task in tasks:
-            job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type, "RESEARCH")
-            payload = {
-                "task_uuid": task.task_uuid,
-                "domain": task.domain,
-                "description": task.description,
-                "run_id": run_id,
-                "cutoff": match_identity.data_cutoff_at.isoformat(),
-            }
-            job_id = self.queue.create_job(
-                job_type=job_type,
-                match_id=match_identity.match_id,
-                payload=payload,
-                priority=task.priority,
-                run_id=run_id,
-            )
-            if job_id:
-                created_jobs.append(job_id)
-
-        # Přechod do stavu RESEARCHING (joby jsou vytvořeny a čekají na workery)
-        self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Research plan dispatched: {len(created_jobs)} jobs")
+        with sqlite3.connect(self.db_path) as conn:
+            tasks_count = conn.execute("SELECT COUNT(*) FROM research_tasks WHERE run_id=?", (run_id,)).fetchone()[0]
+            jobs_count = conn.execute("SELECT COUNT(*) FROM jobs WHERE run_id=?", (run_id,)).fetchone()[0]
 
         return {
             "run_id": run_id,
             "match_id": match_identity.match_id,
-            "status": "RESEARCHING",
-            "tasks_count": len(tasks),
-            "jobs_created": len(created_jobs),
+            "status": "DISCOVERY",
+            "tasks_count": tasks_count,
+            "jobs_created": jobs_count,
         }
