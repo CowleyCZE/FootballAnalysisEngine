@@ -2,6 +2,8 @@ import os
 import hashlib
 import json
 import asyncio
+import logging
+
 try:
     from playwright.async_api import async_playwright
     PLAYWRIGHT_AVAILABLE = True
@@ -12,6 +14,8 @@ from app.crawler.models import CrawlResult, ParsedDocument
 from app.crawler.http_client import HTTPClient
 from app.crawler.rate_limiter import DomainRateLimiter
 from app.parser.html_parser import HTMLParser
+
+logger = logging.getLogger(__name__)
 
 class EngineCrawler:
     def __init__(self, user_agent: str = "FootballAnalysisEngine/1.0"):
@@ -53,7 +57,7 @@ class EngineCrawler:
         if result.success and result.html:
             doc = self.parser.parse(result.html, result.final_url or url)
             if doc.word_count < 30:  # Podezření na JS vyrenderovanou stránku
-                print(f"[CRAWLER] Nízký počet slov ({doc.word_count}), zkouším Playwright...")
+                logger.info(f"[CRAWLER] Nízký počet slov ({doc.word_count}), zkouším Playwright...")
                 pw_result = await self.fetch_with_playwright(url)
                 if pw_result.success and pw_result.html:
                     result = pw_result
