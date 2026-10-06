@@ -63,7 +63,12 @@ def main():
         print(f"{'JOB ID':<38} | {'TYPE':<12} | {'STATUS':<10} | {'PRIO':<4} | {'WORKER'}")
         print("-" * 75)
         for r in rows:
-            print(f"{r['job_id']:<38} | {r['job_type']:<12} | {r['status']:<10} | {r['priority']:<4} | {r['worker_id']}")
+            job_id = r['job_id'] or ''
+            job_type = r['job_type'] or ''
+            status = r['status'] or ''
+            prio = str(r['priority'] or 0)
+            worker_id = r['worker_id'] or 'NONE'
+            print(f"{job_id:<38} | {job_type:<12} | {status:<10} | {prio:<4} | {worker_id}")
         conn.close()
 
     elif args.command == "workers":
@@ -75,7 +80,11 @@ def main():
         print(f"{'WORKER ID':<15} | {'CAPABILITIES':<30} | {'STATUS':<8} | {'LAST HEARTBEAT'}")
         print("-" * 75)
         for r in rows:
-            print(f"{r['worker_id']:<15} | {r['worker_type']:<30} | {r['status']:<8} | {r['last_heartbeat']}")
+            worker_id = r['worker_id'] or ''
+            worker_type = r['worker_type'] or 'UNKNOWN'
+            status = r['status'] or ''
+            last_hb = r['last_heartbeat'] or ''
+            print(f"{worker_id:<15} | {worker_type:<30} | {status:<8} | {last_hb}")
         conn.close()
 
     elif args.command == "recover":

@@ -34,6 +34,7 @@ class TaskRequirement(BaseModel):
     priority: int = 50
     required: bool = False
     capabilities_required: List[str] = Field(default_factory=list)
+    depends_on: List[str] = Field(default_factory=list)
 
 
 class ResearchManifest(BaseModel):

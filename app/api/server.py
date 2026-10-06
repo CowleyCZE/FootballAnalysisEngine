@@ -55,7 +55,8 @@ class JobClaimRequest(BaseModel):
 class JobResult(BaseModel):
     worker_id: str
     status: str
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[Any] = None
+    result_json: Optional[Any] = None
     error: Optional[str] = None
 
 
@@ -232,9 +233,28 @@ def claim_job(data: JobClaimRequest):
 def job_result(job_id: str, data: JobResult):
     queue = JobQueue(db_path=DB_PATH)
     status_mapped = data.status.upper()
+    res_data = data.result if data.result is not None else data.result_json
+
     if status_mapped == "SUCCESS":
-        queue.update_job_status(job_id, "SUCCESS", result=data.result, worker_id=data.worker_id)
+        queue.update_job_status(job_id, "SUCCESS", result=res_data, worker_id=data.worker_id)
     else:
         queue.update_job_status(job_id, "FAILED", error=data.error, worker_id=data.worker_id)
+
+    # Autonomní posun pipeline
+    run_id = None
+    with queue.store.connect() as conn:
+        row = conn.execute("SELECT run_id FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        if row and row["run_id"]:
+            run_id = row["run_id"]
+
+    if run_id:
+        master = MasterOrchestrator(db_path=DB_PATH)
+        with sqlite3.connect(DB_PATH) as conn:
+            for _ in range(5):
+                state_before = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
+                master.tick(run_id)
+                state_after = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
+                if state_before and state_after and state_before[0] == state_after[0]:
+                    break
 
     return {"status": "ok", "job_id": job_id}

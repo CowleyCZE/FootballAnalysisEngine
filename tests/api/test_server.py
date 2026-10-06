@@ -59,6 +59,20 @@ def test_start_analysis_by_request(api_test_db):
     assert data["match_id"] == 101
 
 
+def test_start_analysis_auto_creates_match(api_test_db):
+    client = TestClient(server_module.app)
+    resp = client.post("/api/analysis/start", json={
+        "home_team": "Arsenal",
+        "away_team": "Chelsea",
+        "competition": "Premier League",
+        "scheduled_at": "2026-11-20T18:00:00"
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "started" or data["status"] == "DISCOVERY"
+    assert data["match_id"] is not None
+
+
 def test_worker_registration_and_job_claim(api_test_db):
     client = TestClient(server_module.app)
     start_resp = client.post("/api/analysis/start", json={"match_id": 101})
@@ -87,3 +101,28 @@ def test_worker_registration_and_job_claim(api_test_db):
         "result": {"status": "ok"}
     })
     assert result_resp.status_code == 200
+
+
+def test_job_result_triggers_autonomous_tick(api_test_db):
+    client = TestClient(server_module.app)
+    start_resp = client.post("/api/analysis/start", json={"match_id": 101})
+    run_id = start_resp.json()["run_id"]
+
+    # Claim and finish all discovery jobs
+    while True:
+        claim_resp = client.post("/api/jobs/claim", json={
+            "worker_id": "w1",
+            "capabilities": ["generic", "RESEARCH", "STATISTICS"]
+        })
+        if claim_resp.json()["status"] == "no_job":
+            break
+        job_id = claim_resp.json()["job"]["id"]
+        client.post(f"/api/jobs/{job_id}/result", json={
+            "worker_id": "w1",
+            "status": "SUCCESS",
+            "result": {"evidence": ["sample"]}
+        })
+
+    # Pipeline should have advanced past DISCOVERY automatically
+    status_resp = client.get(f"/api/analysis/{run_id}")
+    assert status_resp.json()["state"] != "DISCOVERY"
