@@ -1,0 +1,11 @@
+{
+  "run_id": "29465b4a-a6b9-4869-bc95-83dac851f132",
+  "match_id": 555,
+  "ai_run_id": "ai-run-2",
+  "audit_score": 1.0,
+  "status": "AUDIT_COMPLETE",
+  "issues": [],
+  "research_jobs": [],
+  "current_cycle": 2,
+  "max_cycles": 3
+}

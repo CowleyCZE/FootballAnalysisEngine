@@ -15,11 +15,15 @@ class AnalysisRequest(BaseModel):
 
 class MatchIdentity(BaseModel):
     match_id: int
-    home_team_id: int
-    away_team_id: int
+    home_team_id: Optional[int] = None
+    away_team_id: Optional[int] = None
     competition_id: Optional[int] = None
+    home_team: str = ""
+    away_team: str = ""
+    competition: str = ""
     scheduled_at: datetime
     data_cutoff_at: datetime
+    venue: Optional[str] = None
 
 
 class TaskRequirement(BaseModel):
