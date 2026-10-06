@@ -68,6 +68,7 @@ def root():
     }
 
 
+@app.get("/health")
 @app.get("/api/health")
 def health():
     return {
@@ -156,6 +157,34 @@ def get_analysis_status(run_id: str):
             "finished_at": run["finished_at"],
             "jobs_count": len(jobs_list),
             "jobs": jobs_list,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/analysis/{run_id}/result")
+def get_analysis_result(run_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        run = conn.execute("SELECT * FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
+        if not run:
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+        ai_job = conn.execute("SELECT result_json FROM jobs WHERE run_id = ? AND job_type = 'AI_ANALYSIS' AND status = 'SUCCESS' ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
+        audit_job = conn.execute("SELECT result_json FROM jobs WHERE run_id = ? AND job_type = 'AUDIT' AND status = 'SUCCESS' ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
+
+        ai_res = json.loads(ai_job["result_json"]) if ai_job and ai_job["result_json"] else None
+        audit_res = json.loads(audit_job["result_json"]) if audit_job and audit_job["result_json"] else None
+
+        return {
+            "run_id": run_id,
+            "match_id": run["match_id"],
+            "state": run["state"],
+            "cycle": run["cycle"],
+            "ai_analysis": ai_res,
+            "audit": audit_res,
+            "finished_at": run["finished_at"],
         }
     finally:
         conn.close()

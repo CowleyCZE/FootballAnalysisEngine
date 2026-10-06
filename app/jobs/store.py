@@ -22,7 +22,6 @@ class JobStore:
     def init_db(self) -> None:
         initialize_database(self.db_path)
 
-
     def create_job_on_connection(self, conn, job_id, job_type, match_id, run_id, payload, fingerprint, priority, max_attempts, parent_job_id=None):
         existing = conn.execute("SELECT job_id FROM jobs WHERE fingerprint=? LIMIT 1", (fingerprint,)).fetchone()
         if existing:
@@ -32,10 +31,25 @@ class JobStore:
         conn.execute("INSERT INTO jobs(job_id,run_id,match_id,parent_job_id,job_type,status,priority,payload_json,fingerprint,max_attempts,created_at) VALUES(?,?,?,?,?,'PENDING',?,?,?,?,?)", (job_id,run_id,match_id,parent_job_id,job_type,priority,json.dumps(payload,sort_keys=True),fingerprint,max_attempts,self.now()))
         self._event(conn,"JOB_CREATED",job_id,None,{"job_type":job_type,"fingerprint":fingerprint})
         return job_id
-    def register_worker(self, worker_id: str, capabilities: Iterable[str], worker_type: str = "generic", metadata: Optional[Dict[str, Any]] = None) -> None:
+
+    def register_worker(self, worker_id: str, capabilities: Iterable[str], worker_type: str = "generic", metadata: Optional[Dict[str, Any]] = None, worker_name: Optional[str] = None) -> None:
         now = self.now()
+        name = worker_name or worker_id
         with self.connect() as conn:
-            conn.execute("INSERT INTO workers(worker_id, worker_type, status, capabilities_json, last_heartbeat, metadata_json, registered_at) VALUES(?, ?, 'IDLE', ?, ?, ?, ?) ON CONFLICT(worker_id) DO UPDATE SET worker_type=excluded.worker_type, status='IDLE', capabilities_json=excluded.capabilities_json, last_heartbeat=excluded.last_heartbeat, metadata_json=excluded.metadata_json", (worker_id, worker_type, json.dumps(sorted(set(capabilities))), now, json.dumps(metadata or {}), now))
+            conn.execute(
+                """
+                INSERT INTO workers(worker_id, worker_name, worker_type, status, capabilities_json, last_heartbeat, metadata_json, registered_at)
+                VALUES(?, ?, ?, 'IDLE', ?, ?, ?, ?)
+                ON CONFLICT(worker_id) DO UPDATE SET
+                    worker_name=excluded.worker_name,
+                    worker_type=excluded.worker_type,
+                    status='IDLE',
+                    capabilities_json=excluded.capabilities_json,
+                    last_heartbeat=excluded.last_heartbeat,
+                    metadata_json=excluded.metadata_json
+                """,
+                (worker_id, name, worker_type, json.dumps(sorted(set(capabilities))), now, json.dumps(metadata or {}), now)
+            )
 
     def heartbeat(self, worker_id: str, current_job_id: Optional[str] = None) -> None:
         with self.connect() as conn:

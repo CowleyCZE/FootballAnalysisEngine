@@ -33,11 +33,11 @@ class PipelineRecovery:
             has_research_tasks = self._table_exists(conn, "research_tasks")
             has_research_executions = self._table_exists(conn, "research_executions")
             rows = conn.execute(
-                "SELECT id, job_id, run_id, attempts, max_attempts, heartbeat_at, worker_id, status "
+                "SELECT id, job_id, run_id, attempts, max_attempts, heartbeat_at, started_at, created_at, worker_id, status "
                 "FROM jobs WHERE status IN ('CLAIMED','RUNNING')"
             ).fetchall()
             for job in rows:
-                heartbeat = job["heartbeat_at"]
+                heartbeat = job["heartbeat_at"] or job["started_at"] or job["created_at"]
                 if not heartbeat:
                     continue
                 try:
