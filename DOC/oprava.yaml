@@ -1,0 +1,870 @@
+PROJECT:
+  name: "FootballAnalysisEngine"
+  repository: "CowleyCZE/FootballAnalysisEngine"
+  primary_branch_for_repairs: "fix/part-11-integration"
+
+  IMPORTANT:
+    - "NEUPRAVOVAT main jako výchozí větev pro opravy."
+    - "feature/p0-orchestrator-research-fixes-* je historická/stale větev."
+    - "Opravy provádět postupně podle FÁZE 1 až FÁZE 6."
+    - "Po každé fázi musí projít definované testy."
+    - "Nepovažovat unit testy za důkaz funkčního systému."
+    - "Finální kritérium je plný autonomní end-to-end běh."
+
+  CORE_PRINCIPLE:
+    evidence_first: true
+    no_fabricated_data: true
+    cutoff_is_mandatory: true
+    ai_is_not_source_of_truth: true
+    success_only_when_pipeline_is_functionally_complete: true
+
+
+============================================================
+PRIORITY MODEL
+============================================================
+
+P0:
+  meaning: "Blokuje finální verzi systému."
+  rule: "Dokud existuje P0, systém není READY."
+
+P1:
+  meaning: "Nutné pro spolehlivý produkční provoz."
+  rule: "Po odstranění P0 musí být odstraněny všechny P1."
+
+P2:
+  meaning: "Předprodukční dotažení."
+  rule: "P2 řešit až po stabilním P0 + P1."
+
+
+============================================================
+P0 — BLOKUJÍCÍ PROBLÉMY
+============================================================
+
+P0-01:
+  title: "Nekompatibilní kontrakt ResearchWorker ↔ Orchestrator"
+  severity: "P0"
+
+  problem:
+    - "ResearchWorker očekává task_id."
+    - "ResearchWorker očekává match_id."
+    - "ResearchWorker očekává domain."
+    - "ResearchWorker očekává cutoff_datetime."
+    - "ResearchWorker očekává match context."
+    - "Některé orchestration paths tyto údaje neposílají."
+    - "Worker může dostat neúplný payload."
+    - "Výsledkem mohou být prázdné nebo chybné query."
+
+  required_fix:
+    - "Definovat jediný canonical ResearchTask contract."
+    - "Worker musí dostat minimálně task_id/run_id."
+    - "Worker má načíst canonical ResearchTask z DB."
+    - "ResearchTask musí obsahovat kompletní match context."
+    - "Odstranit paralelní nekompatibilní payload formáty."
+
+  acceptance:
+    - "Každý RESEARCH job lze převést na platný ResearchTask."
+    - "ResearchWorker nikdy nepadá na chybějícím task_id."
+    - "QueryBuilder vždy dostane home_team, away_team, competition a cutoff."
+
+
+P0-02:
+  title: "Dvě konkurenční orchestration cesty"
+  severity: "P0"
+
+  problem:
+    - "Existuje MasterOrchestrator."
+    - "Existuje MatchOrchestrator."
+    - "Obě cesty mají odlišnou logiku."
+    - "MatchOrchestrator vytváří payload odlišný od toho, co ResearchWorker očekává."
+    - "Vzniká riziko, že API spouští jinou pipeline než interní orchestrace."
+
+  required_fix:
+    canonical_flow:
+      - "API"
+      - "MatchResolver"
+      - "MasterOrchestrator"
+      - "ResearchPlanner"
+      - "ResearchTask"
+      - "JobStore"
+      - "Workers"
+      - "ResearchEngine"
+      - "Statistics"
+      - "AI"
+      - "Audit"
+      - "Finalize"
+
+    actions:
+      - "Vybrat jeden canonical orchestrator."
+      - "Druhou cestu odstranit nebo změnit na tenkou kompatibilní façade."
+      - "Všechny vstupy musí používat stejný Run/Match/Task model."
+
+  acceptance:
+    - "Existuje pouze jeden skutečný execution path."
+    - "API i interní test pipeline používají stejný orchestrator."
+
+
+P0-03:
+  title: "AI nedostává skutečný DB-backed evidence/statistics context"
+  severity: "P0"
+
+  problem:
+    - "ContextBuilder obsahuje load_claims_from_db()."
+    - "ContextBuilder obsahuje load_statistics_from_db()."
+    - "build_context() však pracuje s předanými claims/statistics."
+    - "AIWorker používá payload.get('claims') a payload.get('statistics')."
+    - "Orchestrator nemusí předat skutečná data."
+    - "AI tedy může analyzovat prázdný nebo neúplný context."
+
+  required_fix:
+    - "ContextBuilder musí načítat canonical data podle run_id/match_id."
+    - "Claims musí pocházet z validovaných evidence."
+    - "Statistics musí pocházet z ověřených zdrojů."
+    - "AI nesmí vytvářet chybějící fakta."
+    - "Pokud data nejsou dostatečná, výstup musí být insufficient_data."
+
+  acceptance:
+    - "AI payload obsahuje ověřené claims."
+    - "AI payload obsahuje ověřené statistics."
+    - "Každé významné tvrzení lze dohledat k evidence/source."
+    - "AI bez dostatečných dat nezkonstruuje fake facts."
+
+
+P0-04:
+  title: "Audit → Research repair loop nepoužívá canonical ResearchTask"
+  severity: "P0"
+
+  problem:
+    - "Audit může generovat verify_player_availability."
+    - "Audit může generovat fetch_additional_sources."
+    - "RepairQueue generuje vlastní job payload."
+    - "Orchestrator tyto úkoly může poslat jako obecný RESEARCH job."
+    - "ResearchWorker však očekává canonical ResearchTask."
+    - "Audit → Research loop proto není spolehlivě kompatibilní."
+
+  required_fix:
+    - "Audit nesmí vytvářet vlastní nekompatibilní Research payload."
+    - "Audit musí vytvořit ResearchRequest."
+    - "ResearchPlanner/TaskFactory převede ResearchRequest na ResearchTask."
+    - "ResearchTask vytvoří standardní Job."
+    - "ResearchWorker zpracuje stejným způsobem jako initial research."
+
+  acceptance:
+    - "Audit může vyvolat další research."
+    - "Repair job projde stejným ResearchTask workflow."
+    - "Audit → Research → Evidence → Claims → AI → Audit loop funguje opakovaně."
+
+
+P0-05:
+  title: "EvidenceExtractor nepokrývá všechny research domains"
+  severity: "P0"
+
+  problem:
+    currently_real_extraction:
+      - "ABSENCES_HOME"
+      - "ABSENCES_AWAY"
+
+    missing_or_insufficient:
+      - "MATCH_IDENTITY"
+      - "FORM_HOME"
+      - "FORM_AWAY"
+      - "STATISTICS"
+      - "HEAD_TO_HEAD"
+      - "EXPECTED_LINEUPS"
+      - "WEATHER"
+
+  required_fix:
+    - "Implementovat domain-specific evidence extraction."
+    - "Každý required domain musí mít definovaná evidence pravidla."
+    - "Evidence musí obsahovat source/document reference."
+    - "Evidence musí být časově validována vůči cutoff."
+    - "Evidence musí být převoditelná na Claim."
+
+  acceptance:
+    - "Každý required research domain může vytvořit evidence."
+    - "Evidence → Claim funguje pro všechny required domains."
+    - "Neexistuje pouze formální/stub implementace."
+
+
+P0-06:
+  title: "API orchestration endpoint není spolehlivě napojen na canonical pipeline"
+  severity: "P0"
+
+  problem:
+    - "Dokumentace požaduje POST /api/analysis/start."
+    - "Dokumentace požaduje GET /api/analysis/{run_id}."
+    - "V různých verzích existuje stará API/job infrastruktura."
+    - "Existuje riziko rozporu mezi routerem, orchestrátorem a DB schématem."
+    - "API může používat MatchOrchestrator místo canonical MasterOrchestrator."
+
+  required_fix:
+    endpoints:
+      - "POST /api/analysis/start"
+      - "GET /api/analysis/{run_id}"
+
+    actions:
+      - "Napojit endpointy na canonical orchestrator."
+      - "Sjednotit DB model."
+      - "Sjednotit JobStore/API payload."
+      - "Odstranit staré API kontrakty."
+
+  acceptance:
+    - "POST vytvoří skutečný analysis run."
+    - "GET vrací aktuální stav stejného runu."
+    - "API spustí stejnou pipeline jako interní E2E test."
+
+
+P0-07:
+  title: "ResearchTask používá team IDs místo skutečných názvů týmů"
+  severity: "P0"
+
+  problem:
+    - "Dispatch může ukládat home_team jako home_team_id."
+    - "Dispatch může ukládat away_team jako away_team_id."
+    - "Competition může být uložen jako competition_id."
+    - "QueryBuilder očekává názvy týmů/competition."
+
+  required_fix:
+    canonical_match_context:
+      - "match_id"
+      - "home_team"
+      - "away_team"
+      - "competition"
+      - "scheduled_at"
+      - "venue"
+      - "data_cutoff_at"
+      - "run_id"
+      - "run_db_id"
+
+  acceptance:
+    - "Query obsahuje skutečný název domácího týmu."
+    - "Query obsahuje skutečný název hostujícího týmu."
+    - "Query obsahuje správnou soutěž."
+    - "Query neobsahuje pouze numerické IDs."
+
+
+P0-08:
+  title: "Sport filter není dostatečně robustní"
+  severity: "P0"
+
+  problem:
+    - "Filtrace fotbalu je převážně keyword-based."
+    - "Samotná přítomnost football keywordů nezaručuje správný zápas."
+    - "Systém musí ověřit správnou identitu zápasu."
+
+  required_fix:
+    - "Validovat home team."
+    - "Validovat away team."
+    - "Validovat competition."
+    - "Validovat sport."
+    - "Preferovat více nezávislých identifikačních signálů."
+    - "Odmítnout nejednoznačné výsledky."
+
+  acceptance:
+    - "Výsledek musí patřit ke správnému zápasu."
+    - "Nesouvisející sportovní výsledky jsou odstraněny."
+
+
+P0-09:
+  title: "Freshness + cutoff enforcement není konzistentní v celé pipeline"
+  severity: "P0"
+
+  problem:
+    - "Cutoff je implementován pouze v některých vrstvách."
+    - "Search results bez published_at mohou být problematicky filtrovány."
+    - "Audit používá vlastní časové posuzování."
+    - "Audit nemusí mít přímo data_cutoff_at."
+    - "Je možné, že novější informace pronikne do analýzy."
+
+  required_fix:
+    - "data_cutoff_at musí být součástí canonical Run/Match context."
+    - "Search musí respektovat cutoff."
+    - "Crawler/DocumentProcessor musí zachovat retrieved_at."
+    - "Evidence musí mít published_at/retrieved_at."
+    - "ClaimValidator musí validovat cutoff."
+    - "Audit musí dostat cutoff."
+    - "AI context musí obsahovat cutoff."
+
+  acceptance:
+    - "Žádný claim s datem > cutoff nesmí být použit."
+    - "Každý claim má časovou stopu."
+    - "Audit dokáže cutoff nezávisle ověřit."
+
+
+P0-10:
+  title: "Plný autonomní end-to-end pipeline test neprochází"
+  severity: "P0"
+
+  required_flow:
+    - "POST /api/analysis/start"
+    - "MatchResolver"
+    - "canonical MatchContext"
+    - "MasterOrchestrator"
+    - "ResearchPlanner"
+    - "ResearchTasks"
+    - "Jobs"
+    - "ResearchWorker"
+    - "SearXNG"
+    - "Source selection"
+    - "Crawler"
+    - "Parser"
+    - "EvidenceExtractor"
+    - "ClaimBuilder"
+    - "ClaimValidator"
+    - "ConflictDetector"
+    - "Statistics"
+    - "ContextBuilder"
+    - "Ollama AI"
+    - "Audit"
+    - "Repair loop if necessary"
+    - "Finalization"
+    - "COMPLETED / UNRESOLVED"
+
+  acceptance:
+    - "Celý proces proběhne bez ručního zásahu."
+    - "Žádný fake/fallback football data."
+    - "Run se nesmí označit SUCCESS pouze proto, že workery technicky skončily."
+
+
+============================================================
+P1 — PROBLÉMY PRO SPOLEHLIVOST
+============================================================
+
+P1-01:
+  title: "Source independence"
+  fixes:
+    - "Zajistit nezávislost zdrojů."
+    - "Nespoléhat na jednu stránku/doménu."
+    - "Rozlišovat source authority od source independence."
+    - "Pro kritická tvrzení požadovat vhodnou vícezdrojovou podporu."
+
+
+P1-02:
+  title: "Source registry je duplicitní"
+  problem:
+    - "Existuje YAML source registry."
+    - "Současně existuje hardcoded registry v Pythonu."
+  fixes:
+    - "Jeden canonical source registry."
+    - "Konfigurace musí být načítána z YAML/config."
+    - "Odstranit duplicitní hardcoded seznam."
+    - "Přidat validaci konfigurace."
+
+
+P1-03:
+  title: "Crawler robustnost"
+  fixes:
+    - "HTTP fallback."
+    - "Playwright fallback pro JS stránky."
+    - "Timeout handling."
+    - "Retry policy."
+    - "Rate limiting."
+    - "Detekce neúspěšného/partial fetch."
+    - "Zachovat final_url."
+    - "Zachovat retrieved_at."
+    - "Zachovat content_hash."
+
+
+P1-04:
+  title: "Parser robustnost"
+  fixes:
+    - "Zachovat canonical_url."
+    - "Zachovat published_at."
+    - "Zachovat retrieved_at."
+    - "Zachovat content_hash."
+    - "Zachovat word_count."
+    - "Zachovat quality_score."
+    - "Zachovat language."
+    - "Správně zpracovat JS/HTML/metadata varianty."
+
+
+P1-05:
+  title: "Document metadata se ztrácí mezi Crawler → Parser → Research"
+  problem:
+    - "Crawler metadata jsou bohatší než metadata používaná dále."
+    - "Některá metadata se při zpracování ztrácejí."
+
+  fixes:
+    - "Definovat canonical ParsedDocument."
+    - "Metadata musí být přenesena až do evidence."
+    - "Evidence musí mít traceability na document/source."
+
+
+P1-06:
+  title: "Recovery, idempotence a restart"
+  fixes:
+    - "Každý job musí být bezpečně retryovatelný."
+    - "Duplicate execution nesmí vytvořit nekontrolované duplicity."
+    - "Worker crash musí být recoverable."
+    - "Run musí pokračovat po restartu systému."
+    - "Stav musí být uložen v DB."
+    - "Recovery musí respektovat dependency graph."
+
+
+P1-07:
+  title: "DB/schema konzistence"
+  problem:
+    - "Existují rozpory mezi testy, schema a některými repository/API vrstvami."
+    - "Příklady: research_tasks/jobs/runs a legacy columns."
+    - "Historické testy mohou očekávat jiné schéma."
+
+  fixes:
+    - "Definovat canonical database schema."
+    - "Odstranit legacy schema assumptions."
+    - "Sjednotit repository."
+    - "Sjednotit JobStore."
+    - "Sjednotit orchestrator."
+    - "Sjednotit API."
+    - "Přidat schema migration/validation test."
+
+
+P1-08:
+  title: "Run metadata a stav nejsou vždy konzistentní"
+  fixes:
+    - "pipeline_runs.state = canonical execution state."
+    - "runs.status musí být synchronizovaný."
+    - "Každá state transition musí být auditovatelná."
+    - "Ukládat state history."
+    - "Ukládat důvod transition."
+    - "Ukládat finish/error metadata."
+
+
+P1-09:
+  title: "config_hash není důsledně ukládán"
+  fixes:
+    - "Při startu runu vypočítat config hash."
+    - "Uložit jej do run metadata."
+    - "Umožnit reprodukovatelnost konkrétní analýzy."
+
+
+P1-10:
+  title: "ConflictDetector je příliš jednoduchý"
+  problem:
+    - "Claims jsou primárně seskupovány podle subject."
+    - "Různé predicates mohou být nesprávně porovnávány."
+    - "Novější source date sama o sobě nemusí znamenat skutečné vyřešení konfliktu."
+
+  fixes:
+    - "Conflict key musí zahrnovat subject + predicate + relevantní context."
+    - "Rozlišovat skutečný konflikt od různých tvrzení."
+    - "Používat source authority."
+    - "Používat evidence quality."
+    - "Používat temporal validity."
+    - "Konflikty musí být auditovatelné."
+
+
+P1-11:
+  title: "Search relevance je příliš jednoduchá"
+  fixes:
+    - "Home team match."
+    - "Away team match."
+    - "Competition match."
+    - "Topic match."
+    - "Source authority."
+    - "Freshness."
+    - "Identity confidence."
+    - "Penalizace ambiguous results."
+
+
+P1-12:
+  title: "Freshness ranking není dostatečně přesný"
+  fixes:
+    - "Explicitní freshness score."
+    - "Published_at."
+    - "Retrieved_at."
+    - "Cutoff distance."
+    - "Source reliability."
+    - "Nezaměňovat retrieval time za publication time."
+
+
+P1-13:
+  title: "Audit nemá dostatečný samostatný cutoff context"
+  fixes:
+    - "AuditRun musí znát data_cutoff_at."
+    - "Audit musí kontrolovat claims proti cutoff."
+    - "Audit nesmí schválit future information."
+
+
+P1-14:
+  title: "API finálního výsledku a evidence"
+  fixes:
+    - "API musí vracet run state."
+    - "API musí vracet analysis result."
+    - "API musí vracet evidence/source references."
+    - "API musí vracet warnings."
+    - "API musí vracet unresolved issues."
+    - "API musí vracet cutoff."
+    - "API musí vracet confidence/traceability."
+
+
+P1-15:
+  title: "Test suite není dostatečně silná"
+  fixes:
+    unit_tests:
+      - "orchestrator"
+      - "research"
+      - "search"
+      - "crawler"
+      - "parser"
+      - "evidence"
+      - "claims"
+      - "statistics"
+      - "AI"
+      - "audit"
+
+    integration_tests:
+      - "ResearchWorker contract."
+      - "DB schema."
+      - "JobStore."
+      - "API."
+      - "Research pipeline."
+
+    e2e_tests:
+      - "full autonomous analysis"
+      - "cutoff enforcement"
+      - "audit repair loop"
+      - "worker restart"
+      - "insufficient data"
+      - "conflicting sources"
+
+
+P1-16:
+  title: "CI gates nejsou dostatečně přísné"
+  problem:
+    - "CI obsahuje tolerování chyby při instalaci dependencies."
+    - "CI coverage není dostatečně svázána s canonical branch."
+    - "Unit testy samy nestačí."
+
+  fixes:
+    - "Dependency install failure musí shodit CI."
+    - "compile check."
+    - "unit tests."
+    - "integration tests."
+    - "E2E acceptance test."
+    - "schema validation."
+    - "No-fabrication checks."
+    - "CI musí blokovat merge při P0 regresi."
+
+
+============================================================
+P2 — PŘEDPRODUKČNÍ DOTAŽENÍ
+============================================================
+
+P2-01:
+  title: "Rozšíření Source Registry"
+  tasks:
+    - "Doplnit další relevantní kvalitní zdroje."
+    - "Definovat source type."
+    - "Definovat authority."
+    - "Definovat independence."
+    - "Definovat priority."
+    - "Pravidelně validovat registry."
+
+
+P2-02:
+  title: "Observability"
+  tasks:
+    - "Structured logging."
+    - "Run-level logging."
+    - "Job-level logging."
+    - "Research metrics."
+    - "Crawler metrics."
+    - "Search metrics."
+    - "Evidence/claim metrics."
+    - "AI metrics."
+    - "Audit metrics."
+    - "Failure reasons."
+    - "Latency tracking."
+    - "Retry counters."
+    - "Worker health."
+
+
+P2-03:
+  title: "Retence logů"
+  tasks:
+    - "Definovat retention policy."
+    - "Oddělit audit logs od běžných runtime logs."
+    - "Zamezit nekontrolovanému růstu logů."
+    - "Zachovat logy potřebné pro auditovatelnost."
+
+
+P2-04:
+  title: "Provozní dokumentace"
+  tasks:
+    - "Instalace."
+    - "Konfigurace."
+    - "Spuštění SearXNG."
+    - "Spuštění workerů."
+    - "Notebook worker."
+    - "Note9 worker."
+    - "Ollama."
+    - "Database."
+    - "Recovery."
+    - "Troubleshooting."
+    - "Monitoring."
+    - "Backup/restore."
+    - "Release procedure."
+
+
+P2-05:
+  title: "Výkonnostní optimalizace"
+  tasks:
+    - "Parallelizace research tasks."
+    - "Optimalizace SearXNG requests."
+    - "Caching bezpečných výsledků."
+    - "Crawler concurrency podle domain."
+    - "DB indexy."
+    - "Minimalizace redundantních queries."
+    - "Optimalizace AI context size."
+    - "Měření skutečné latency před optimalizací."
+
+
+============================================================
+DOPORUČENÉ POŘADÍ OPRAV
+============================================================
+
+PHASE_1:
+  name: "Stabilizace základní architektury"
+  goal: "Odstranit všechny strukturální P0 chyby, které brání správnému toku dat."
+
+  tasks:
+    - "P0-02 — sjednotit orchestration path."
+    - "P0-01 — definovat canonical ResearchTask/Job contract."
+    - "P0-07 — vytvořit canonical MatchContext."
+    - "P0-06 — napojit API na canonical orchestrator."
+    - "P1-07 — sjednotit DB/schema kontrakt."
+
+  deliverable:
+    - "API → canonical orchestrator → ResearchTask → Job → Worker je konzistentní."
+
+  gate:
+    - "Database schema test PASS."
+    - "Orchestrator lifecycle test PASS."
+    - "Research job creation test PASS."
+    - "Worker can claim canonical Research job."
+
+
+PHASE_2:
+  name: "Funkční Research pipeline"
+  goal: "Zajistit, že systém skutečně získává ověřitelná data."
+
+  tasks:
+    - "P0-05 — dokončit EvidenceExtractor."
+    - "P0-08 — robustní sportovní filtr."
+    - "P0-09 — sjednotit cutoff/freshness."
+    - "P1-01 — source independence."
+    - "P1-03 — crawler robustness."
+    - "P1-04 — parser robustness."
+    - "P1-05 — zachování document metadata."
+    - "P1-11 — relevance scoring."
+    - "P1-12 — freshness scoring."
+    - "P1-10 — conflict detection."
+
+  deliverable:
+    - "Search → Source selection → Crawl → Parse → Evidence → Claims funguje pro všechny required domains."
+
+  gate:
+    - "Required research domains produce evidence."
+    - "Claims contain source traceability."
+    - "Future information is rejected."
+    - "Wrong football matches are rejected."
+
+
+PHASE_3:
+  name: "Evidence-first AI"
+  goal: "Zajistit, aby AI analyzovala pouze ověřený context."
+
+  tasks:
+    - "P0-03 — DB-backed ContextBuilder."
+    - "Načítání claims podle run_id/match_id."
+    - "Načítání statistics podle run_id/match_id."
+    - "Předání cutoff do AI contextu."
+    - "Evidence traceability."
+    - "Insufficient-data handling."
+    - "Zakázat fake/fallback football facts."
+
+  deliverable:
+    - "AI dostane pouze ověřený context."
+    - "AI nedoplňuje chybějící fakta."
+    - "AI dokáže označit nedostatek dat."
+
+  gate:
+    - "AI context obsahuje claims."
+    - "AI context obsahuje statistics."
+    - "Claims mají evidence."
+    - "AI test s prázdnými daty vrátí insufficient_data."
+
+
+PHASE_4:
+  name: "Audit a autonomní opravný cyklus"
+  goal: "Zajistit, že systém dokáže sám odhalit nedostatky a požádat o další research."
+
+  tasks:
+    - "P0-04 — Audit → canonical ResearchTask."
+    - "P1-13 — audit cutoff enforcement."
+    - "Audit issue classification."
+    - "RepairQueue → ResearchRequest."
+    - "ResearchRequest → ResearchPlanner."
+    - "ResearchPlanner → ResearchTask."
+    - "ResearchTask → Job."
+    - "Job → ResearchWorker."
+    - "Nová evidence → Claims."
+    - "Nový context → AI."
+    - "Opakovaný Audit."
+
+  deliverable:
+    - "Audit → Research → Evidence → AI → Audit loop."
+
+  gate:
+    - "Audit dokáže vytvořit repair request."
+    - "Repair request je zpracován workerem."
+    - "Nová evidence se dostane do AI."
+    - "Pipeline se dokáže vrátit k auditu."
+    - "Loop se ukončí při splnění acceptance podmínek."
+
+
+PHASE_5:
+  name: "Recovery, API, testy a CI"
+  goal: "Zajistit spolehlivý autonomní provoz."
+
+  tasks:
+    - "P1-06 — recovery/idempotence/restart."
+    - "P1-08 — state/run metadata consistency."
+    - "P1-09 — config_hash."
+    - "P1-14 — final result/evidence API."
+    - "P1-15 — complete test suite."
+    - "P1-16 — strict CI gates."
+
+  deliverable:
+    - "Systém přežije restart workeru."
+    - "Retry nevytvoří nekontrolované duplicity."
+    - "API poskytuje kompletní stav a výsledek."
+    - "CI blokuje regresní P0/P1 chyby."
+
+  gate:
+    - "Unit tests PASS."
+    - "Integration tests PASS."
+    - "Recovery tests PASS."
+    - "API tests PASS."
+    - "CI PASS."
+
+
+PHASE_6:
+  name: "Předprodukční dotažení"
+  goal: "Dokončit P2 a připravit systém na dlouhodobý provoz."
+
+  tasks:
+    - "P2-01 — rozšířit Source Registry."
+    - "P2-02 — observability."
+    - "P2-03 — log retention."
+    - "P2-04 — provozní dokumentace."
+    - "P2-05 — performance optimization."
+
+  deliverable:
+    - "Production-ready operational environment."
+
+  gate:
+    - "Monitoring funguje."
+    - "Logs jsou dohledatelné."
+    - "Retention je definována."
+    - "Provozní dokumentace je kompletní."
+    - "Performance je změřena."
+    - "Žádný P0."
+    - "Žádný P1."
+    - "P2 backlog je uzavřen nebo explicitně schválen."
+
+
+============================================================
+FINÁLNÍ ACCEPTANCE TEST
+============================================================
+
+FINAL_TEST:
+  name: "FULL_AUTONOMOUS_FOOTBALL_ANALYSIS"
+
+  input:
+    - "konkrétní reálný fotbalový zápas"
+
+  expected_flow:
+    01: "API receives analysis request"
+    02: "MatchResolver identifies exactly one match"
+    03: "Canonical MatchContext created"
+    04: "data_cutoff_at fixed"
+    05: "ResearchPlanner creates canonical ResearchTasks"
+    06: "Jobs created"
+    07: "Notebook/Note9 workers claim jobs"
+    08: "Search via SearXNG"
+    09: "Source selection"
+    10: "Crawler"
+    11: "Parser"
+    12: "Evidence extraction"
+    13: "Claim creation"
+    14: "Claim validation"
+    15: "Conflict detection"
+    16: "Statistics collection"
+    17: "DB persistence"
+    18: "ContextBuilder loads verified data"
+    19: "Ollama produces evidence-grounded analysis"
+    20: "Audit validates result"
+    21: "Audit creates repair request if needed"
+    22: "Repair request becomes canonical ResearchTask"
+    23: "ResearchWorker executes repair"
+    24: "Context is rebuilt"
+    25: "AI is rerun if required"
+    26: "Final Audit"
+    27: "Finalize"
+    28: "COMPLETED or UNRESOLVED"
+
+  HARD_FAILURES:
+    - "fake football data"
+    - "example.com fallback data"
+    - "missing match identity"
+    - "wrong teams"
+    - "wrong competition"
+    - "future information beyond cutoff"
+    - "AI claims without evidence"
+    - "ResearchWorker payload mismatch"
+    - "broken Audit → Research loop"
+    - "manual intervention required"
+    - "run marked SUCCESS despite incomplete required work"
+
+
+============================================================
+DEFINITION OF DONE
+============================================================
+
+DONE_WHEN:
+  P0:
+    status: "0 open"
+
+  P1:
+    status: "0 open"
+
+  P2:
+    status: "0 open OR explicitly accepted as non-blocking"
+
+  ARCHITECTURE:
+    - "one canonical orchestration path"
+    - "one canonical MatchContext"
+    - "one canonical ResearchTask contract"
+    - "one canonical DB schema"
+    - "one canonical source registry"
+
+  DATA:
+    - "evidence-first"
+    - "full source traceability"
+    - "cutoff enforced"
+    - "no fabricated data"
+
+  AUTONOMY:
+    - "Notebook + Note9 can execute assigned work autonomously"
+    - "worker recovery works"
+    - "audit repair loop works"
+    - "no manual pipeline intervention"
+
+  TESTING:
+    - "unit tests PASS"
+    - "integration tests PASS"
+    - "E2E PASS"
+    - "CI PASS"
+
+  FINAL_STATUS:
+    "READY"

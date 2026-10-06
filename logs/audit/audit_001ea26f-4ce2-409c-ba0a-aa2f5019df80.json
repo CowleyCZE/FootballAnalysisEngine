@@ -1,0 +1,19 @@
+{
+  "run_id": "001ea26f-4ce2-409c-ba0a-aa2f5019df80",
+  "match_id": 123,
+  "ai_run_id": "ai-run-1",
+  "audit_score": 0.7,
+  "status": "UNRESOLVED",
+  "issues": [
+    {
+      "type": "ai_analysis_unavailable",
+      "severity": "CRITICAL",
+      "description": "AI analytická vrstva neposkytla použitelný výstup. Lokální AI služba neposkytla použitelný výstup: Ollama API request failed after 3 retries: Client error '404 Not Found' for url 'http://127.0.0.1:11434/api/generate'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "evidence_ids": [],
+      "requires_research": false
+    }
+  ],
+  "research_jobs": [],
+  "current_cycle": 1,
+  "max_cycles": 3
+}
