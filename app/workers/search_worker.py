@@ -6,10 +6,6 @@ from typing import Any, Dict, List
 
 import httpx
 
-from app.search.engine import SearchEngine
-from app.search.models import QuerySpec
-from app.search.searxng_client import SearXNGClient
-
 
 class SearchWorker:
     """Compatibility worker backed by the unified SearchEngine pipeline with Note 9 lightweight proxy support."""
@@ -35,10 +31,20 @@ class SearchWorker:
                 "topic_terms": list(payload.get("topic_terms") or []),
                 "data_cutoff_at": payload.get("data_cutoff_at") or payload.get("cutoff"),
             }
+            headers = {}
+            token = os.getenv("WORKER_API_TOKEN") or os.getenv("API_SECRET_TOKEN")
+            if token:
+                headers["X-Worker-Token"] = token
+                headers["Authorization"] = f"Bearer {token}"
+
             with httpx.Client(timeout=30.0) as client:
-                resp = client.post(proxy_url, json=proxy_payload)
+                resp = client.post(proxy_url, json=proxy_payload, headers=headers)
                 resp.raise_for_status()
                 return resp.json()
+
+        from app.search.engine import SearchEngine
+        from app.search.models import QuerySpec
+        from app.search.searxng_client import SearXNGClient
 
         client = SearXNGClient(
             base_url=os.getenv("SEARXNG_URL", "http://127.0.0.1:8080"),

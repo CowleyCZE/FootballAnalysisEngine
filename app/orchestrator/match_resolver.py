@@ -94,19 +94,18 @@ class MatchResolver:
             home_team_row = _get_team(request.home_team)
             away_team_row = _get_team(request.away_team)
 
-            # Do NOT create unverified matches automatically
-            if not home_team_row or not away_team_row:
-                unverified_teams = []
+            is_verified = bool(home_team_row and away_team_row and request.competition and request.competition.strip())
+            if not is_verified:
+                unverified_reasons = []
                 if not home_team_row:
-                    unverified_teams.append(request.home_team)
+                    unverified_reasons.append(f"domácí tým '{request.home_team}'")
                 if not away_team_row:
-                    unverified_teams.append(request.away_team)
+                    unverified_reasons.append(f"hostující tým '{request.away_team}'")
+                if not request.competition or not request.competition.strip():
+                    unverified_reasons.append("chybí specifikace soutěže")
                 raise MatchNotFoundException(
-                    f"Zápas nelze ověřit v autoritativních datech. Neznámé týmy: {', '.join(unverified_teams)}"
+                    f"Zápas nelze ověřit v autoritativních datech ({', '.join(unverified_reasons)}). Status nastaven na UNVERIFIED / RESOLVE_FAILED."
                 )
-
-            if not request.competition or not request.competition.strip():
-                raise MatchNotFoundException("Zápas nelze ověřit: chybí specifikace soutěže.")
 
             home_team_id = int(home_team_row["id"])
             away_team_id = int(away_team_row["id"])

@@ -4,7 +4,7 @@ orchestrator:
   max_parallel_jobs: 4
   default_max_attempts: 3
   audit_max_cycles: 3
-  worker_timeout: 120
+  worker_timeout: 300
   job_timeout: 900
   recovery_enabled: true
 

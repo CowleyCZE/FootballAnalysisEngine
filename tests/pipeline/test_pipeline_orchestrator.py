@@ -56,7 +56,7 @@ def test_05_06_worker_crash_recovery_and_retry_limit(test_db):
     j_id = queue.create_job("SEARCH", 123, {"query": "fail"}, max_attempts=2)
     job = queue.claim_job("worker-dead", ["SEARCH"])
     with sqlite3.connect(test_db) as conn:
-        old_time = (datetime.now(timezone.utc) - timedelta(seconds=200)).isoformat()
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=400)).isoformat()
         conn.execute("UPDATE jobs SET heartbeat_at = ? WHERE job_id = ?", (old_time, j_id))
         conn.commit()
     orc = MasterOrchestrator(db_path=test_db)

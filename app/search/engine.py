@@ -43,7 +43,7 @@ class SearchEngine:
         home_team: Optional[str] = None,
         away_team: Optional[str] = None,
         competition: Optional[str] = None,
-        min_identity_confidence: float = 0.0,
+        min_identity_confidence: float = 0.6,
     ) -> list[SearchResult]:
         data = await self.client.search(
             query.query,
@@ -81,7 +81,8 @@ class SearchEngine:
                 scheduled_at=data_cutoff_at,
             )
 
-            if min_identity_confidence > 0 and confidence < min_identity_confidence:
+            # Strict threshold check if teams were provided
+            if (home_team or away_team) and min_identity_confidence > 0 and confidence < min_identity_confidence:
                 continue
 
             result.relevance = calculate_relevance(
