@@ -21,6 +21,9 @@ class EvidenceExtractor:
         text = doc.get("text", "")
         url = doc.get("url", "")
         pub_at = doc.get("published_at")
+        retrieved_at = doc.get("retrieved_at")
+        canonical_url = doc.get("canonical_url") or url
+        content_hash = doc.get("content_hash")
         doc_id = doc.get("document_id")
 
         if not text:
@@ -39,19 +42,23 @@ class EvidenceExtractor:
                         text_fragment=sent,
                         document_id=doc_id,
                         published_at=pub_at,
+                        retrieved_at=retrieved_at,
+                        canonical_url=canonical_url,
+                        content_hash=content_hash,
                         domain=domain
                     ))
             else:
-                # Default domain extraction
                 evidence_list.append(Evidence(
                     source_url=url,
                     text_fragment=sent,
                     document_id=doc_id,
                     published_at=pub_at,
+                    retrieved_at=retrieved_at,
+                    canonical_url=canonical_url,
+                    content_hash=content_hash,
                     domain=domain
                 ))
 
-        # Fallback if no specific sentence matched keywords but document text exists
         if not evidence_list and sentences:
             first_fragment = " ".join(sentences[:3])
             evidence_list.append(Evidence(
@@ -59,6 +66,9 @@ class EvidenceExtractor:
                 text_fragment=first_fragment[:500],
                 document_id=doc_id,
                 published_at=pub_at,
+                retrieved_at=retrieved_at,
+                canonical_url=canonical_url,
+                content_hash=content_hash,
                 domain=domain
             ))
 

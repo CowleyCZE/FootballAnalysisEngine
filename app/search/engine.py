@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Optional
 
 from app.search.deduplicator import deduplicate
 from app.search.models import QuerySpec, SearchResult
 from app.search.normalizer import normalize_searx_result
-from app.search.relevance import calculate_relevance
+from app.search.relevance import calculate_relevance, calculate_identity_confidence
 from app.search.searxng_client import SearXNGClient
 from app.search.source_registry import SearchSourceRegistry
 from app.search.sport_filter import filter_sports_results
@@ -21,6 +21,7 @@ class SearchEngine:
           -> normalization
           -> deduplication
           -> source authority
+          -> identity confidence check
           -> relevance
           -> ranking
     """
@@ -39,6 +40,10 @@ class SearchEngine:
         team: str = "",
         topic_terms: list[str] | None = None,
         data_cutoff_at=None,
+        home_team: Optional[str] = None,
+        away_team: Optional[str] = None,
+        competition: Optional[str] = None,
+        min_identity_confidence: float = 0.0,
     ) -> list[SearchResult]:
         data = await self.client.search(
             query.query,
@@ -46,8 +51,6 @@ class SearchEngine:
             time_range=query.time_range,
         )
 
-        # Keep compatibility with injected test/legacy clients that return
-        # the raw result list instead of the SearXNG response envelope.
         if isinstance(data, list):
             raw_results = data
         elif isinstance(data, dict):
@@ -65,9 +68,22 @@ class SearchEngine:
             ]
         terms = topic_terms or []
 
+        validated_results = []
         for result in filtered:
             info = self.source_registry.get_info(result.url)
             result.source_type = info["source_type"]
+
+            confidence = calculate_identity_confidence(
+                result,
+                home_team=home_team or team,
+                away_team=away_team,
+                competition=competition,
+                scheduled_at=data_cutoff_at,
+            )
+
+            if min_identity_confidence > 0 and confidence < min_identity_confidence:
+                continue
+
             result.relevance = calculate_relevance(
                 result,
                 team=team,
@@ -75,16 +91,20 @@ class SearchEngine:
                 source_priority=query.priority,
                 source_authority=info["authority"],
                 data_cutoff_at=data_cutoff_at,
+                home_team=home_team,
+                away_team=away_team,
+                competition=competition,
             )
+            validated_results.append(result)
 
-        filtered.sort(
+        validated_results.sort(
             key=lambda result: (
                 getattr(result, "relevance", 0),
                 result.score,
             ),
             reverse=True,
         )
-        return filtered
+        return validated_results
 
     @staticmethod
     def _is_at_or_before_cutoff(result: SearchResult, cutoff) -> bool:
@@ -108,10 +128,21 @@ class SearchEngine:
         team: str = "",
         topic_terms: list[str] | None = None,
         data_cutoff_at=None,
+        home_team: Optional[str] = None,
+        away_team: Optional[str] = None,
+        competition: Optional[str] = None,
     ) -> list[SearchResult]:
         all_results: list[SearchResult] = []
         for query in queries:
             all_results.extend(
-                await self.search(query=query, team=team, topic_terms=topic_terms, data_cutoff_at=data_cutoff_at)
+                await self.search(
+                    query=query,
+                    team=team,
+                    topic_terms=topic_terms,
+                    data_cutoff_at=data_cutoff_at,
+                    home_team=home_team,
+                    away_team=away_team,
+                    competition=competition,
+                )
             )
         return deduplicate(all_results)

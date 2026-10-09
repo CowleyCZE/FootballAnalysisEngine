@@ -24,6 +24,7 @@ class MatchIdentity(BaseModel):
     scheduled_at: datetime
     data_cutoff_at: datetime
     venue: Optional[str] = None
+    status: str = "RESOLVED"
 
 
 class TaskRequirement(BaseModel):
