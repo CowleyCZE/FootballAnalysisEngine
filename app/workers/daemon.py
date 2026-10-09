@@ -98,9 +98,11 @@ class WorkerDaemon:
             elif res_status in ("FAILED", "ERROR"):
                 err_msg = result.get("error") or f"Job handler returned status {res_status}"
                 self.queue.update_job_status(job_id, JobStatus.FAILED, result=result, error=str(err_msg), worker_id=self.worker_id)
-            else:
-                # Pokud není status definován, ale handler doběhl bez výjimky
+            elif isinstance(result, dict) and result.get("status") is None and bool(result):
                 self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=result, worker_id=self.worker_id)
+            else:
+                err_msg = f"Job produced unknown or invalid status: {res_status}"
+                self.queue.update_job_status(job_id, JobStatus.FAILED, result=result, error=err_msg, worker_id=self.worker_id)
         except Exception as exc:
             logger.exception("Worker %s failed job %s", self.worker_id, job_id)
             self.queue.update_job_status(job_id, JobStatus.RETRY, error=str(exc), worker_id=self.worker_id)

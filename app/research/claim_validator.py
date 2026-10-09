@@ -4,8 +4,9 @@ from app.research.models import Claim, ClaimStatus
 from app.research.cutoff_filter import CutoffFilter
 
 TIME_SENSITIVE_PREDICATES = {
+    "availability_status", "absence_report", "match_identity", "team_form",
     "has_absence", "is_injured", "is_suspended", "is_doubtful", "current_form",
-    "lineup_status", "weather_condition", "recent_results"
+    "expected_lineup", "lineup_status", "weather_condition", "recent_results"
 }
 
 
@@ -18,7 +19,13 @@ class ClaimValidator:
                 validated.append(claim)
                 continue
 
-            is_time_sensitive = claim.predicate in TIME_SENSITIVE_PREDICATES or "absence" in claim.predicate or "form" in claim.predicate
+            is_time_sensitive = (
+                claim.predicate in TIME_SENSITIVE_PREDICATES
+                or "absence" in claim.predicate
+                or "form" in claim.predicate
+                or "lineup" in claim.predicate
+                or "status" in claim.predicate
+            )
 
             # Check claim's own source_date against cutoff
             if claim.source_date:

@@ -22,13 +22,14 @@ def test_db(tmp_path):
             competition TEXT NOT NULL,
             season TEXT,
             scheduled_at TEXT NOT NULL,
-            venue TEXT
+            venue TEXT,
+            status TEXT
         );
         """
     )
     cursor.execute("INSERT INTO teams VALUES (1, 'Sparta Praha'), (2, 'Slavia Praha');")
     cursor.execute(
-        "INSERT INTO matches VALUES (100, 1, 2, '1. Liga', '2026/27', '2026-10-10 18:00:00', 'Letna');"
+        "INSERT INTO matches VALUES (100, 1, 2, '1. Liga', '2026/27', '2026-10-10 18:00:00', 'Letna', 'RESOLVED');"
     )
     conn.commit()
     conn.close()

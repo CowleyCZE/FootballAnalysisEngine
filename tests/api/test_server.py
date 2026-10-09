@@ -16,7 +16,7 @@ def api_test_db(tmp_path, monkeypatch):
     conn = sqlite3.connect(db_file)
     conn.execute("INSERT INTO teams(id, name, normalized_name) VALUES (1, 'Real Madrid', 'real_madrid'), (2, 'Barcelona', 'barcelona'), (3, 'Arsenal', 'arsenal'), (4, 'Chelsea', 'chelsea')")
     conn.execute("INSERT INTO competitions(id, name, country) VALUES (1, 'La Liga', 'Spain'), (2, 'Premier League', 'England')")
-    conn.execute("INSERT INTO matches(id, competition, competition_id, home_team_id, away_team_id, scheduled_at) VALUES (101, 'La Liga', 1, 1, 2, '2026-10-15 20:00:00')")
+    conn.execute("INSERT INTO matches(id, competition, competition_id, home_team_id, away_team_id, scheduled_at, status) VALUES (101, 'La Liga', 1, 1, 2, '2026-10-15 20:00:00', 'RESOLVED')")
     conn.commit()
     conn.close()
 
@@ -32,16 +32,36 @@ def test_health_and_root(api_test_db):
     assert client.get("/api/health").status_code == 200
 
 
+def test_api_authentication_enforcement(api_test_db):
+    client = TestClient(server_module.app)
+
+    # 1. Unauthenticated request returns 401
+    unauth_resp = client.post("/api/analysis/start", json={"match_id": 101})
+    assert unauth_resp.status_code == 401
+
+    # 2. Invalid token returns 401
+    bad_token_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers={"X-Worker-Token": "wrong-token"})
+    assert bad_token_resp.status_code == 401
+
+    # 3. Valid X-Worker-Token header succeeds
+    auth_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)
+    assert auth_resp.status_code == 200
+
+    # 4. Valid Authorization: Bearer header succeeds
+    bearer_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers={"Authorization": "Bearer test-secret-token"})
+    assert bearer_resp.status_code == 200
+
+
 def test_start_analysis_by_match_id(api_test_db):
     client = TestClient(server_module.app)
-    resp = client.post("/api/analysis/start", json={"match_id": 101})
+    resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "started"
     assert data["match_id"] == 101
     run_id = data["run_id"]
 
-    status_resp = client.get(f"/api/analysis/{run_id}")
+    status_resp = client.get(f"/api/analysis/{run_id}", headers=AUTH_HEADERS)
     assert status_resp.status_code == 200
     status_data = status_resp.json()
     assert status_data["match_id"] == 101
@@ -56,7 +76,7 @@ def test_start_analysis_by_request(api_test_db):
         "away_team": "Barcelona",
         "competition": "La Liga",
         "scheduled_at": "2026-10-15T20:00:00"
-    })
+    }, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "DISCOVERY"
@@ -64,17 +84,16 @@ def test_start_analysis_by_request(api_test_db):
 
 
 def test_start_analysis_creates_match_for_verified_teams(api_test_db):
+    # If Arsenal and Chelsea exist but match is not in schedule, start analysis must fail as unverified
     client = TestClient(server_module.app)
     resp = client.post("/api/analysis/start", json={
         "home_team": "Arsenal",
         "away_team": "Chelsea",
         "competition": "Premier League",
         "scheduled_at": "2026-11-20T18:00:00"
-    })
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "started" or data["status"] == "DISCOVERY"
-    assert data["match_id"] is not None
+    }, headers=AUTH_HEADERS)
+    assert resp.status_code == 404
+    assert "neexistuje v autoritativním rozpisu" in resp.json()["detail"]
 
 
 def test_start_analysis_rejects_unverified_teams(api_test_db):
@@ -84,14 +103,14 @@ def test_start_analysis_rejects_unverified_teams(api_test_db):
         "away_team": "Chelsea",
         "competition": "Premier League",
         "scheduled_at": "2026-11-20T18:00:00"
-    })
+    }, headers=AUTH_HEADERS)
     assert resp.status_code == 404
     assert "Zápas nelze ověřit" in resp.json()["detail"]
 
 
 def test_worker_registration_and_job_claim(api_test_db):
     client = TestClient(server_module.app)
-    start_resp = client.post("/api/analysis/start", json={"match_id": 101})
+    start_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)
     assert start_resp.status_code == 200
 
     # Unauthenticated should fail with 401
@@ -130,7 +149,7 @@ def test_worker_registration_and_job_claim(api_test_db):
 
 def test_job_result_triggers_autonomous_tick(api_test_db):
     client = TestClient(server_module.app)
-    start_resp = client.post("/api/analysis/start", json={"match_id": 101})
+    start_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)
     run_id = start_resp.json()["run_id"]
 
     # Claim and finish all discovery jobs
@@ -149,5 +168,5 @@ def test_job_result_triggers_autonomous_tick(api_test_db):
         }, headers=AUTH_HEADERS)
 
     # Pipeline should have advanced past DISCOVERY automatically
-    status_resp = client.get(f"/api/analysis/{run_id}")
+    status_resp = client.get(f"/api/analysis/{run_id}", headers=AUTH_HEADERS)
     assert status_resp.json()["state"] != "DISCOVERY"

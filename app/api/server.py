@@ -175,7 +175,7 @@ def internal_search(req: SearchInternalRequest):
     }
 
 
-@app.post("/api/analysis/start")
+@app.post("/api/analysis/start", dependencies=[Depends(verify_api_auth)])
 def start_analysis(req: AnalysisStartRequest):
     if req.match_id is not None:
         master = MasterOrchestrator(db_path=DB_PATH)
@@ -217,7 +217,7 @@ def start_analysis(req: AnalysisStartRequest):
     raise HTTPException(status_code=400, detail="Must provide either match_id or (home_team, away_team, scheduled_at)")
 
 
-@app.get("/api/analysis/{run_id}")
+@app.get("/api/analysis/{run_id}", dependencies=[Depends(verify_api_auth)])
 def get_analysis_status(run_id: str):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -253,7 +253,7 @@ def get_analysis_status(run_id: str):
         conn.close()
 
 
-@app.get("/api/analysis/{run_id}/result")
+@app.get("/api/analysis/{run_id}/result", dependencies=[Depends(verify_api_auth)])
 def get_analysis_result(run_id: str, include_historical: bool = False):
     """Vrátí finální analytický výsledek s kompletní dohledatelností (claims, evidence, cutoff, audit).
 

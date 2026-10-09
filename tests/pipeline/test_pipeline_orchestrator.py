@@ -20,7 +20,7 @@ def test_db(tmp_path):
     MasterOrchestrator(db_path=db)
     with sqlite3.connect(db) as conn:
         conn.execute("INSERT INTO teams(id, name, normalized_name) VALUES (1, 'Home FC', 'home_fc'), (2, 'Away FC', 'away_fc')")
-        conn.execute("INSERT INTO matches(id, competition, season, home_team_id, away_team_id, scheduled_at, venue) VALUES (123, 'Test League', '2026/27', 1, 2, '2026-10-10T18:00:00', 'Test Stadium')")
+        conn.execute("INSERT INTO matches(id, competition, season, home_team_id, away_team_id, scheduled_at, venue, status) VALUES (123, 'Test League', '2026/27', 1, 2, '2026-10-10T18:00:00', 'Test Stadium', 'RESOLVED')")
         conn.commit()
     return db
 
