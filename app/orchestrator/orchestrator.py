@@ -111,6 +111,8 @@ class MasterOrchestrator:
                 payload = {
                     "task_id": task_id,
                     "task_uuid": task.task_uuid,
+                    "task_type": task.task_type,
+                    "required": bool(task.required),
                     "domain": task.domain,
                     "description": task.description,
                     "run_id": run_id,

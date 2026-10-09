@@ -5,7 +5,7 @@ import os
 import sqlite3
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends, status
 from pydantic import BaseModel, Field
 
 from app.orchestrator.orchestrator import MasterOrchestrator, MatchOrchestrator
@@ -28,6 +28,29 @@ DB_PATH = "database/football.db"
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def verify_api_auth(
+    x_worker_token: Optional[str] = Header(None, alias="X-Worker-Token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
+    expected_token = os.getenv("WORKER_API_TOKEN") or os.getenv("API_SECRET_TOKEN")
+    if not expected_token:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="API token authentication is not configured on the server. Access blocked for security.",
+        )
+
+    provided_token = x_worker_token
+    if not provided_token and authorization and authorization.lower().startswith("bearer "):
+        provided_token = authorization[7:].strip()
+
+    if provided_token != expected_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing worker API token",
+        )
+    return True
 
 
 class AnalysisStartRequest(BaseModel):
@@ -103,7 +126,7 @@ def notebook_worker_heartbeat():
     }
 
 
-@app.post("/api/internal/search")
+@app.post("/api/internal/search", dependencies=[Depends(verify_api_auth)])
 def internal_search(req: SearchInternalRequest):
     """Interní vyhledávací proxy endpoint pro odlehčené Note 9 workery."""
     client = SearXNGClient(
@@ -229,8 +252,12 @@ def get_analysis_status(run_id: str):
 
 
 @app.get("/api/analysis/{run_id}/result")
-def get_analysis_result(run_id: str):
-    """Vrátí finální analytický výsledek s kompletní dohledatelností (claims, evidence, cutoff, audit)."""
+def get_analysis_result(run_id: str, include_historical: bool = False):
+    """Vrátí finální analytický výsledek s kompletní dohledatelností (claims, evidence, cutoff, audit).
+
+    Standardně filtruje výhradně podle c.run_id = ?. Pokud je include_historical=True, přimíchává i
+    historické claims ze stejného match_id označené s příznakem archived=True.
+    """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     try:
@@ -249,11 +276,18 @@ def get_analysis_result(run_id: str):
 
         claims = []
         if run_db_id:
-            claim_rows = conn.execute("""
-                SELECT c.id, c.claim_text, c.claim_type, c.normalized_claim, c.status, c.confidence, c.valid_from
-                FROM claims c
-                WHERE c.run_id = ? OR c.match_id = ?
-            """, (run_db_id, match_id)).fetchall()
+            if include_historical:
+                claim_rows = conn.execute("""
+                    SELECT c.id, c.run_id, c.claim_text, c.claim_type, c.normalized_claim, c.status, c.confidence, c.valid_from
+                    FROM claims c
+                    WHERE c.run_id = ? OR c.match_id = ?
+                """, (run_db_id, match_id)).fetchall()
+            else:
+                claim_rows = conn.execute("""
+                    SELECT c.id, c.run_id, c.claim_text, c.claim_type, c.normalized_claim, c.status, c.confidence, c.valid_from
+                    FROM claims c
+                    WHERE c.run_id = ?
+                """, (run_db_id,)).fetchall()
 
             for cr in claim_rows:
                 ev_rows = conn.execute("""
@@ -263,6 +297,7 @@ def get_analysis_result(run_id: str):
                     JOIN documents d ON d.id = e.document_id
                     WHERE ce.claim_id = ?
                 """, (cr["id"],)).fetchall()
+                is_archived = (cr["run_id"] != run_db_id)
                 claims.append({
                     "claim_id": cr["id"],
                     "claim_text": cr["claim_text"],
@@ -271,6 +306,7 @@ def get_analysis_result(run_id: str):
                     "status": cr["status"],
                     "confidence": cr["confidence"],
                     "valid_from": cr["valid_from"],
+                    "archived": is_archived,
                     "evidence": [dict(ev) for ev in ev_rows],
                 })
 
@@ -280,7 +316,7 @@ def get_analysis_result(run_id: str):
         ai_res = json.loads(ai_job["result_json"]) if ai_job and ai_job["result_json"] else None
         audit_res = json.loads(audit_job["result_json"]) if audit_job and audit_job["result_json"] else None
 
-        audit_issues = conn.execute("SELECT rule_name, issue_type, severity, message, description FROM audit_issues WHERE audit_run_id IN (SELECT id FROM audit_runs WHERE run_id = ? OR match_id = ?)", (run_id, match_id)).fetchall()
+        audit_issues = conn.execute("SELECT rule_name, issue_type, severity, message, description FROM audit_issues WHERE audit_run_id IN (SELECT id FROM audit_runs WHERE run_id = ?)", (run_id,)).fetchall()
 
         warnings = []
         if audit_res and isinstance(audit_res, dict) and audit_res.get("warnings"):
@@ -307,7 +343,7 @@ def get_analysis_result(run_id: str):
         conn.close()
 
 
-@app.post("/api/workers/register")
+@app.post("/api/workers/register", dependencies=[Depends(verify_api_auth)])
 def register_worker(worker: WorkerRegistration):
     queue = JobQueue(db_path=DB_PATH)
     queue.store.register_worker(worker.worker_id, worker.capabilities, worker_type=worker.worker_name)
@@ -317,7 +353,7 @@ def register_worker(worker: WorkerRegistration):
     }
 
 
-@app.post("/api/workers/heartbeat")
+@app.post("/api/workers/heartbeat", dependencies=[Depends(verify_api_auth)])
 def worker_heartbeat(data: WorkerHeartbeat):
     queue = JobQueue(db_path=DB_PATH)
     queue.store.heartbeat(data.worker_id)
@@ -328,7 +364,7 @@ def worker_heartbeat(data: WorkerHeartbeat):
     }
 
 
-@app.post("/api/jobs/claim")
+@app.post("/api/jobs/claim", dependencies=[Depends(verify_api_auth)])
 def claim_job(data: JobClaimRequest):
     queue = JobQueue(db_path=DB_PATH)
     job = queue.claim_job(data.worker_id, data.capabilities)
@@ -345,9 +381,17 @@ def claim_job(data: JobClaimRequest):
     }
 
 
-@app.post("/api/jobs/{job_id}/result")
+@app.post("/api/jobs/{job_id}/result", dependencies=[Depends(verify_api_auth)])
 def job_result(job_id: str, data: JobResult):
     queue = JobQueue(db_path=DB_PATH)
+    with sqlite3.connect(DB_PATH) as conn:
+        job_row = conn.execute("SELECT worker_id, status FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        if not job_row:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        assigned_worker = job_row[0]
+        if assigned_worker is not None and assigned_worker != data.worker_id:
+            raise HTTPException(status_code=403, detail=f"Job {job_id} was assigned to worker {assigned_worker}, not {data.worker_id}")
+
     status_mapped = data.status.upper()
     res_data = data.result if data.result is not None else data.result_json
 

@@ -10,6 +10,7 @@ from app.database.schema import initialize_database
 def api_test_db(tmp_path, monkeypatch):
     db_file = str(tmp_path / "test_api.db")
     monkeypatch.setattr(server_module, "DB_PATH", db_file)
+    monkeypatch.setenv("WORKER_API_TOKEN", "test-secret-token")
     initialize_database(db_file)
 
     conn = sqlite3.connect(db_file)
@@ -20,6 +21,9 @@ def api_test_db(tmp_path, monkeypatch):
     conn.close()
 
     return db_file
+
+
+AUTH_HEADERS = {"X-Worker-Token": "test-secret-token"}
 
 
 def test_health_and_root(api_test_db):
@@ -82,7 +86,7 @@ def test_start_analysis_rejects_unverified_teams(api_test_db):
         "scheduled_at": "2026-11-20T18:00:00"
     })
     assert resp.status_code == 404
-    assert "Zápas nelze ověřit v autoritativních datech" in resp.json()["detail"]
+    assert "Zápas nelze ověřit" in resp.json()["detail"]
 
 
 def test_worker_registration_and_job_claim(api_test_db):
@@ -90,18 +94,27 @@ def test_worker_registration_and_job_claim(api_test_db):
     start_resp = client.post("/api/analysis/start", json={"match_id": 101})
     assert start_resp.status_code == 200
 
-    reg_resp = client.post("/api/workers/register", json={
+    # Unauthenticated should fail with 401
+    unauth_resp = client.post("/api/workers/register", json={
         "worker_id": "test-worker-1",
         "worker_name": "notebook",
         "worker_version": "1.0",
         "capabilities": ["RESEARCH", "STATISTICS"]
     })
+    assert unauth_resp.status_code == 401
+
+    reg_resp = client.post("/api/workers/register", json={
+        "worker_id": "test-worker-1",
+        "worker_name": "notebook",
+        "worker_version": "1.0",
+        "capabilities": ["RESEARCH", "STATISTICS"]
+    }, headers=AUTH_HEADERS)
     assert reg_resp.status_code == 200
 
     claim_resp = client.post("/api/jobs/claim", json={
         "worker_id": "test-worker-1",
         "capabilities": ["RESEARCH", "STATISTICS"]
-    })
+    }, headers=AUTH_HEADERS)
     assert claim_resp.status_code == 200
     claim_data = claim_resp.json()
     assert claim_data["status"] == "job_assigned"
@@ -111,7 +124,7 @@ def test_worker_registration_and_job_claim(api_test_db):
         "worker_id": "test-worker-1",
         "status": "SUCCESS",
         "result": {"status": "ok"}
-    })
+    }, headers=AUTH_HEADERS)
     assert result_resp.status_code == 200
 
 
@@ -125,7 +138,7 @@ def test_job_result_triggers_autonomous_tick(api_test_db):
         claim_resp = client.post("/api/jobs/claim", json={
             "worker_id": "w1",
             "capabilities": ["generic", "RESEARCH", "STATISTICS"]
-        })
+        }, headers=AUTH_HEADERS)
         if claim_resp.json()["status"] == "no_job":
             break
         job_id = claim_resp.json()["job"]["id"]
@@ -133,7 +146,7 @@ def test_job_result_triggers_autonomous_tick(api_test_db):
             "worker_id": "w1",
             "status": "SUCCESS",
             "result": {"evidence": ["sample"]}
-        })
+        }, headers=AUTH_HEADERS)
 
     # Pipeline should have advanced past DISCOVERY automatically
     status_resp = client.get(f"/api/analysis/{run_id}")
