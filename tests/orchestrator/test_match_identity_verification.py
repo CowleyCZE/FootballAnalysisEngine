@@ -7,6 +7,7 @@ from app.orchestrator.match_resolver import (
     MatchNotFoundException,
     AmbiguousMatchException,
     UnverifiedMatchException,
+    parse_to_utc,
 )
 from app.orchestrator.orchestrator import MasterOrchestrator, MatchOrchestrator
 from app.search.relevance import calculate_identity_confidence
@@ -345,3 +346,36 @@ def test_timezone_and_kickoff_time_matching(test_db):
     )
     with pytest.raises(MatchNotFoundException):
         resolver.resolve(req_different_time)
+
+
+def test_invalid_timezone_raises_value_error():
+    """Neplatné nebo neznámé časové pásmo vyvolá ValueError."""
+    dt_naive = datetime(2025, 5, 10, 18, 0)
+    with pytest.raises(ValueError, match="Neplatné nebo neznámé časové pásmo"):
+        parse_to_utc(dt_naive, "Invalid/Timezone")
+
+    with pytest.raises(ValueError, match="Neplatné nebo neznámé časové pásmo"):
+        parse_to_utc(dt_naive, "FooBarZone")
+
+    # Valid timezones should work
+    res_ny = parse_to_utc(dt_naive, "America/New_York")
+    assert res_ny.tzinfo == timezone.utc
+    assert res_ny.hour == 22  # 18:00 EDT (UTC-4) -> 22:00 UTC
+
+
+def test_empty_or_missing_competition_rejected(test_db):
+    """Požadavek s prázdnou nebo chybějící soutěží musí být odmítnut."""
+    resolver = MatchResolver(db_path=test_db)
+
+    for empty_comp in ["", "   "]:
+        req = AnalysisRequest(
+            home_team="AC Sparta Praha",
+            away_team="SK Slavia Praha",
+            competition=empty_comp,
+            scheduled_at=datetime(2025, 5, 10, 18, 0, tzinfo=timezone.utc),
+        )
+        with pytest.raises(UnverifiedMatchException, match="Požadavek neobsahuje specifikaci soutěže"):
+            resolver.resolve(req)
+
+        with pytest.raises(UnverifiedMatchException, match="Požadavek neobsahuje specifikaci soutěže"):
+            resolver.resolve_or_create(req)

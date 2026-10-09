@@ -41,9 +41,7 @@ def normalize_competition_name(name: Optional[str]) -> str:
 
 
 def match_competitions(req_comp: str, db_comp: str) -> bool:
-    if not req_comp or not req_comp.strip():
-        return True
-    if not db_comp or not db_comp.strip():
+    if not req_comp or not req_comp.strip() or not db_comp or not db_comp.strip():
         return False
     return normalize_competition_name(req_comp) == normalize_competition_name(db_comp)
 
@@ -60,11 +58,13 @@ def parse_to_utc(dt_val: Any, default_tz_name: str = "Europe/Prague") -> datetim
         raise ValueError(f"Cannot parse datetime from {dt_val}")
 
     if dt.tzinfo is None:
+        if not default_tz_name or not str(default_tz_name).strip():
+            raise ValueError("Neplatné nebo chybějící název časového pásma.")
         try:
-            tz = ZoneInfo(default_tz_name)
+            tz = ZoneInfo(str(default_tz_name).strip())
             dt = dt.replace(tzinfo=tz)
-        except Exception:
-            dt = dt.replace(tzinfo=timezone.utc)
+        except Exception as e:
+            raise ValueError(f"Neplatné nebo neznámé časové pásmo '{default_tz_name}': {e}")
 
     return dt.astimezone(timezone.utc)
 
@@ -74,6 +74,11 @@ class MatchResolver:
         self.db_path = db_path
 
     def resolve(self, request: AnalysisRequest) -> MatchIdentity:
+        if not request.competition or not request.competition.strip():
+            raise UnverifiedMatchException(
+                "Požadavek neobsahuje specifikaci soutěže. Zápas nelze potvrdit ani ověřit bez jednoznačně určené soutěže."
+            )
+
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -156,6 +161,11 @@ class MatchResolver:
         )
 
     def resolve_or_create(self, request: AnalysisRequest) -> MatchIdentity:
+        if not request.competition or not request.competition.strip():
+            raise UnverifiedMatchException(
+                "Požadavek neobsahuje specifikaci soutěže. Zápas nelze potvrdit ani ověřit bez jednoznačně určené soutěže."
+            )
+
         try:
             return self.resolve(request)
         except MatchNotFoundException:
