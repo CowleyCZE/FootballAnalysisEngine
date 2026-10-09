@@ -23,11 +23,15 @@ class CoverageEngine:
         tasks = cursor.fetchall()
 
         # Načteme otevřené konflikty s korektním uzávorkováním SQL podmínek
-        cursor.execute(
-            "SELECT domain, severity FROM research_conflicts WHERE (run_id = ? OR run_id = ?) AND status = 'OPEN'",
-            (str(run_id), str(run_db_id) if run_db_id is not None else str(run_id))
-        )
-        conflicts = cursor.fetchall()
+        table_exists = cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_conflicts'").fetchone()
+        if table_exists:
+            cursor.execute(
+                "SELECT domain, severity FROM research_conflicts WHERE (run_id = ? OR run_id = ?) AND status = 'OPEN'",
+                (str(run_id), str(run_db_id) if run_db_id is not None else str(run_id))
+            )
+            conflicts = cursor.fetchall()
+        else:
+            conflicts = []
         conn.close()
 
         if not tasks:

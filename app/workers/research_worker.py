@@ -9,6 +9,7 @@ from app.crawler.crawler import EngineCrawler
 from app.database.research_repository import ResearchRepository
 from app.research.engine import ResearchEngine
 from app.research.models import ResearchStatus, ResearchTask
+from app.orchestrator.match_resolver import parse_to_utc
 
 
 class _CrawlerAdapter:
@@ -45,10 +46,14 @@ class ResearchWorker:
         away_team = payload.get("away_team") or match.get("away_team")
         competition = payload.get("competition") or match.get("competition")
         venue = payload.get("venue") or match.get("venue")
-        scheduled_raw = payload.get("scheduled_at") or match.get("scheduled_at")
-        cutoff_raw = payload.get("cutoff_datetime") or payload.get("cutoff") or match.get("cutoff_datetime") or match.get("cutoff") or scheduled_raw
 
-        if not home_team or not away_team or not competition or str(home_team).isdigit() or str(away_team).isdigit() or not scheduled_raw:
+        scheduled_raw = payload.get("scheduled_at") or match.get("scheduled_at")
+        cutoff_raw = (
+            payload.get("data_cutoff_at") or payload.get("cutoff_datetime") or payload.get("cutoff")
+            or match.get("data_cutoff_at") or match.get("cutoff_datetime") or match.get("cutoff")
+        )
+
+        if not home_team or not away_team or not competition or str(home_team).isdigit() or str(away_team).isdigit() or not scheduled_raw or not cutoff_raw:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 row = conn.execute("""
@@ -72,10 +77,18 @@ class ResearchWorker:
                     if not scheduled_raw:
                         scheduled_raw = row["scheduled_at"]
                     if not cutoff_raw:
-                        cutoff_raw = scheduled_raw
+                        cutoff_raw = row["scheduled_at"]
 
-        cutoff = self._parse_datetime(cutoff_raw) if cutoff_raw else datetime.now(timezone.utc)
-        scheduled_at = self._parse_datetime(scheduled_raw) if scheduled_raw else cutoff
+        if not scheduled_raw:
+            raise ValueError("Match kickoff time (scheduled_at) is missing.")
+        if not cutoff_raw:
+            cutoff_raw = scheduled_raw
+        if not cutoff_raw:
+            raise ValueError("Data cutoff time (data_cutoff_at) is missing.")
+
+        tz_override = payload.get("timezone") or match.get("timezone") or "Europe/Prague"
+        scheduled_at = self._parse_datetime(scheduled_raw, default_tz_name=tz_override)
+        cutoff = self._parse_datetime(cutoff_raw, default_tz_name=tz_override)
 
         return {
             "home_team": str(home_team or f"Team_{match_id}"),
@@ -89,12 +102,34 @@ class ResearchWorker:
     def run_execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         match = payload.get("match") or {}
         match_id = int(payload.get("match_id") or match.get("id") or 0)
-        ctx = self._resolve_match_context(match_id, payload, match)
 
         task_id = payload.get("task_id")
         domain = str(payload.get("domain") or "GENERAL")
         run_id_str = str(payload.get("run_id") or "")
         run_db_id = int(payload.get("run_db_id") or 0)
+
+        try:
+            ctx = self._resolve_match_context(match_id, payload, match)
+        except Exception as err:
+            err_msg = f"Match context resolution failed: {err}"
+            if task_id:
+                try:
+                    self.repository.mark_task_failed(int(task_id), err_msg)
+                except Exception:
+                    pass
+            return {
+                "status": "FAILED",
+                "error": err_msg,
+                "task_id": task_id,
+                "execution_id": None,
+                "claims": [],
+                "evidence_count": 0,
+                "sources_count": 0,
+                "documents_count": 0,
+                "conflicts_count": 0,
+                "warnings": [err_msg],
+                "metrics": {},
+            }
 
         if not task_id:
             task_uuid = str(payload.get("task_uuid") or f"TASK-{match_id}-{domain}")
@@ -145,9 +180,10 @@ class ResearchWorker:
         return int(row["attempt_number"] or 1)
 
     @staticmethod
-    def _parse_datetime(value: Any) -> datetime:
-        if value is None:
+    def _parse_datetime(value: Any, default_tz_name: str = "Europe/Prague") -> datetime:
+        if value is None or (isinstance(value, str) and not value.strip()):
             raise ValueError("RESEARCH job requires a data cutoff and scheduled_at")
-        if isinstance(value, datetime):
-            return value
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        try:
+            return parse_to_utc(value, default_tz_name=default_tz_name)
+        except Exception as err:
+            raise ValueError(f"Invalid timestamp or timezone '{value}': {err}")

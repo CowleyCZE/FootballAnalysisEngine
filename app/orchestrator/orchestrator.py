@@ -68,7 +68,12 @@ class MasterOrchestrator:
                 return None
 
             scheduled_str = row["scheduled_at"]
-            scheduled_dt = parse_to_utc(scheduled_str) if scheduled_str else datetime.now(timezone.utc)
+            if not scheduled_str:
+                return None
+            try:
+                scheduled_dt = parse_to_utc(scheduled_str)
+            except Exception:
+                return None
             return MatchIdentity(
                 match_id=row["match_id"],
                 home_team_id=row["home_team_id"],
@@ -349,9 +354,17 @@ class MasterOrchestrator:
 
             audit_status = audit_res.get("status")
             audit_score = audit_res.get("audit_score", 1.0)
+            audit_issues = audit_res.get("issues", []) if isinstance(audit_res, dict) else []
+
+            has_critical_cutoff = any(
+                iss.get("type") in ("cutoff_missing", "cutoff_violation") and iss.get("severity") == "CRITICAL"
+                for iss in audit_issues
+            )
 
             if audit_status in {"AUDIT_COMPLETE", "PASS", "OK", "COMPLETED"}:
-                if audit_score is not None and float(audit_score) < 0.3:
+                if has_critical_cutoff:
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Audit contains critical cutoff issue")
+                elif audit_score is not None and float(audit_score) < 0.3:
                     self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Audit score too low ({audit_score})")
                 else:
                     readiness = self.coverage_engine.evaluate_run(run_id, self._get_run_db_id(run_id))

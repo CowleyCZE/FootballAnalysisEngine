@@ -40,7 +40,8 @@ def test_end_to_end_adversarial_audit_loop(tmp_path):
         claims=claims_cycle1,
         statistics=stats_cycle1,
         max_cycles=3,
-        current_cycle=1
+        current_cycle=1,
+        data_cutoff_at=stale_date,
     )
 
     assert len(audit_run1["issues"]) >= 5
@@ -69,7 +70,8 @@ def test_end_to_end_adversarial_audit_loop(tmp_path):
         claims=claims_cycle2,
         statistics=stats_cycle2,
         max_cycles=3,
-        current_cycle=2
+        current_cycle=2,
+        data_cutoff_at=fresh_date,
     )
 
     assert audit_run2["status"] == "AUDIT_COMPLETE"

@@ -13,6 +13,7 @@ from app.audit.evidence_checker import EvidenceChecker
 from app.audit.consistency import ConsistencyChecker
 from app.audit.repair_queue import RepairQueue
 from app.research.cutoff_filter import CutoffFilter
+from app.orchestrator.match_resolver import parse_to_utc
 
 logger = logging.getLogger(__name__)
 
@@ -63,24 +64,33 @@ class AdversarialAuditor:
         issues.extend(ev_issues)
 
         # 2. Cutoff & Freshness Audit
-        cutoff_dt = (
+        cutoff_raw = (
             data_cutoff_at
             or ai_analysis.get("data_cutoff_at")
             or ai_analysis.get("match", {}).get("data_cutoff_at")
             or ai_analysis.get("match", {}).get("scheduled_at")
         )
-        if not cutoff_dt and claims:
-            # Fallback to latest evidence published_at if available
-            ev_dates = [
-                ev.get("published_at")
-                for c in claims
-                for ev in c.get("evidence", [])
-                if ev.get("published_at")
-            ]
-            if ev_dates:
-                cutoff_dt = max(ev_dates)
+        if not cutoff_raw and match_id and self.db_path:
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT scheduled_at FROM matches WHERE id = ?", (match_id,)).fetchone()
+                    if row and row["scheduled_at"]:
+                        cutoff_raw = row["scheduled_at"]
+            except Exception:
+                pass
 
-        if not cutoff_dt:
+        parsed_cutoff = None
+        cutoff_valid = False
+        if cutoff_raw:
+            try:
+                parsed_cutoff = parse_to_utc(cutoff_raw)
+                cutoff_valid = True
+            except Exception as e:
+                logger.warning(f"Invalid data_cutoff_at format '{cutoff_raw}': {e}")
+                cutoff_valid = False
+
+        if not cutoff_valid or parsed_cutoff is None:
             issues.append({
                 "type": "cutoff_missing",
                 "severity": "CRITICAL",
@@ -94,13 +104,13 @@ class AdversarialAuditor:
                 pub_at = ev.get("published_at")
                 eid = ev.get("id") or ev.get("evidence_id")
 
-                if cutoff_dt:
-                    passed, reason = CutoffFilter.validate(pub_at, cutoff_dt, policy="strict_exclude")
+                if cutoff_valid and parsed_cutoff:
+                    passed, reason = CutoffFilter.validate(pub_at, parsed_cutoff, policy="strict_exclude")
                     if not passed or reason == "EXCLUDED_BY_CUTOFF":
                         issues.append({
                             "type": "cutoff_violation",
                             "severity": "CRITICAL",
-                            "description": f"Důkaz ID {eid} s datem {pub_at} překračuje data_cutoff_at ({cutoff_dt})",
+                            "description": f"Důkaz ID {eid} s datem {pub_at} překračuje data_cutoff_at ({parsed_cutoff.isoformat()})",
                             "evidence_ids": [eid] if eid else [],
                             "requires_research": True
                         })
@@ -138,13 +148,21 @@ class AdversarialAuditor:
         # Tvorba výzkumných úloh
         research_jobs = RepairQueue.generate_research_jobs(match_id, issues)
 
-        if ai_analysis.get("status") == "insufficient_data":
+        has_missing_cutoff = any(iss.get("type") == "cutoff_missing" for iss in issues)
+        has_critical_cutoff = any(
+            iss.get("type") in ("cutoff_missing", "cutoff_violation") and iss.get("severity") == "CRITICAL"
+            for iss in issues
+        )
+
+        if ai_analysis.get("status") == "insufficient_data" or has_missing_cutoff:
             status = "UNRESOLVED"
             research_jobs = []
         elif current_cycle >= max_cycles and len(research_jobs) > 0:
             status = "UNRESOLVED"
         elif len(research_jobs) > 0:
             status = "RESEARCH_REQUIRED"
+        elif has_critical_cutoff:
+            status = "UNRESOLVED"
         else:
             status = "AUDIT_COMPLETE"
 

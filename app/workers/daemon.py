@@ -87,7 +87,7 @@ class WorkerDaemon:
                 res_status = str(result.get("status") or "").upper()
 
             # Striktní mapování stavů
-            if res_status in ("SUCCESS", "COMPLETED", "RESOLVED"):
+            if res_status in ("SUCCESS", "COMPLETED", "RESOLVED", "AUDIT_COMPLETE", "RESEARCH_REQUIRED", "UNRESOLVED"):
                 self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=result, worker_id=self.worker_id)
             elif res_status in ("PARTIAL", "NO_RESULT", "INSUFFICIENT_DATA"):
                 error_msg = result.get("error") or f"Job produced non-successful outcome status: {res_status}"
@@ -98,8 +98,6 @@ class WorkerDaemon:
             elif res_status in ("FAILED", "ERROR"):
                 err_msg = result.get("error") or f"Job handler returned status {res_status}"
                 self.queue.update_job_status(job_id, JobStatus.FAILED, result=result, error=str(err_msg), worker_id=self.worker_id)
-            elif isinstance(result, dict) and result.get("status") is None and bool(result):
-                self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=result, worker_id=self.worker_id)
             else:
                 err_msg = f"Job produced unknown or invalid status: {res_status}"
                 self.queue.update_job_status(job_id, JobStatus.FAILED, result=result, error=err_msg, worker_id=self.worker_id)

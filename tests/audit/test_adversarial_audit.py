@@ -32,7 +32,7 @@ def test_conflicting_evidence_and_job_generation(tmp_path):
     ]
     ai_analysis = {"key_factors": [], "conclusion": "Analyzovano."}
 
-    res = auditor.audit(match_id=100, ai_run_id="run-1", ai_analysis=ai_analysis, claims=claims, statistics={})
+    res = auditor.audit(match_id=100, ai_run_id="run-1", ai_analysis=ai_analysis, claims=claims, statistics={}, data_cutoff_at="2026-10-04T12:00:00Z")
 
     assert res["status"] == "RESEARCH_REQUIRED"
     assert len(res["research_jobs"]) > 0

@@ -36,6 +36,12 @@ class ResearchRepository:
         with self.get_connection() as conn:
             conn.execute("UPDATE research_tasks SET job_id=?, status=CASE WHEN status IN ('PLANNED','QUEUED') THEN 'QUEUED' ELSE status END, updated_at=? WHERE id=?", (job_id, self._now(), int(task_id)))
 
+    def mark_task_failed(self, task_id: int, error_message: str) -> None:
+        with self.get_connection() as conn:
+            now = self._now()
+            conn.execute("UPDATE research_tasks SET status='FAILED', updated_at=? WHERE id=?", (now, int(task_id)))
+            conn.execute("UPDATE research_sessions SET status='FAILED', completed_at=? WHERE task_id=? AND status='RUNNING'", (now, int(task_id)))
+
     def mark_task_running(self, task_id: int, attempt_number: int) -> None:
         with self.get_connection() as conn:
             row = conn.execute("SELECT status FROM research_tasks WHERE id=?", (int(task_id),)).fetchone()
