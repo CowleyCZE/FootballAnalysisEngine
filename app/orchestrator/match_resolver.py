@@ -1,6 +1,7 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
+from zoneinfo import ZoneInfo
 from app.orchestrator.models import AnalysisRequest, MatchIdentity
 
 
@@ -20,6 +21,54 @@ class UnverifiedMatchException(MatchResolverException):
     pass
 
 
+COMPETITION_ALIASES: Dict[str, str] = {
+    "epl": "premier league",
+    "english premier league": "premier league",
+    "la liga": "la liga",
+    "laliga": "la liga",
+    "champions league": "uefa champions league",
+    "ucl": "uefa champions league",
+    "chance liga": "chance liga",
+    "czech first league": "chance liga",
+}
+
+
+def normalize_competition_name(name: Optional[str]) -> str:
+    if not name or not name.strip():
+        return ""
+    norm = " ".join(name.strip().lower().split())
+    return COMPETITION_ALIASES.get(norm, norm)
+
+
+def match_competitions(req_comp: str, db_comp: str) -> bool:
+    if not req_comp or not req_comp.strip():
+        return True
+    if not db_comp or not db_comp.strip():
+        return False
+    return normalize_competition_name(req_comp) == normalize_competition_name(db_comp)
+
+
+def parse_to_utc(dt_val: Any, default_tz_name: str = "Europe/Prague") -> datetime:
+    if isinstance(dt_val, str):
+        s = dt_val.strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+    elif isinstance(dt_val, datetime):
+        dt = dt_val
+    else:
+        raise ValueError(f"Cannot parse datetime from {dt_val}")
+
+    if dt.tzinfo is None:
+        try:
+            tz = ZoneInfo(default_tz_name)
+            dt = dt.replace(tzinfo=tz)
+        except Exception:
+            dt = dt.replace(tzinfo=timezone.utc)
+
+    return dt.astimezone(timezone.utc)
+
+
 class MatchResolver:
     def __init__(self, db_path: str = "database/football.db"):
         self.db_path = db_path
@@ -29,7 +78,7 @@ class MatchResolver:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # Query to find match by team names, competition, and scheduled date in authoritative schedule
+        # Query candidates by team names
         query = """
             SELECT m.id as match_id, m.home_team_id, m.away_team_id, m.competition_id, m.scheduled_at, m.venue, m.status,
                    th.name as home_team, ta.name as away_team, COALESCE(c.name, m.competition, '') as competition
@@ -37,43 +86,60 @@ class MatchResolver:
             LEFT JOIN teams th ON m.home_team_id = th.id
             LEFT JOIN teams ta ON m.away_team_id = ta.id
             LEFT JOIN competitions c ON m.competition_id = c.id
-            WHERE th.name LIKE ? AND ta.name LIKE ? AND (c.name LIKE ? OR m.competition LIKE ? OR m.competition IS NULL OR m.competition = '')
-            AND DATE(m.scheduled_at) = DATE(?)
+            WHERE (th.name LIKE ? OR lower(th.normalized_name) = lower(?))
+              AND (ta.name LIKE ? OR lower(ta.normalized_name) = lower(?))
         """
 
-        date_str = request.scheduled_at.strftime("%Y-%m-%d")
-        cursor.execute(query, (f"%{request.home_team}%", f"%{request.away_team}%", f"%{request.competition}%", f"%{request.competition}%", date_str))
-        rows = cursor.fetchall()
+        cursor.execute(
+            query,
+            (f"%{request.home_team}%", request.home_team, f"%{request.away_team}%", request.away_team)
+        )
+        candidate_rows = cursor.fetchall()
         conn.close()
 
-        if not rows:
-            raise MatchNotFoundException(f"Zápas {request.home_team} vs {request.away_team} pro datum {date_str} nebyl v autoritativním rozpisu nalezen.")
+        if not candidate_rows:
+            raise MatchNotFoundException(f"Zápas {request.home_team} vs {request.away_team} nebyl v autoritativním rozpisu nalezen.")
 
-        # If competition was explicitly requested, ensure competition name match or comp_id match in rows
-        if request.competition and request.competition.strip():
-            req_comp_norm = request.competition.strip().lower()
-            filtered_rows = []
-            for r in rows:
-                c_name = (r["competition"] or "").strip().lower()
-                if c_name == req_comp_norm or req_comp_norm in c_name or c_name in req_comp_norm:
-                    filtered_rows.append(r)
-            rows = filtered_rows
+        req_utc = parse_to_utc(request.scheduled_at, getattr(request, "timezone", "Europe/Prague"))
 
-        if not rows:
-            raise MatchNotFoundException(f"Zápas {request.home_team} vs {request.away_team} pro soutěž '{request.competition}' a datum {date_str} nebyl v autoritativním rozpisu nalezen.")
+        filtered_rows = []
+        for row in candidate_rows:
+            # 1. Strict competition check
+            db_comp = row["competition"] or ""
+            if request.competition and request.competition.strip():
+                if not match_competitions(request.competition, db_comp):
+                    continue
 
-        if len(rows) > 1:
-            raise AmbiguousMatchException(f"Nalezeno více kandidátů ({len(rows)}) pro zápas {request.home_team} vs {request.away_team}.")
+            # 2. Kickoff time and timezone check
+            if not row["scheduled_at"]:
+                continue
+            db_utc = parse_to_utc(row["scheduled_at"], getattr(request, "timezone", "Europe/Prague"))
 
-        match_data = rows[0]
-        scheduled_str = match_data["scheduled_at"]
-        scheduled_dt = datetime.fromisoformat(scheduled_str) if isinstance(scheduled_str, str) else scheduled_str
+            if req_utc == db_utc:
+                filtered_rows.append((row, db_utc))
 
-        cutoff_dt = scheduled_dt
-        match_status = match_data["status"] if "status" in match_data.keys() and match_data["status"] else "RESOLVED"
+        if not filtered_rows:
+            req_time_str = req_utc.strftime("%Y-%m-%d %H:%M UTC")
+            raise MatchNotFoundException(
+                f"Zápas {request.home_team} vs {request.away_team} pro soutěž '{request.competition}' "
+                f"a čas výkopu {req_time_str} nebyl v autoritativním rozpisu nalezen."
+            )
 
-        if match_status == "UNVERIFIED":
-            raise UnverifiedMatchException(f"Zápas #{match_data['match_id']} existuje v DB, ale je ve stavu UNVERIFIED (nepotvrzený rozpis). Analýzu nelze spustit.")
+        if len(filtered_rows) > 1:
+            raise AmbiguousMatchException(
+                f"Nalezeno více kandidátů ({len(filtered_rows)}) pro zápas {request.home_team} vs {request.away_team}."
+            )
+
+        match_data, db_utc = filtered_rows[0]
+
+        # Fail-closed status check: ONLY explicit status == 'RESOLVED' is allowed
+        match_status = match_data["status"] if ("status" in match_data.keys() and match_data["status"]) else None
+        if match_status != "RESOLVED":
+            status_str = match_status if match_status else "NULL/EMPTY"
+            raise UnverifiedMatchException(
+                f"Zápas #{match_data['match_id']} existuje v DB, ale je ve stavu '{status_str}' "
+                f"(pouze explicitní stav RESOLVED je povolen pro spuštění analýzy)."
+            )
 
         return MatchIdentity(
             match_id=match_data["match_id"],
@@ -83,8 +149,8 @@ class MatchResolver:
             home_team=match_data["home_team"] or request.home_team,
             away_team=match_data["away_team"] or request.away_team,
             competition=match_data["competition"] or request.competition,
-            scheduled_at=scheduled_dt,
-            data_cutoff_at=cutoff_dt,
+            scheduled_at=db_utc,
+            data_cutoff_at=db_utc,
             venue=match_data["venue"] if "venue" in match_data.keys() else None,
             status=match_status,
         )

@@ -9,7 +9,7 @@ from app.orchestrator.config import PipelineConfig
 from app.orchestrator.state_machine import MatchStateMachine, MatchState
 from app.orchestrator.recovery import PipelineRecovery
 from app.orchestrator.scheduler import DependencyScheduler
-from app.orchestrator.match_resolver import MatchResolver, MatchNotFoundException, AmbiguousMatchException
+from app.orchestrator.match_resolver import MatchResolver, MatchNotFoundException, AmbiguousMatchException, parse_to_utc
 from app.orchestrator.research_planner import ResearchPlanner
 from app.orchestrator.models import AnalysisRequest, MatchIdentity, TaskRequirement
 from app.jobs.queue import JobQueue
@@ -61,12 +61,12 @@ class MasterOrchestrator:
             if not row:
                 return None
 
-            match_status = row["status"] if "status" in row.keys() and row["status"] else "RESOLVED"
-            if match_status == "UNVERIFIED":
+            match_status = row["status"] if ("status" in row.keys() and row["status"]) else None
+            if match_status != "RESOLVED":
                 return None
 
             scheduled_str = row["scheduled_at"]
-            scheduled_dt = datetime.fromisoformat(scheduled_str) if scheduled_str else datetime.now(timezone.utc)
+            scheduled_dt = parse_to_utc(scheduled_str) if scheduled_str else datetime.now(timezone.utc)
             return MatchIdentity(
                 match_id=row["match_id"],
                 home_team_id=row["home_team_id"],
@@ -169,13 +169,13 @@ class MasterOrchestrator:
         """Spustí pipeline pro existující zápas: Match Identity → Research Planner → Jobs."""
         match_identity = self._get_match_identity_from_id(match_id)
         if not match_identity:
-            # Check if match exists but is UNVERIFIED
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             row = cursor.execute("SELECT status FROM matches WHERE id = ?", (match_id,)).fetchone()
             conn.close()
-            if row and row[0] == "UNVERIFIED":
-                raise ValueError(f"Match {match_id} exists but is UNVERIFIED. Pipeline cannot start for unverified match.")
+            if row:
+                st = row[0] if row[0] else "NULL/EMPTY"
+                raise ValueError(f"Match {match_id} exists but status is '{st}' (only explicit status RESOLVED is allowed). Pipeline cannot start.")
             raise ValueError(f"Match {match_id} does not exist")
 
         run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_M{match_id}_{uuid.uuid4().hex[:4]}"

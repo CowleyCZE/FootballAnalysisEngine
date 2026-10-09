@@ -241,3 +241,107 @@ def test_scenario_10_existing_tests_and_valid_verified_matches_pass(test_db):
     run_id = master.start_pipeline(200)
     assert run_id is not None
     assert "M200_" in run_id
+
+
+def test_fail_closed_status_checks(test_db):
+    """
+    Null, prázdný, UNVERIFIED, PENDING i neznámý stav musí vést k bezpečnému odmítnutí.
+    """
+    resolver = MatchResolver(db_path=test_db)
+    master = MasterOrchestrator(db_path=test_db)
+
+    invalid_statuses = [None, "", "UNVERIFIED", "PENDING", "DRAFT", "CANCELLED"]
+    for idx, st in enumerate(invalid_statuses, start=300):
+        with sqlite3.connect(test_db) as conn:
+            conn.execute("DELETE FROM matches WHERE id >= 300")
+            conn.execute(
+                "INSERT INTO matches (id, home_team_id, away_team_id, competition_id, competition, scheduled_at, status) "
+                "VALUES (?, 10, 20, 1, 'Chance Liga', '2025-05-10T18:00:00+00:00', ?)",
+                (idx, st)
+            )
+            conn.commit()
+
+        req = AnalysisRequest(
+            home_team="AC Sparta Praha",
+            away_team="SK Slavia Praha",
+            competition="Chance Liga",
+            scheduled_at=datetime(2025, 5, 10, 18, 0, tzinfo=timezone.utc),
+        )
+
+        with pytest.raises(UnverifiedMatchException) as exc_info:
+            resolver.resolve(req)
+        assert "pouze explicitní stav RESOLVED je povolen" in str(exc_info.value)
+
+        with pytest.raises(ValueError) as exc_info_master:
+            master.start_pipeline(idx)
+        assert "only explicit status RESOLVED is allowed" in str(exc_info_master.value)
+
+
+def test_strict_competition_matching(test_db):
+    """
+    Obecné slovo 'League' nesmí potvrdit 'Premier League'. Aliase 'EPL' a 'Czech First League' fungují.
+    """
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            "INSERT INTO matches (id, home_team_id, away_team_id, competition_id, competition, scheduled_at, status) "
+            "VALUES (400, 10, 20, 2, 'Premier League', '2025-05-10T18:00:00+00:00', 'RESOLVED')"
+        )
+        conn.commit()
+
+    resolver = MatchResolver(db_path=test_db)
+
+    # Partial / ambiguous competition "League" must NOT match "Premier League"
+    req_generic = AnalysisRequest(
+        home_team="AC Sparta Praha",
+        away_team="SK Slavia Praha",
+        competition="League",
+        scheduled_at=datetime(2025, 5, 10, 18, 0, tzinfo=timezone.utc),
+    )
+    with pytest.raises(MatchNotFoundException):
+        resolver.resolve(req_generic)
+
+    # Known alias "EPL" must match "Premier League"
+    req_alias = AnalysisRequest(
+        home_team="AC Sparta Praha",
+        away_team="SK Slavia Praha",
+        competition="EPL",
+        scheduled_at=datetime(2025, 5, 10, 18, 0, tzinfo=timezone.utc),
+    )
+    identity = resolver.resolve(req_alias)
+    assert identity.match_id == 400
+
+
+def test_timezone_and_kickoff_time_matching(test_db):
+    """
+    Stejný čaový okamžik napříč časovými pásmy (18:00 UTC vs 20:00 Europe/Prague) se shoduje.
+    Odlišný čas výkopu v stejný den se nesmí spojit.
+    """
+    with sqlite3.connect(test_db) as conn:
+        # Match 500 stored in Europe/Prague timezone (UTC+2) -> 20:00 CEST == 18:00 UTC
+        conn.execute(
+            "INSERT INTO matches (id, home_team_id, away_team_id, competition_id, competition, scheduled_at, status) "
+            "VALUES (500, 10, 20, 1, 'Chance Liga', '2025-05-10T20:00:00+02:00', 'RESOLVED')"
+        )
+        conn.commit()
+
+    resolver = MatchResolver(db_path=test_db)
+
+    # 1. 18:00 UTC equals 20:00 Europe/Prague (+02:00) -> Match found
+    req_same_time = AnalysisRequest(
+        home_team="AC Sparta Praha",
+        away_team="SK Slavia Praha",
+        competition="Chance Liga",
+        scheduled_at=datetime(2025, 5, 10, 18, 0, tzinfo=timezone.utc),
+    )
+    ident = resolver.resolve(req_same_time)
+    assert ident.match_id == 500
+
+    # 2. 21:00 UTC on the same day -> Kickoff time mismatch, must fail
+    req_different_time = AnalysisRequest(
+        home_team="AC Sparta Praha",
+        away_team="SK Slavia Praha",
+        competition="Chance Liga",
+        scheduled_at=datetime(2025, 5, 10, 21, 0, tzinfo=timezone.utc),
+    )
+    with pytest.raises(MatchNotFoundException):
+        resolver.resolve(req_different_time)

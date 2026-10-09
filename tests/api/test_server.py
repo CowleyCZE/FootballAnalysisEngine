@@ -16,7 +16,7 @@ def api_test_db(tmp_path, monkeypatch):
     conn = sqlite3.connect(db_file)
     conn.execute("INSERT INTO teams(id, name, normalized_name) VALUES (1, 'Real Madrid', 'real_madrid'), (2, 'Barcelona', 'barcelona'), (3, 'Arsenal', 'arsenal'), (4, 'Chelsea', 'chelsea')")
     conn.execute("INSERT INTO competitions(id, name, country) VALUES (1, 'La Liga', 'Spain'), (2, 'Premier League', 'England')")
-    conn.execute("INSERT INTO matches(id, competition, competition_id, home_team_id, away_team_id, scheduled_at) VALUES (101, 'La Liga', 1, 1, 2, '2026-10-15 20:00:00')")
+    conn.execute("INSERT INTO matches(id, competition, competition_id, home_team_id, away_team_id, scheduled_at, status) VALUES (101, 'La Liga', 1, 1, 2, '2026-10-15 20:00:00', 'RESOLVED')")
     conn.commit()
     conn.close()
 

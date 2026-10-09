@@ -21,7 +21,7 @@ def e2e_db(tmp_path, monkeypatch):
     conn = sqlite3.connect(db_file)
     conn.execute("INSERT INTO teams(id, name, normalized_name) VALUES (1, 'Liverpool', 'liverpool'), (2, 'Everton', 'everton')")
     conn.execute("INSERT INTO competitions(id, name, country) VALUES (1, 'Premier League', 'England')")
-    conn.execute("INSERT INTO matches(id, competition, competition_id, home_team_id, away_team_id, scheduled_at, venue) VALUES (500, 'Premier League', 1, 1, 2, '2026-10-25T15:00:00', 'Anfield')")
+    conn.execute("INSERT INTO matches(id, competition, competition_id, home_team_id, away_team_id, scheduled_at, venue, status) VALUES (500, 'Premier League', 1, 1, 2, '2026-10-25T15:00:00', 'Anfield', 'RESOLVED')")
     conn.commit()
     conn.close()
 
