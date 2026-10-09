@@ -68,17 +68,7 @@ class AdversarialAuditor:
             data_cutoff_at
             or ai_analysis.get("data_cutoff_at")
             or ai_analysis.get("match", {}).get("data_cutoff_at")
-            or ai_analysis.get("match", {}).get("scheduled_at")
         )
-        if not cutoff_raw and match_id and self.db_path:
-            try:
-                with sqlite3.connect(self.db_path) as conn:
-                    conn.row_factory = sqlite3.Row
-                    row = conn.execute("SELECT scheduled_at FROM matches WHERE id = ?", (match_id,)).fetchone()
-                    if row and row["scheduled_at"]:
-                        cutoff_raw = row["scheduled_at"]
-            except Exception:
-                pass
 
         parsed_cutoff = None
         cutoff_valid = False

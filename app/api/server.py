@@ -272,8 +272,6 @@ def get_analysis_result(run_id: str, include_historical: bool = False):
         run_db_id = run_base["id"] if run_base else None
 
         cutoff_row = conn.execute("SELECT data_cutoff_at FROM research_tasks WHERE run_id = ? AND data_cutoff_at IS NOT NULL LIMIT 1", (run_id,)).fetchone()
-        if not cutoff_row:
-            cutoff_row = conn.execute("SELECT scheduled_at as data_cutoff_at FROM matches WHERE id = ?", (match_id,)).fetchone()
         data_cutoff_at = cutoff_row["data_cutoff_at"] if cutoff_row else None
 
         claims = []

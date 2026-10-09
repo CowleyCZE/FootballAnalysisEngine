@@ -34,7 +34,7 @@ def phase3_db(tmp_path):
 
 def test_context_builder_loads_claims_and_enrich_match_info(phase3_db):
     cb = ContextBuilder(db_path=phase3_db)
-    context = cb.build_context(match_info={"match_id": 88}, run_db_id=1)
+    context = cb.build_context(match_info={"match_id": 88, "data_cutoff_at": "2026-10-20 20:00:00"}, run_db_id=1)
 
     assert context["match"]["home_team"] == "Arsenal"
     assert context["match"]["away_team"] == "Chelsea"

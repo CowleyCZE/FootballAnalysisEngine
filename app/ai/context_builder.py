@@ -50,8 +50,6 @@ class ContextBuilder:
                 info["data_cutoff_at"] = info["cutoff_datetime"]
             elif info.get("cutoff"):
                 info["data_cutoff_at"] = info["cutoff"]
-            elif info.get("scheduled_at"):
-                info["data_cutoff_at"] = info["scheduled_at"]
 
         info["match_id"] = match_id
         return info

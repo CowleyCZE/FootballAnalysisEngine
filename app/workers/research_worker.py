@@ -76,13 +76,9 @@ class ResearchWorker:
                         venue = row["venue"]
                     if not scheduled_raw:
                         scheduled_raw = row["scheduled_at"]
-                    if not cutoff_raw:
-                        cutoff_raw = row["scheduled_at"]
 
         if not scheduled_raw:
             raise ValueError("Match kickoff time (scheduled_at) is missing.")
-        if not cutoff_raw:
-            cutoff_raw = scheduled_raw
         if not cutoff_raw:
             raise ValueError("Data cutoff time (data_cutoff_at) is missing.")
 
