@@ -1,7 +1,7 @@
 import sqlite3
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, Status
+from fastapi import APIRouter, HTTPException, status
 
 from app.orchestrator.models import AnalysisRequest, ResearchReadiness
 from app.orchestrator.orchestrator import MasterOrchestrator
@@ -37,13 +37,13 @@ def _resolve_match_id(request: AnalysisRequest) -> int:
         ).fetchone()
     if not row:
         raise HTTPException(
-            status_code=Status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Zadaný zápas nebyl nalezen v databázi.",
         )
     return int(row["id"])
 
 
-@router.post("/start", status_code=Status.HTTP_201_CREATED)
+@router.post("/start", status_code=status.HTTP_201_CREATED)
 def start_analysis(request: AnalysisRequest) -> Dict[str, Any]:
     """Zahájí autonomní pipeline pro existující zápas v databázi."""
     match_id = _resolve_match_id(request)
@@ -51,10 +51,10 @@ def start_analysis(request: AnalysisRequest) -> Dict[str, Any]:
         run_id = orchestrator.start_pipeline(match_id)
         return {"run_id": run_id, "match_id": match_id, "status": MatchState.DISCOVERY}
     except ValueError as exc:
-        raise HTTPException(status_code=Status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=Status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chyba při spuštění analýzy: {exc}",
         ) from exc
 
@@ -68,7 +68,7 @@ def get_analysis_status(run_id: str) -> Dict[str, Any]:
             "SELECT * FROM pipeline_runs WHERE run_id = ?", (run_id,)
         ).fetchone()
         if not run:
-            raise HTTPException(status_code=Status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
         jobs = conn.execute(
             "SELECT * FROM jobs WHERE run_id = ? ORDER BY id", (run_id,)
         ).fetchall()
@@ -87,7 +87,7 @@ def check_analysis_readiness(run_id: str) -> ResearchReadiness:
             "SELECT job_type, status FROM jobs WHERE run_id = ?", (run_id,)
         ).fetchall()
     if not run:
-        raise HTTPException(status_code=Status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
 
     required_types = {"SEARCH", "STATISTICS"}
     completed = {row["job_type"] for row in jobs if row["status"] == "SUCCESS"}
@@ -119,7 +119,7 @@ def cancel_analysis(run_id: str) -> Dict[str, Any]:
             "SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)
         ).fetchone()
         if not run:
-            raise HTTPException(status_code=Status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
         conn.execute(
             "UPDATE jobs SET status='CANCELLED', finished_at=CURRENT_TIMESTAMP WHERE run_id=? AND status IN ('PENDING','BLOCKED','RETRY')",
             (run_id,),
