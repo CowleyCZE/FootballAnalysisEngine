@@ -49,6 +49,19 @@ class MatchResolver:
         if not rows:
             raise MatchNotFoundException(f"Zápas {request.home_team} vs {request.away_team} pro datum {date_str} nebyl v autoritativním rozpisu nalezen.")
 
+        # If competition was explicitly requested, ensure competition name match or comp_id match in rows
+        if request.competition and request.competition.strip():
+            req_comp_norm = request.competition.strip().lower()
+            filtered_rows = []
+            for r in rows:
+                c_name = (r["competition"] or "").strip().lower()
+                if c_name == req_comp_norm or req_comp_norm in c_name or c_name in req_comp_norm:
+                    filtered_rows.append(r)
+            rows = filtered_rows
+
+        if not rows:
+            raise MatchNotFoundException(f"Zápas {request.home_team} vs {request.away_team} pro soutěž '{request.competition}' a datum {date_str} nebyl v autoritativním rozpisu nalezen.")
+
         if len(rows) > 1:
             raise AmbiguousMatchException(f"Nalezeno více kandidátů ({len(rows)}) pro zápas {request.home_team} vs {request.away_team}.")
 
@@ -109,44 +122,29 @@ class MatchResolver:
                     f"Zápas nelze ověřit v autoritativních datech ({', '.join(unverified_reasons)}). Zápas neexistuje v rozpisu."
                 )
 
-            # Check if match fixture is verified in competitions or schedule
+            # Existence of teams and competition alone DOES NOT verify that a fixture exists.
+            # Record request in DB as UNVERIFIED if desired, but NEVER set status = RESOLVED or return a resolved match.
             comp_row = None
             if request.competition:
                 comp_norm = request.competition.strip().lower()
                 comp_row = cursor.execute("SELECT id, name FROM competitions WHERE lower(name) = ?", (comp_norm,)).fetchone()
 
-            is_fixture_verified = bool(comp_row)
-            match_status = "RESOLVED" if is_fixture_verified else "UNVERIFIED"
-
+            comp_id = int(comp_row["id"]) if comp_row else None
             home_team_id = int(home_team_row["id"])
             away_team_id = int(away_team_row["id"])
-            comp_id = int(comp_row["id"]) if comp_row else None
-
             scheduled_str = request.scheduled_at.isoformat()
+
             cursor.execute(
                 """
                 INSERT INTO matches (home_team_id, away_team_id, competition_id, competition, scheduled_at, status)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 'UNVERIFIED')
                 """,
-                (home_team_id, away_team_id, comp_id, request.competition or "", scheduled_str, match_status)
+                (home_team_id, away_team_id, comp_id, request.competition or "", scheduled_str)
             )
             match_id = int(cursor.lastrowid)
             conn.commit()
 
-        if match_status == "UNVERIFIED":
-            raise MatchNotFoundException(f"Zápas #{match_id} založen jako UNVERIFIED, protože soutěž '{request.competition}' není v autoritativním registru. Analýzu nelze spustit pro neoverený zápas.")
-
-        scheduled_dt = request.scheduled_at
-        return MatchIdentity(
-            match_id=match_id,
-            home_team_id=home_team_id,
-            away_team_id=away_team_id,
-            competition_id=comp_id,
-            home_team=home_team_row["name"],
-            away_team=away_team_row["name"],
-            competition=request.competition,
-            scheduled_at=scheduled_dt,
-            data_cutoff_at=scheduled_dt,
-            venue=None,
-            status=match_status,
+        raise UnverifiedMatchException(
+            f"Zápas #{match_id} ({request.home_team} vs {request.away_team}) neexistuje v autoritativním rozpisu pro datum {request.scheduled_at.strftime('%Y-%m-%d')}. "
+            f"Existence týmů nebo soutěže v DB nestačí k potvrdit konkrétní utkání. Zápas uložen jako UNVERIFIED a analýza je zablokována."
         )

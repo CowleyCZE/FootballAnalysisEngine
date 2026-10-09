@@ -25,9 +25,11 @@ def calculate_identity_confidence(
     content = getattr(result, 'content', '') or ''
     text = f"{title} {content}".lower()
 
-    # If result is explicitly youth/reserve, severely penalize identity confidence unless home/away requested youth
+    # If result is explicitly youth/reserve, severely penalize identity confidence unless requested team is youth/reserve
     if any(kw in text for kw in YOUTH_RESERVE_KEYWORDS):
-        if home_team and not any(kw in home_team.lower() for kw in YOUTH_RESERVE_KEYWORDS):
+        ht_req_youth = home_team and any(kw in home_team.lower() for kw in YOUTH_RESERVE_KEYWORDS)
+        at_req_youth = away_team and any(kw in away_team.lower() for kw in YOUTH_RESERVE_KEYWORDS)
+        if not ht_req_youth and not at_req_youth:
             return 0.0
 
     confidence = 0.0
@@ -37,42 +39,66 @@ def calculate_identity_confidence(
     if home_team and home_team.strip():
         ht_lower = home_team.lower().strip()
         if ht_lower in text:
-            confidence += 0.4
+            confidence += 0.35
             ht_matched = True
         else:
             ht_parts = [p for p in ht_lower.split() if len(p) > 3 and p not in {"club", "real", "fc", "fk", "sc", "city", "town"}]
             if ht_parts and any(p in text for p in ht_parts):
-                confidence += 0.3
+                confidence += 0.25
                 ht_matched = True
 
     at_matched = False
     if away_team and away_team.strip():
         at_lower = away_team.lower().strip()
         if at_lower in text:
-            confidence += 0.4
+            confidence += 0.35
             at_matched = True
         else:
             at_parts = [p for p in at_lower.split() if len(p) > 3 and p not in {"club", "real", "fc", "fk", "sc", "city", "town"}]
             if at_parts and any(p in text for p in at_parts):
-                confidence += 0.3
+                confidence += 0.25
                 at_matched = True
 
-    if not home_team and not away_team:
-        confidence += 0.5
+    # When both teams are requested:
+    if home_team and away_team:
+        # If one team is completely missing, penalty to prevent single-team articles from scoring high
+        if not ht_matched or not at_matched:
+            return 0.0
+
+        # Check for venue / hosting indication or swapped teams
+        # E.g. "away_team vs home_team" or "away_team at home_team" vs "home_team vs away_team"
+        ht_pos = text.find(home_team.lower().strip()) if ht_matched else -1
+        at_pos = text.find(away_team.lower().strip()) if at_matched else -1
+
+        # If both exact names appear and away team appears before home team with vs/v, check if swapped
+        if ht_pos != -1 and at_pos != -1:
+            snippet_between = text[min(ht_pos, at_pos):max(ht_pos, at_pos) + len(home_team) + len(away_team)]
+            if at_pos < ht_pos and (" vs " in snippet_between or " - " in snippet_between or " v " in snippet_between):
+                # Swapped home and away teams penalty
+                confidence -= 0.3
+
+    elif not home_team and not away_team:
+        confidence += 0.2
 
     # Competition check
     if competition and competition.strip():
         comp_lower = competition.lower().strip()
         if comp_lower in text:
             confidence += 0.2
+        else:
+            # If competition is specified but not in text, small deduction
+            confidence -= 0.1
 
     # Date / Year check
     if scheduled_at:
+        date_iso = scheduled_at.strftime("%Y-%m-%d")
         year_str = str(scheduled_at.year)
-        if year_str in text:
+        if date_iso in text or scheduled_at.strftime("%d.%m.%Y") in text or scheduled_at.strftime("%d/%m/%Y") in text:
             confidence += 0.1
+        elif year_str in text:
+            confidence += 0.05
 
-    return min(1.0, confidence)
+    return max(0.0, min(1.0, confidence))
 
 
 def calculate_relevance(

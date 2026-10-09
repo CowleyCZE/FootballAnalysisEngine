@@ -64,6 +64,7 @@ def test_start_analysis_by_request(api_test_db):
 
 
 def test_start_analysis_creates_match_for_verified_teams(api_test_db):
+    # If Arsenal and Chelsea exist but match is not in schedule, start analysis must fail as unverified
     client = TestClient(server_module.app)
     resp = client.post("/api/analysis/start", json={
         "home_team": "Arsenal",
@@ -71,10 +72,8 @@ def test_start_analysis_creates_match_for_verified_teams(api_test_db):
         "competition": "Premier League",
         "scheduled_at": "2026-11-20T18:00:00"
     })
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "started" or data["status"] == "DISCOVERY"
-    assert data["match_id"] is not None
+    assert resp.status_code == 404
+    assert "neexistuje v autoritativním rozpisu" in resp.json()["detail"]
 
 
 def test_start_analysis_rejects_unverified_teams(api_test_db):

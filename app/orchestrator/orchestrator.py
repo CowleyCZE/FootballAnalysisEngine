@@ -49,7 +49,7 @@ class MasterOrchestrator:
         try:
             cursor.execute("""
                 SELECT m.id as match_id, m.home_team_id, m.away_team_id,
-                       m.competition_id, m.scheduled_at, m.venue,
+                       m.competition_id, m.scheduled_at, m.venue, m.status,
                        th.name as home_team, ta.name as away_team, COALESCE(c.name, m.competition, '') as competition
                 FROM matches m
                 LEFT JOIN teams th ON m.home_team_id = th.id
@@ -60,6 +60,11 @@ class MasterOrchestrator:
             row = cursor.fetchone()
             if not row:
                 return None
+
+            match_status = row["status"] if "status" in row.keys() and row["status"] else "RESOLVED"
+            if match_status == "UNVERIFIED":
+                return None
+
             scheduled_str = row["scheduled_at"]
             scheduled_dt = datetime.fromisoformat(scheduled_str) if scheduled_str else datetime.now(timezone.utc)
             return MatchIdentity(
@@ -73,6 +78,7 @@ class MasterOrchestrator:
                 scheduled_at=scheduled_dt,
                 data_cutoff_at=scheduled_dt,
                 venue=row["venue"] if "venue" in row.keys() else None,
+                status=match_status,
             )
         finally:
             conn.close()
@@ -163,6 +169,13 @@ class MasterOrchestrator:
         """Spustí pipeline pro existující zápas: Match Identity → Research Planner → Jobs."""
         match_identity = self._get_match_identity_from_id(match_id)
         if not match_identity:
+            # Check if match exists but is UNVERIFIED
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            row = cursor.execute("SELECT status FROM matches WHERE id = ?", (match_id,)).fetchone()
+            conn.close()
+            if row and row[0] == "UNVERIFIED":
+                raise ValueError(f"Match {match_id} exists but is UNVERIFIED. Pipeline cannot start for unverified match.")
             raise ValueError(f"Match {match_id} does not exist")
 
         run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_M{match_id}_{uuid.uuid4().hex[:4]}"
