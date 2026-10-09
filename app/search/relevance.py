@@ -5,7 +5,8 @@ from urllib.parse import urlparse
 YOUTH_RESERVE_KEYWORDS = {
     "u15", "u16", "u17", "u18", "u19", "u21", "u23",
     "under-15", "under-17", "under-18", "under-19", "under-21", "under-23",
-    "youth", "dorost", "juniors", "b team", "reserves", "rezerva", "u-19", "u-21"
+    "youth", "dorost", "juniors", "b team", "reserves", "rezerva", "u-19", "u-21",
+    "b-tým", "b-team", "akademie", "academy", "u19s", "u21s"
 }
 
 AMBIGUOUS_DOMAINS = {
@@ -20,27 +21,41 @@ def calculate_identity_confidence(
     competition: Optional[str] = None,
     scheduled_at: Optional[datetime] = None
 ) -> float:
-    text = f"{getattr(result, 'title', '')} {getattr(result, 'content', '')}".lower()
+    title = getattr(result, 'title', '') or ''
+    content = getattr(result, 'content', '') or ''
+    text = f"{title} {content}".lower()
+
+    # If result is explicitly youth/reserve, severely penalize identity confidence unless home/away requested youth
+    if any(kw in text for kw in YOUTH_RESERVE_KEYWORDS):
+        if home_team and not any(kw in home_team.lower() for kw in YOUTH_RESERVE_KEYWORDS):
+            return 0.0
+
     confidence = 0.0
 
     # Team presence checks
+    ht_matched = False
     if home_team and home_team.strip():
         ht_lower = home_team.lower().strip()
         if ht_lower in text:
-            confidence += 0.35
+            confidence += 0.4
+            ht_matched = True
         else:
-            ht_parts = [p for p in ht_lower.split() if len(p) > 3 and p not in {"club", "real", "fc", "fk", "sc"}]
-            if any(p in text for p in ht_parts):
-                confidence += 0.25
+            ht_parts = [p for p in ht_lower.split() if len(p) > 3 and p not in {"club", "real", "fc", "fk", "sc", "city", "town"}]
+            if ht_parts and any(p in text for p in ht_parts):
+                confidence += 0.3
+                ht_matched = True
 
+    at_matched = False
     if away_team and away_team.strip():
         at_lower = away_team.lower().strip()
         if at_lower in text:
-            confidence += 0.35
+            confidence += 0.4
+            at_matched = True
         else:
-            at_parts = [p for p in at_lower.split() if len(p) > 3 and p not in {"club", "real", "fc", "fk", "sc"}]
-            if any(p in text for p in at_parts):
-                confidence += 0.25
+            at_parts = [p for p in at_lower.split() if len(p) > 3 and p not in {"club", "real", "fc", "fk", "sc", "city", "town"}]
+            if at_parts and any(p in text for p in at_parts):
+                confidence += 0.3
+                at_matched = True
 
     if not home_team and not away_team:
         confidence += 0.5

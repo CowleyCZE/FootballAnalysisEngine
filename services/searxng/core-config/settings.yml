@@ -10,6 +10,4 @@ search:
 server:
   limiter: false
   image_proxy: false
-
-server:
-  secret_key: "325b05674577c61e2a90292d035e5e5cdcdfda3b48f331c8c0255bebf94cbbea"
+  secret_key: "CHANGE_ME_SEARXNG_SECRET_KEY_ENV_VAR"

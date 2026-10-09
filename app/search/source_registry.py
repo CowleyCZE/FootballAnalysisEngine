@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 from urllib.parse import urlparse
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 class SearchSourceRegistry:
@@ -23,6 +26,7 @@ class SearchSourceRegistry:
 
     def load_config(self, config_path: str) -> None:
         if not os.path.exists(config_path):
+            logger.warning("SourceRegistry YAML file not found: %s. Using default fallback configuration.", config_path)
             return
         try:
             with open(config_path, "r", encoding="utf-8") as f:
@@ -39,8 +43,8 @@ class SearchSourceRegistry:
                     self._domains[domain.lower()] = cfg.get("type", "unknown")
                 elif isinstance(cfg, str):
                     self._domains[domain.lower()] = cfg
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error("Failed to parse SourceRegistry configuration YAML at %s: %s", config_path, exc, exc_info=True)
 
     @property
     def DOMAINS(self) -> dict[str, str]:

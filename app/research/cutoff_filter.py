@@ -21,7 +21,7 @@ class CutoffFilter:
         cls,
         published_at: Optional[Union[datetime, str]],
         cutoff_at: Union[datetime, str],
-        policy: str = "allow_unknown"
+        policy: str = "unverified_date"
     ) -> Tuple[bool, str]:
         pub_dt = cls._to_utc_naive(published_at)
         cutoff_dt = cls._to_utc_naive(cutoff_at)
@@ -30,9 +30,10 @@ class CutoffFilter:
             return True, "VALID"
 
         if pub_dt is None:
-            if policy == "exclude":
+            if policy == "strict_exclude":
                 return False, "DATE_UNKNOWN"
-            return True, "DATE_UNKNOWN_ALLOWED"
+            # Označíme jako UNVERIFIED_DATE, document smí projít, ale má omezenou váhu/platnost
+            return True, "UNVERIFIED_DATE"
 
         if pub_dt > cutoff_dt:
             return False, "EXCLUDED_BY_CUTOFF"
