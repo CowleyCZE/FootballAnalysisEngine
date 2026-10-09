@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.orchestrator.orchestrator import MasterOrchestrator, MatchOrchestrator
 from app.orchestrator.models import AnalysisRequest
-from app.orchestrator.match_resolver import MatchNotFoundException, AmbiguousMatchException
+from app.orchestrator.match_resolver import MatchNotFoundException, AmbiguousMatchException, UnverifiedMatchException
 from app.search.engine import SearchEngine
 from app.search.models import QuerySpec
 from app.search.searxng_client import SearXNGClient
@@ -36,7 +36,10 @@ def verify_api_auth(
 ):
     expected_token = os.getenv("WORKER_API_TOKEN") or os.getenv("API_SECRET_TOKEN")
     if not expected_token:
-        return True
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="API token authentication is not configured on the server. Access blocked for security.",
+        )
 
     provided_token = x_worker_token
     if not provided_token and authorization and authorization.lower().startswith("bearer "):
@@ -205,6 +208,8 @@ def start_analysis(req: AnalysisStartRequest):
             result = orchestrator.start_analysis_run(analysis_req)
             return result
         except MatchNotFoundException as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except UnverifiedMatchException as e:
             raise HTTPException(status_code=404, detail=str(e))
         except AmbiguousMatchException as e:
             raise HTTPException(status_code=400, detail=str(e))

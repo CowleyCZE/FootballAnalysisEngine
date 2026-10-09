@@ -2,7 +2,7 @@ import logging
 import os
 import time
 import threading
-from typing import Callable, Dict
+from typing import Callable, Dict, Any
 
 from app.jobs.queue import JobQueue
 from app.jobs.models import JobStatus
@@ -86,13 +86,20 @@ class WorkerDaemon:
             if isinstance(result, dict):
                 res_status = str(result.get("status") or "").upper()
 
-            if res_status in ("FAILED", "ERROR"):
-                err_msg = result.get("error") or f"Job handler returned status {res_status}"
-                self.queue.update_job_status(job_id, JobStatus.FAILED, result=result, error=str(err_msg), worker_id=self.worker_id)
+            # Striktní mapování stavů
+            if res_status in ("SUCCESS", "COMPLETED", "RESOLVED"):
+                self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=result, worker_id=self.worker_id)
+            elif res_status in ("PARTIAL", "NO_RESULT", "INSUFFICIENT_DATA"):
+                error_msg = result.get("error") or f"Job produced non-successful outcome status: {res_status}"
+                self.queue.update_job_status(job_id, JobStatus.FAILED, result=result, error=error_msg, worker_id=self.worker_id)
             elif res_status == "RETRY":
                 err_msg = result.get("error") or "Job handler requested retry"
                 self.queue.update_job_status(job_id, JobStatus.RETRY, result=result, error=str(err_msg), worker_id=self.worker_id)
+            elif res_status in ("FAILED", "ERROR"):
+                err_msg = result.get("error") or f"Job handler returned status {res_status}"
+                self.queue.update_job_status(job_id, JobStatus.FAILED, result=result, error=str(err_msg), worker_id=self.worker_id)
             else:
+                # Pokud není status definován, ale handler doběhl bez výjimky
                 self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=result, worker_id=self.worker_id)
         except Exception as exc:
             logger.exception("Worker %s failed job %s", self.worker_id, job_id)

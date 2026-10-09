@@ -29,7 +29,7 @@ class MatchResolver:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        # Query to find match by team names, competition, and scheduled date
+        # Query to find match by team names, competition, and scheduled date in authoritative schedule
         query = """
             SELECT m.id as match_id, m.home_team_id, m.away_team_id, m.competition_id, m.scheduled_at, m.venue, m.status,
                    th.name as home_team, ta.name as away_team, COALESCE(c.name, m.competition, '') as competition
@@ -47,7 +47,7 @@ class MatchResolver:
         conn.close()
 
         if not rows:
-            raise MatchNotFoundException(f"Zápas {request.home_team} vs {request.away_team} nebyl v databázi nalezen.")
+            raise MatchNotFoundException(f"Zápas {request.home_team} vs {request.away_team} pro datum {date_str} nebyl v autoritativním rozpisu nalezen.")
 
         if len(rows) > 1:
             raise AmbiguousMatchException(f"Nalezeno více kandidátů ({len(rows)}) pro zápas {request.home_team} vs {request.away_team}.")
@@ -58,6 +58,9 @@ class MatchResolver:
 
         cutoff_dt = scheduled_dt
         match_status = match_data["status"] if "status" in match_data.keys() and match_data["status"] else "RESOLVED"
+
+        if match_status == "UNVERIFIED":
+            raise UnverifiedMatchException(f"Zápas #{match_data['match_id']} existuje v DB, ale je ve stavu UNVERIFIED (nepotvrzený rozpis). Analýzu nelze spustit.")
 
         return MatchIdentity(
             match_id=match_data["match_id"],
@@ -94,8 +97,7 @@ class MatchResolver:
             home_team_row = _get_team(request.home_team)
             away_team_row = _get_team(request.away_team)
 
-            is_verified = bool(home_team_row and away_team_row and request.competition and request.competition.strip())
-            if not is_verified:
+            if not home_team_row or not away_team_row:
                 unverified_reasons = []
                 if not home_team_row:
                     unverified_reasons.append(f"domácí tým '{request.home_team}'")
@@ -104,34 +106,47 @@ class MatchResolver:
                 if not request.competition or not request.competition.strip():
                     unverified_reasons.append("chybí specifikace soutěže")
                 raise MatchNotFoundException(
-                    f"Zápas nelze ověřit v autoritativních datech ({', '.join(unverified_reasons)}). Status nastaven na UNVERIFIED / RESOLVE_FAILED."
+                    f"Zápas nelze ověřit v autoritativních datech ({', '.join(unverified_reasons)}). Zápas neexistuje v rozpisu."
                 )
+
+            # Check if match fixture is verified in competitions or schedule
+            comp_row = None
+            if request.competition:
+                comp_norm = request.competition.strip().lower()
+                comp_row = cursor.execute("SELECT id, name FROM competitions WHERE lower(name) = ?", (comp_norm,)).fetchone()
+
+            is_fixture_verified = bool(comp_row)
+            match_status = "RESOLVED" if is_fixture_verified else "UNVERIFIED"
 
             home_team_id = int(home_team_row["id"])
             away_team_id = int(away_team_row["id"])
+            comp_id = int(comp_row["id"]) if comp_row else None
 
             scheduled_str = request.scheduled_at.isoformat()
             cursor.execute(
                 """
-                INSERT INTO matches (home_team_id, away_team_id, competition, scheduled_at, status)
-                VALUES (?, ?, ?, ?, 'RESOLVED')
+                INSERT INTO matches (home_team_id, away_team_id, competition_id, competition, scheduled_at, status)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (home_team_id, away_team_id, request.competition or "", scheduled_str)
+                (home_team_id, away_team_id, comp_id, request.competition or "", scheduled_str, match_status)
             )
             match_id = int(cursor.lastrowid)
             conn.commit()
+
+        if match_status == "UNVERIFIED":
+            raise MatchNotFoundException(f"Zápas #{match_id} založen jako UNVERIFIED, protože soutěž '{request.competition}' není v autoritativním registru. Analýzu nelze spustit pro neoverený zápas.")
 
         scheduled_dt = request.scheduled_at
         return MatchIdentity(
             match_id=match_id,
             home_team_id=home_team_id,
             away_team_id=away_team_id,
-            competition_id=None,
+            competition_id=comp_id,
             home_team=home_team_row["name"],
             away_team=away_team_row["name"],
             competition=request.competition,
             scheduled_at=scheduled_dt,
             data_cutoff_at=scheduled_dt,
             venue=None,
-            status="RESOLVED",
+            status=match_status,
         )

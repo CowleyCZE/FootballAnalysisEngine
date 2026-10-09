@@ -22,8 +22,11 @@ class CoverageEngine:
             cursor.execute("SELECT domain, required, status FROM research_tasks WHERE run_id = ? OR run_db_id = ?", (str(run_id), run_db_id))
         tasks = cursor.fetchall()
 
-        # Načteme otevřené konflikty
-        cursor.execute("SELECT domain, severity FROM research_conflicts WHERE run_id = ? OR run_id = ? AND status = 'OPEN'", (str(run_id), str(run_db_id)))
+        # Načteme otevřené konflikty s korektním uzávorkováním SQL podmínek
+        cursor.execute(
+            "SELECT domain, severity FROM research_conflicts WHERE (run_id = ? OR run_id = ?) AND status = 'OPEN'",
+            (str(run_id), str(run_db_id) if run_db_id is not None else str(run_id))
+        )
         conflicts = cursor.fetchall()
         conn.close()
 

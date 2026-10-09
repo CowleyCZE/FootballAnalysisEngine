@@ -17,6 +17,10 @@ env/
 *.db-shm
 *.db-wal
 
+# Secrets & Local Config
+.env
+services/searxng/.env
+
 # Logs
 logs/*.log
 logs/*.json
@@ -34,6 +38,3 @@ data/processed/*
 # OS
 Thumbs.db
 .DS_Store
-12. KROK 7 — vytvoření virtuálního Python prostředí
-python -m venv .venv
-13. Aktivace prostředí
