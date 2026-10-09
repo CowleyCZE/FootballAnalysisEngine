@@ -5,51 +5,23 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.orchestrator.models import AnalysisRequest, ResearchReadiness
 from app.orchestrator.orchestrator import MasterOrchestrator
+from app.orchestrator.match_resolver import MatchNotFoundException, AmbiguousMatchException
 from app.orchestrator.state_machine import MatchState
 
 router = APIRouter(prefix="/api/analysis", tags=["Analysis Orchestrator"])
 orchestrator = MasterOrchestrator()
 
 
-def _resolve_match_id(request: AnalysisRequest) -> int:
-    with sqlite3.connect(orchestrator.db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            """
-            SELECT m.id
-            FROM matches m
-            JOIN teams ht ON ht.id = m.home_team_id
-            JOIN teams at ON at.id = m.away_team_id
-            WHERE lower(ht.name) = lower(?)
-              AND lower(at.name) = lower(?)
-              AND lower(COALESCE(m.competition, '')) = lower(?)
-              AND date(m.scheduled_at) = date(?)
-            ORDER BY abs(strftime('%s', m.scheduled_at) - strftime('%s', ?)) ASC
-            LIMIT 1
-            """,
-            (
-                request.home_team,
-                request.away_team,
-                request.competition,
-                request.scheduled_at.isoformat(),
-                request.scheduled_at.isoformat(),
-            ),
-        ).fetchone()
-    if not row:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Zadaný zápas nebyl nalezen v databázi.",
-        )
-    return int(row["id"])
-
-
 @router.post("/start", status_code=status.HTTP_201_CREATED)
 def start_analysis(request: AnalysisRequest) -> Dict[str, Any]:
-    """Zahájí autonomní pipeline pro existující zápas v databázi."""
-    match_id = _resolve_match_id(request)
+    """Zahájí autonomní pipeline pro ověřený zápas přes MasterOrchestrator a MatchResolver."""
     try:
-        run_id = orchestrator.start_pipeline(match_id)
-        return {"run_id": run_id, "match_id": match_id, "status": MatchState.DISCOVERY}
+        run_id = orchestrator.start_pipeline_from_request(request)
+        return {"run_id": run_id, "status": MatchState.DISCOVERY}
+    except MatchNotFoundException as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AmbiguousMatchException as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except Exception as exc:

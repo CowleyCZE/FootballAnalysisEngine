@@ -18,7 +18,6 @@ from app.database.connection import init_database_schema
 
 logger = logging.getLogger(__name__)
 
-# Mapování typu tasku (z ResearchPlaneru) na typ jobu ve frontě
 _TASK_TYPE_TO_JOB_TYPE = {
     "FACT_COLLECTION": "RESEARCH",
     "STAT_COLLECTION": "STATISTICS",
@@ -140,7 +139,6 @@ class MasterOrchestrator:
                 conn.execute("UPDATE research_tasks SET job_id=?,status='QUEUED',updated_at=CURRENT_TIMESTAMP WHERE id=?", (job_id, task_id))
                 created.append(job_id)
 
-            # Record task dependencies in job_dependencies
             for task in tasks:
                 if task.depends_on:
                     job_id = task_uuid_to_job_id[task.task_uuid]
@@ -347,14 +345,37 @@ class MasterOrchestrator:
                     required_research = audit_res.get("required_research") or audit_res.get("research_jobs") or []
                     if not required_research:
                         required_research = [{"domain": "GENERAL", "reason": "audit_required"}]
-                    for item in required_research:
-                        self.queue.create_job(
-                            "RESEARCH",
-                            match_id,
-                            {**item, "run_id": run_id, "cycle": cycle},
-                            priority=JobPriority.HIGH,
-                            run_id=run_id,
-                        )
+
+                    match_ident = self._get_match_identity_from_id(match_id)
+                    if match_ident:
+                        task_reqs = []
+                        for item in required_research:
+                            domain = str(item.get("domain") or "GENERAL")
+                            task_type = str(item.get("job_type") or "FACT_COLLECTION")
+                            if task_type not in ("FACT_COLLECTION", "STAT_COLLECTION", "NEWS_COLLECTION"):
+                                task_type = "FACT_COLLECTION"
+                            desc = str(item.get("description") or item.get("reason") or f"Audit repair for {domain}")
+                            prio = int(item.get("priority", 80))
+                            task_uuid = f"REPAIR-{run_id}-{cycle}-{uuid.uuid4().hex[:6]}"
+                            task_reqs.append(TaskRequirement(
+                                task_uuid=task_uuid,
+                                domain=domain,
+                                task_type=task_type,
+                                description=desc,
+                                priority=prio,
+                                required=True,
+                                capabilities_required=["RESEARCH"],
+                            ))
+                        self._dispatch_research_tasks(task_reqs, match_id, run_id, match_ident)
+                    else:
+                        for item in required_research:
+                            self.queue.create_job(
+                                "RESEARCH",
+                                match_id,
+                                {**item, "run_id": run_id, "cycle": cycle},
+                                priority=JobPriority.HIGH,
+                                run_id=run_id,
+                            )
                 else:
                     self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Max cycles ({max_cycles}) reached")
             else:

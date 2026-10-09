@@ -1,26 +1,113 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
+from urllib.parse import urlparse
+
+YOUTH_RESERVE_KEYWORDS = {
+    "u15", "u16", "u17", "u18", "u19", "u21", "u23",
+    "under-15", "under-17", "under-18", "under-19", "under-21", "under-23",
+    "youth", "dorost", "juniors", "b team", "reserves", "rezerva", "u-19", "u-21"
+}
+
+AMBIGUOUS_DOMAINS = {
+    "youtube.com", "m.youtube.com", "tiktok.com", "instagram.com", "facebook.com", "x.com", "twitter.com"
+}
+
+
+def calculate_identity_confidence(
+    result,
+    home_team: Optional[str] = None,
+    away_team: Optional[str] = None,
+    competition: Optional[str] = None,
+    scheduled_at: Optional[datetime] = None
+) -> float:
+    text = f"{getattr(result, 'title', '')} {getattr(result, 'content', '')}".lower()
+    confidence = 0.0
+
+    # Team presence checks
+    if home_team and home_team.strip():
+        ht_lower = home_team.lower().strip()
+        if ht_lower in text:
+            confidence += 0.35
+        else:
+            ht_parts = [p for p in ht_lower.split() if len(p) > 3 and p not in {"club", "real", "fc", "fk", "sc"}]
+            if any(p in text for p in ht_parts):
+                confidence += 0.25
+
+    if away_team and away_team.strip():
+        at_lower = away_team.lower().strip()
+        if at_lower in text:
+            confidence += 0.35
+        else:
+            at_parts = [p for p in at_lower.split() if len(p) > 3 and p not in {"club", "real", "fc", "fk", "sc"}]
+            if any(p in text for p in at_parts):
+                confidence += 0.25
+
+    if not home_team and not away_team:
+        confidence += 0.5
+
+    # Competition check
+    if competition and competition.strip():
+        comp_lower = competition.lower().strip()
+        if comp_lower in text:
+            confidence += 0.2
+
+    # Date / Year check
+    if scheduled_at:
+        year_str = str(scheduled_at.year)
+        if year_str in text:
+            confidence += 0.1
+
+    return min(1.0, confidence)
+
 
 def calculate_relevance(
     result,
-    team: str,
-    topic_terms: list[str],
+    team: str = "",
+    topic_terms: Optional[List[str]] = None,
     source_priority: int = 0,
     source_authority: float = 0.0,
-    data_cutoff_at: Optional[datetime] = None
+    data_cutoff_at: Optional[datetime] = None,
+    home_team: Optional[str] = None,
+    away_team: Optional[str] = None,
+    competition: Optional[str] = None
 ) -> float:
     score = 0.0
-    title = result.title.lower()
-    url = result.url.lower()
-    content = result.content.lower()
-    team_lower = team.lower()
+    title = getattr(result, "title", "").lower()
+    url = getattr(result, "url", "").lower()
+    content = getattr(result, "content", "").lower()
+    text = f"{title} {content}"
 
-    if team_lower in title:
+    # Authority bonus
+    score += source_authority * 25.0
+
+    # Main team / query team match
+    target_team = team or home_team or ""
+    if target_team and target_team.lower() in title:
         score += 30.0
-    if team_lower in url:
+    elif target_team and target_team.lower() in url:
         score += 20.0
 
-    for term in topic_terms:
+    if away_team and away_team.lower() in title:
+        score += 25.0
+
+    # Youth / reserve penalty
+    if any(kw in text for kw in YOUTH_RESERVE_KEYWORDS):
+        score -= 80.0
+
+    # Ambiguity penalty for video/social platforms or generic content
+    domain = ""
+    try:
+        domain = urlparse(url).netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+    except Exception:
+        pass
+
+    if domain in AMBIGUOUS_DOMAINS:
+        score -= 40.0
+
+    # Topic terms match
+    for term in (topic_terms or []):
         term_lower = term.lower()
         if term_lower in title:
             score += 15.0
@@ -29,7 +116,7 @@ def calculate_relevance(
 
     score += min(source_priority // 10, 20)
 
-    # Freshness calculation
+    # Freshness / Cutoff calculation
     if data_cutoff_at and getattr(result, "published_at", None):
         try:
             pub_date = datetime.fromisoformat(str(result.published_at).replace("Z", "+00:00"))
@@ -38,7 +125,6 @@ def calculate_relevance(
             elif data_cutoff_at.tzinfo is None and pub_date.tzinfo is not None:
                 data_cutoff_at = data_cutoff_at.replace(tzinfo=pub_date.tzinfo)
             if pub_date > data_cutoff_at:
-                # Penalty for post-cutoff items if not filtered out
                 score -= 100.0
             else:
                 days_diff = (data_cutoff_at - pub_date).days

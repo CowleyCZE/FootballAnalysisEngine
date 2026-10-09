@@ -1,5 +1,7 @@
+import asyncio
 from datetime import datetime, timezone
 import json
+import os
 import sqlite3
 from typing import Optional, List, Dict, Any
 
@@ -9,6 +11,9 @@ from pydantic import BaseModel, Field
 from app.orchestrator.orchestrator import MasterOrchestrator, MatchOrchestrator
 from app.orchestrator.models import AnalysisRequest
 from app.orchestrator.match_resolver import MatchNotFoundException, AmbiguousMatchException
+from app.search.engine import SearchEngine
+from app.search.models import QuerySpec
+from app.search.searxng_client import SearXNGClient
 from app.jobs.queue import JobQueue
 
 
@@ -33,6 +38,17 @@ class AnalysisStartRequest(BaseModel):
     scheduled_at: Optional[str] = None
     timezone: str = "Europe/Prague"
     priority: int = 50
+
+
+class SearchInternalRequest(BaseModel):
+    query: str
+    language: str = "en"
+    priority: int = 50
+    time_range: Optional[str] = None
+    reason: str = ""
+    team: str = ""
+    topic_terms: List[str] = Field(default_factory=list)
+    data_cutoff_at: Optional[str] = None
 
 
 class WorkerRegistration(BaseModel):
@@ -84,6 +100,55 @@ def notebook_worker_heartbeat():
         "status": "online",
         "worker": "notebook",
         "timestamp": now(),
+    }
+
+
+@app.post("/api/internal/search")
+def internal_search(req: SearchInternalRequest):
+    """Interní vyhledávací proxy endpoint pro odlehčené Note 9 workery."""
+    client = SearXNGClient(
+        base_url=os.getenv("SEARXNG_URL", "http://127.0.0.1:8080"),
+        timeout=float(os.getenv("SEARXNG_TIMEOUT", "30")),
+    )
+    engine = SearchEngine(client=client)
+    spec = QuerySpec(
+        query=req.query,
+        language=req.language,
+        priority=req.priority,
+        time_range=req.time_range,
+        reason=req.reason,
+    )
+    cutoff = datetime.fromisoformat(req.data_cutoff_at.replace("Z", "+00:00")) if req.data_cutoff_at else None
+    results = asyncio.run(
+        engine.search(
+            query=spec,
+            team=req.team,
+            topic_terms=req.topic_terms,
+            data_cutoff_at=cutoff,
+        )
+    )
+    serialized = [
+        {
+            "title": r.title,
+            "url": r.url,
+            "snippet": r.content,
+            "content": r.content,
+            "engine": r.engine,
+            "publishedDate": r.published_at,
+            "published_at": r.published_at,
+            "score": r.score,
+            "relevance": r.relevance,
+            "source_type": r.source_type,
+            "retrieved_at": r.retrieved_at,
+        }
+        for r in results
+    ]
+    return {
+        "status": "COMPLETED",
+        "query": req.query,
+        "results": serialized,
+        "result_count": len(serialized),
+        "source": "notebook_proxy",
     }
 
 
@@ -165,6 +230,7 @@ def get_analysis_status(run_id: str):
 
 @app.get("/api/analysis/{run_id}/result")
 def get_analysis_result(run_id: str):
+    """Vrátí finální analytický výsledek s kompletní dohledatelností (claims, evidence, cutoff, audit)."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     try:
@@ -172,19 +238,69 @@ def get_analysis_result(run_id: str):
         if not run:
             raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
 
+        match_id = run["match_id"]
+        run_base = conn.execute("SELECT id FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        run_db_id = run_base["id"] if run_base else None
+
+        cutoff_row = conn.execute("SELECT data_cutoff_at FROM research_tasks WHERE run_id = ? AND data_cutoff_at IS NOT NULL LIMIT 1", (run_id,)).fetchone()
+        if not cutoff_row:
+            cutoff_row = conn.execute("SELECT scheduled_at as data_cutoff_at FROM matches WHERE id = ?", (match_id,)).fetchone()
+        data_cutoff_at = cutoff_row["data_cutoff_at"] if cutoff_row else None
+
+        claims = []
+        if run_db_id:
+            claim_rows = conn.execute("""
+                SELECT c.id, c.claim_text, c.claim_type, c.normalized_claim, c.status, c.confidence, c.valid_from
+                FROM claims c
+                WHERE c.run_id = ? OR c.match_id = ?
+            """, (run_db_id, match_id)).fetchall()
+
+            for cr in claim_rows:
+                ev_rows = conn.execute("""
+                    SELECT e.quoted_text, e.extracted_value, d.url as source_url, d.published_at, d.canonical_url
+                    FROM claim_evidence ce
+                    JOIN evidence e ON e.id = ce.evidence_id
+                    JOIN documents d ON d.id = e.document_id
+                    WHERE ce.claim_id = ?
+                """, (cr["id"],)).fetchall()
+                claims.append({
+                    "claim_id": cr["id"],
+                    "claim_text": cr["claim_text"],
+                    "claim_type": cr["claim_type"],
+                    "normalized_claim": cr["normalized_claim"],
+                    "status": cr["status"],
+                    "confidence": cr["confidence"],
+                    "valid_from": cr["valid_from"],
+                    "evidence": [dict(ev) for ev in ev_rows],
+                })
+
         ai_job = conn.execute("SELECT result_json FROM jobs WHERE run_id = ? AND job_type = 'AI_ANALYSIS' AND status = 'SUCCESS' ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
         audit_job = conn.execute("SELECT result_json FROM jobs WHERE run_id = ? AND job_type = 'AUDIT' AND status = 'SUCCESS' ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
 
         ai_res = json.loads(ai_job["result_json"]) if ai_job and ai_job["result_json"] else None
         audit_res = json.loads(audit_job["result_json"]) if audit_job and audit_job["result_json"] else None
 
+        audit_issues = conn.execute("SELECT rule_name, issue_type, severity, message, description FROM audit_issues WHERE audit_run_id IN (SELECT id FROM audit_runs WHERE run_id = ? OR match_id = ?)", (run_id, match_id)).fetchall()
+
+        warnings = []
+        if audit_res and isinstance(audit_res, dict) and audit_res.get("warnings"):
+            warnings.extend(audit_res.get("warnings"))
+        if run["state"] == "UNRESOLVED":
+            err_msg = run["error_text"] if "error_text" in run.keys() and run["error_text"] else "insufficient data or audit failed"
+            warnings.append(f"Pipeline finished in state UNRESOLVED: {err_msg}")
+
         return {
             "run_id": run_id,
-            "match_id": run["match_id"],
+            "match_id": match_id,
             "state": run["state"],
             "cycle": run["cycle"],
+            "data_cutoff_at": data_cutoff_at,
+            "claims": claims,
+            "claims_count": len(claims),
             "ai_analysis": ai_res,
             "audit": audit_res,
+            "audit_issues": [dict(iss) for iss in audit_issues],
+            "warnings": warnings,
             "finished_at": run["finished_at"],
         }
     finally:

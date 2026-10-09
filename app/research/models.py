@@ -52,6 +52,9 @@ class Evidence:
     text_fragment: str
     document_id: Optional[int] = None
     published_at: Optional[datetime] = None
+    retrieved_at: Optional[str] = None
+    canonical_url: Optional[str] = None
+    content_hash: Optional[str] = None
     start_offset: Optional[int] = None
     end_offset: Optional[int] = None
     domain: Optional[str] = None

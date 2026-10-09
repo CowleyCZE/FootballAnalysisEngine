@@ -1,34 +1,54 @@
 from __future__ import annotations
 
+import os
 from urllib.parse import urlparse
+import yaml
 
 
 class SearchSourceRegistry:
     DEFAULT_AUTHORITY = 0.2
 
-    SOURCE_TYPES = {
-        "official_club": 1.0,
-        "official_league": 1.0,
-        "statistical_provider": 0.9,
-        "major_news": 0.8,
-        "aggregator": 0.5,
-        "unknown": 0.2,
-    }
+    def __init__(self, config_path: str = "config/source_registry.yaml"):
+        self.config_path = config_path
+        self._source_types = {
+            "official_club": 1.0,
+            "official_league": 1.0,
+            "statistical_provider": 0.9,
+            "major_news": 0.8,
+            "aggregator": 0.5,
+            "unknown": 0.2,
+        }
+        self._domains = {}
+        self.load_config(config_path)
 
-    DOMAINS = {
-        "sparta.cz": "official_club",
-        "slavia.cz": "official_club",
-        "fcbayern.com": "official_club",
-        "realmadrid.com": "official_club",
-        "premierleague.com": "official_league",
-        "uefa.com": "official_league",
-        "bbc.com": "major_news",
-        "bbc.co.uk": "major_news",
-        "skysports.com": "major_news",
-        "livesport.cz": "aggregator",
-        "eurofotbal.cz": "aggregator",
-        "ruik.cz": "major_news",
-    }
+    def load_config(self, config_path: str) -> None:
+        if not os.path.exists(config_path):
+            return
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+
+            st = data.get("source_types", {})
+            for name, cfg in st.items():
+                if isinstance(cfg, dict) and "authority" in cfg:
+                    self._source_types[name] = float(cfg["authority"])
+
+            doms = data.get("domains", {})
+            for domain, cfg in doms.items():
+                if isinstance(cfg, dict):
+                    self._domains[domain.lower()] = cfg.get("type", "unknown")
+                elif isinstance(cfg, str):
+                    self._domains[domain.lower()] = cfg
+        except Exception:
+            pass
+
+    @property
+    def DOMAINS(self) -> dict[str, str]:
+        return self._domains
+
+    @property
+    def SOURCE_TYPES(self) -> dict[str, float]:
+        return self._source_types
 
     def get_domain(self, url: str) -> str:
         try:
@@ -44,8 +64,8 @@ class SearchSourceRegistry:
     def get_source_type(self, url: str) -> str:
         domain = self.get_domain(url)
 
-        if domain in self.DOMAINS:
-            return self.DOMAINS[domain]
+        if domain in self._domains:
+            return self._domains[domain]
 
         return "unknown"
 
@@ -55,7 +75,7 @@ class SearchSourceRegistry:
 
     def get_authority(self, url: str) -> float:
         source_type = self.get_source_type(url)
-        return self.SOURCE_TYPES.get(
+        return self._source_types.get(
             source_type,
             self.DEFAULT_AUTHORITY,
         )
@@ -63,7 +83,7 @@ class SearchSourceRegistry:
     def get_info(self, url: str) -> dict:
         domain = self.get_domain(url)
         source_type = self.get_source_type(url)
-        authority = self.SOURCE_TYPES.get(
+        authority = self._source_types.get(
             source_type,
             self.DEFAULT_AUTHORITY,
         )
