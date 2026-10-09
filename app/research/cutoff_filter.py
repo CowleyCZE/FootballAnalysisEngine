@@ -27,7 +27,7 @@ class CutoffFilter:
         cutoff_dt = cls._to_utc_naive(cutoff_at)
 
         if cutoff_dt is None:
-            return True, "VALID"
+            return False, "CUTOFF_MISSING"
 
         if pub_dt is None:
             if policy == "strict_exclude":

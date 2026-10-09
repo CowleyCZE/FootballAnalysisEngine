@@ -11,6 +11,7 @@ from app.orchestrator.recovery import PipelineRecovery
 from app.orchestrator.scheduler import DependencyScheduler
 from app.orchestrator.match_resolver import MatchResolver, MatchNotFoundException, AmbiguousMatchException, parse_to_utc
 from app.orchestrator.research_planner import ResearchPlanner
+from app.orchestrator.coverage import CoverageEngine
 from app.orchestrator.models import AnalysisRequest, MatchIdentity, TaskRequirement
 from app.jobs.queue import JobQueue
 from app.jobs.models import JobStatus, JobPriority
@@ -39,6 +40,7 @@ class MasterOrchestrator:
         self.recovery = PipelineRecovery(db_path=db_path, timeout_seconds=self.config["orchestrator"]["worker_timeout"])
         self.scheduler = DependencyScheduler(db_path=db_path)
         self.planner = ResearchPlanner()
+        self.coverage_engine = CoverageEngine(db_path=db_path)
         init_database_schema(db_path)
 
     def _get_match_identity_from_id(self, match_id: int) -> Optional[MatchIdentity]:
@@ -352,8 +354,31 @@ class MasterOrchestrator:
                 if audit_score is not None and float(audit_score) < 0.3:
                     self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Audit score too low ({audit_score})")
                 else:
-                    self.state_machine.transition_to(run_id, MatchState.FINALIZING, "Audit passed")
-                    self.state_machine.transition_to(run_id, MatchState.COMPLETED, "Pipeline successful")
+                    readiness = self.coverage_engine.evaluate_run(run_id, self._get_run_db_id(run_id))
+                    if not readiness.ready:
+                        reasons = ", ".join(readiness.blocking_reasons)
+                        if cycle < max_cycles:
+                            self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Coverage check failed ({reasons}) - cycle {cycle}")
+                            match_ident = self._get_match_identity_from_id(match_id)
+                            if match_ident:
+                                task_reqs = [
+                                    TaskRequirement(
+                                        task_uuid=f"REPAIR-COVERAGE-{run_id}-{cycle}-{uuid.uuid4().hex[:6]}",
+                                        domain="GENERAL",
+                                        task_type="FACT_COLLECTION",
+                                        description=f"Repair research for missing coverage: {reasons}",
+                                        priority=80,
+                                        required=True,
+                                        capabilities_required=["RESEARCH"],
+                                    )
+                                ]
+                                self._dispatch_research_tasks(task_reqs, match_id, run_id, match_ident)
+                        else:
+                            self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Coverage check failed and max cycles reached: {reasons}")
+                    else:
+                        self.state_machine.transition_to(run_id, MatchState.FINALIZING, "Audit and coverage check passed")
+                        if self._are_all_jobs_completed(run_id):
+                            self.state_machine.transition_to(run_id, MatchState.COMPLETED, "Pipeline successful")
             elif audit_status == "RESEARCH_REQUIRED":
                 if cycle < max_cycles:
                     self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Research required - cycle {cycle}")
@@ -428,7 +453,11 @@ class MasterOrchestrator:
             return
 
         if state == MatchState.FINALIZING and self._are_all_jobs_completed(run_id):
-            self.state_machine.transition_to(run_id, MatchState.COMPLETED, "All jobs completed")
+            readiness = self.coverage_engine.evaluate_run(run_id, self._get_run_db_id(run_id))
+            if readiness.ready:
+                self.state_machine.transition_to(run_id, MatchState.COMPLETED, "All jobs completed and coverage passed")
+            else:
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Finalizing failed coverage check: {', '.join(readiness.blocking_reasons)}")
 
     def _get_run_db_id(self, run_id: str) -> int:
         with sqlite3.connect(self.db_path) as conn:

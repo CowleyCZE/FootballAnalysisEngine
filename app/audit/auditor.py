@@ -63,15 +63,40 @@ class AdversarialAuditor:
         issues.extend(ev_issues)
 
         # 2. Cutoff & Freshness Audit
-        cutoff_dt = data_cutoff_at or ai_analysis.get("match", {}).get("data_cutoff_at")
+        cutoff_dt = (
+            data_cutoff_at
+            or ai_analysis.get("data_cutoff_at")
+            or ai_analysis.get("match", {}).get("data_cutoff_at")
+            or ai_analysis.get("match", {}).get("scheduled_at")
+        )
+        if not cutoff_dt and claims:
+            # Fallback to latest evidence published_at if available
+            ev_dates = [
+                ev.get("published_at")
+                for c in claims
+                for ev in c.get("evidence", [])
+                if ev.get("published_at")
+            ]
+            if ev_dates:
+                cutoff_dt = max(ev_dates)
+
+        if not cutoff_dt:
+            issues.append({
+                "type": "cutoff_missing",
+                "severity": "CRITICAL",
+                "description": "Není k dispozici žádný platný data_cutoff_at pro audit.",
+                "evidence_ids": [],
+                "requires_research": False,
+            })
+
         for c in claims:
             for ev in c.get("evidence", []):
                 pub_at = ev.get("published_at")
                 eid = ev.get("id") or ev.get("evidence_id")
 
-                if cutoff_dt and pub_at:
-                    passed, _ = CutoffFilter.validate(pub_at, cutoff_dt)
-                    if not passed:
+                if cutoff_dt:
+                    passed, reason = CutoffFilter.validate(pub_at, cutoff_dt, policy="strict_exclude")
+                    if not passed or reason == "EXCLUDED_BY_CUTOFF":
                         issues.append({
                             "type": "cutoff_violation",
                             "severity": "CRITICAL",

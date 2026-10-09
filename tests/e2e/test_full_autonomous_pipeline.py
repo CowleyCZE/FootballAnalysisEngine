@@ -16,6 +16,7 @@ from app.database.schema import initialize_database
 def e2e_db(tmp_path, monkeypatch):
     db_file = str(tmp_path / "e2e_football.db")
     monkeypatch.setattr(server_module, "DB_PATH", db_file)
+    monkeypatch.setenv("WORKER_API_TOKEN", "test-secret-token")
     initialize_database(db_file)
 
     conn = sqlite3.connect(db_file)
@@ -84,11 +85,14 @@ def mock_ai_handler(payload):
     }
 
 
+AUTH_HEADERS = {"X-Worker-Token": "test-secret-token"}
+
+
 def test_full_autonomous_pipeline_e2e(e2e_db):
     client = TestClient(server_module.app)
 
     # 1. API Start
-    start_resp = client.post("/api/analysis/start", json={"match_id": 500})
+    start_resp = client.post("/api/analysis/start", json={"match_id": 500}, headers=AUTH_HEADERS)
     assert start_resp.status_code == 200
     run_id = start_resp.json()["run_id"]
     assert run_id
@@ -113,13 +117,13 @@ def test_full_autonomous_pipeline_e2e(e2e_db):
         worker.process_next_job(handlers)
 
     # 3. Check final run status via API
-    status_resp = client.get(f"/api/analysis/{run_id}")
+    status_resp = client.get(f"/api/analysis/{run_id}", headers=AUTH_HEADERS)
     assert status_resp.status_code == 200
     status_data = status_resp.json()
     assert status_data["state"] in ["COMPLETED", "FINALIZING", "UNRESOLVED"]
 
     # 4. Check final result via API endpoint
-    result_resp = client.get(f"/api/analysis/{run_id}/result")
+    result_resp = client.get(f"/api/analysis/{run_id}/result", headers=AUTH_HEADERS)
     assert result_resp.status_code == 200
     result_data = result_resp.json()
     assert result_data["run_id"] == run_id
@@ -127,9 +131,10 @@ def test_full_autonomous_pipeline_e2e(e2e_db):
 
 
 def test_pipeline_missing_data_insufficient_fallback(e2e_db):
-    # Test pipeline execution when AI worker returns insufficient_data fallback
+    # Test pipeline execution when AI worker returns insufficient_data fallback.
+    # Pipeline MUST finish in UNRESOLVED state (never COMPLETED) when required data is missing.
     client = TestClient(server_module.app)
-    start_resp = client.post("/api/analysis/start", json={"match_id": 500})
+    start_resp = client.post("/api/analysis/start", json={"match_id": 500}, headers=AUTH_HEADERS)
     run_id = start_resp.json()["run_id"]
 
     orchestrator = MasterOrchestrator(db_path=e2e_db)
@@ -146,6 +151,7 @@ def test_pipeline_missing_data_insufficient_fallback(e2e_db):
         orchestrator.tick(run_id)
         worker.process_next_job(handlers)
 
-    status_resp = client.get(f"/api/analysis/{run_id}")
+    status_resp = client.get(f"/api/analysis/{run_id}", headers=AUTH_HEADERS)
     assert status_resp.status_code == 200
-    assert status_resp.json()["state"] in ["UNRESOLVED", "COMPLETED", "FINALIZING"]
+    # Must end in UNRESOLVED, NEVER COMPLETED
+    assert status_resp.json()["state"] == "UNRESOLVED"

@@ -3,7 +3,7 @@ from typing import List, Union
 from app.orchestrator.models import ResearchReadiness
 from app.orchestrator.policies import ResearchPolicy
 
-SUCCESS_STATUSES = {"COMPLETED", "SUCCESS", "PARTIAL", "RESOLVED"}
+SUCCESS_STATUSES = {"COMPLETED", "SUCCESS", "RESOLVED"}
 
 
 class CoverageEngine:
