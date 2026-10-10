@@ -45,7 +45,10 @@ class AIWorker:
         statistics = payload.get("statistics") or {}
         claims = payload.get("claims") or []
         conflicts = payload.get("conflicts") or []
-        match_info = payload.get("match") or {"match_id": match_id}
+        match_info = dict(payload.get("match") or {"match_id": match_id})
+        for k in ("data_cutoff_at", "cutoff_datetime", "cutoff", "scheduled_at"):
+            if payload.get(k) and not match_info.get(k):
+                match_info[k] = payload[k]
 
         context_builder = ContextBuilder(db_path=db_path)
         context = context_builder.build_context(
@@ -63,7 +66,7 @@ class AIWorker:
                 "Chybí ověřená tvrzení (claims) z výzkumné pipeline pro tento zápas",
             )
 
-        cutoff = context.get("match", {}).get("data_cutoff_at", "N/A")
+        cutoff = context.get("match", {}).get("data_cutoff_at") or "N/A"
         prompt = (
             f"STRICT DATA CUTOFF: {cutoff}\n"
             "Analyze the football match using ONLY the supplied context. "
@@ -92,6 +95,23 @@ class AIWorker:
             return AIWorker._insufficient_data_result(
                 match_id,
                 f"Lokální AI služba neposkytla použitelný výstup: {exc}",
+                prompt,
+            )
+
+        # Check if cutoff was missing or invalid: AIWorker cannot produce usable result without valid cutoff
+        cutoff_valid = False
+        if cutoff and cutoff != "N/A":
+            try:
+                from app.orchestrator.match_resolver import parse_to_utc
+                parse_to_utc(cutoff)
+                cutoff_valid = True
+            except Exception:
+                cutoff_valid = False
+
+        if not cutoff_valid:
+            return AIWorker._insufficient_data_result(
+                match_id,
+                "Data cutoff time (data_cutoff_at) is missing or invalid",
                 prompt,
             )
 

@@ -321,9 +321,20 @@ def get_analysis_result(run_id: str, include_historical: bool = False):
         warnings = []
         if audit_res and isinstance(audit_res, dict) and audit_res.get("warnings"):
             warnings.extend(audit_res.get("warnings"))
-        if run["state"] == "UNRESOLVED":
+
+        is_unresolved = (run["state"] == "UNRESOLVED")
+        missing_cutoff = (not data_cutoff_at or str(data_cutoff_at).strip() == "")
+        missing_required_audit = (audit_res is None or audit_res.get("status") not in ("AUDIT_COMPLETE", "PASS", "OK", "COMPLETED"))
+
+        if is_unresolved or missing_cutoff or missing_required_audit:
             err_msg = run["error_text"] if "error_text" in run.keys() and run["error_text"] else "insufficient data or audit failed"
-            warnings.append(f"Pipeline finished in state UNRESOLVED: {err_msg}")
+            warnings.append(f"Pipeline finished in state UNRESOLVED or unverified audit: {err_msg}")
+            if ai_res and isinstance(ai_res, dict):
+                ai_res = dict(ai_res)
+                ai_res["status"] = "insufficient_data"
+                ai_res["conclusion"] = f"AI analýzu nelze prezentovat jako úspěšnou: {err_msg}"
+                ai_res["home_team_analysis"] = None
+                ai_res["away_team_analysis"] = None
 
         return {
             "run_id": run_id,
