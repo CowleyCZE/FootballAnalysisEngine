@@ -138,3 +138,23 @@ def test_candidate_datetime_parses_common_schedule_formats(value, expected):
     parsed = FixtureVerifier._parse_candidate_datetime(value)
     assert parsed is not None
     assert (parsed.year, parsed.month, parsed.day, parsed.hour, parsed.minute) == expected
+
+
+def test_candidate_datetimes_keeps_later_target_after_old_fixture():
+    parsed = FixtureVerifier._parse_candidate_datetimes(
+        "Previous match 20.09.2026, 15:00; next match Sun, 11. 10. 2026. 18:00"
+    )
+    assert [(item.year, item.month, item.day, item.hour, item.minute) for item in parsed] == [
+        (2026, 9, 20, 15, 0),
+        (2026, 10, 11, 18, 0),
+    ]
+
+
+def test_fixture_pair_ignores_earlier_away_team_mention():
+    text = "FK Pardubice schedule. AC Sparta Praha – FK Pardubice, Chance Liga"
+    assert FixtureVerifier._fixture_pair_ok(text, "AC Sparta Praha", "FK Pardubice")
+
+
+def test_fixture_pair_rejects_unrelated_team_mentions():
+    text = "AC Sparta Praha news and FK Pardubice news are separate topics."
+    assert not FixtureVerifier._fixture_pair_ok(text, "AC Sparta Praha", "FK Pardubice")
