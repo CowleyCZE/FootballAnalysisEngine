@@ -16,12 +16,16 @@ def init_database_schema(target: Union[str, Path, sqlite3.Connection]):
         initialize_database(str(target))
         return
 
+    from app.database.schema import _migrate_legacy_schema
     conn = target
     conn.execute("PRAGMA foreign_keys = ON")
+    _migrate_legacy_schema(conn)
     schema_path = BASE_DIR / "database" / "schema.sql"
     research_schema_path = BASE_DIR / "database" / "research_schema.sql"
     conn.executescript(schema_path.read_text(encoding="utf-8"))
+    _migrate_legacy_schema(conn)
     conn.executescript(research_schema_path.read_text(encoding="utf-8"))
+    _migrate_legacy_schema(conn)
     conn.commit()
 
 

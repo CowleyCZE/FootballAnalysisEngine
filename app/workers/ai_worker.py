@@ -45,7 +45,42 @@ class AIWorker:
         statistics = payload.get("statistics") or {}
         claims = payload.get("claims") or []
         conflicts = payload.get("conflicts") or []
-        match_info = payload.get("match") or {"match_id": match_id}
+        match_info = dict(payload.get("match") or {"match_id": match_id})
+
+        candidates = []
+        for k in ("data_cutoff_at", "cutoff_datetime", "cutoff"):
+            if payload.get(k) is not None and str(payload.get(k)).strip() != "":
+                candidates.append(payload.get(k))
+            if match_info.get(k) is not None and str(match_info.get(k)).strip() != "":
+                candidates.append(match_info.get(k))
+
+        parsed_cutoffs = []
+        has_invalid_cutoff = False
+        for c in candidates:
+            try:
+                from app.orchestrator.match_resolver import parse_to_utc
+                parsed_cutoffs.append(parse_to_utc(c))
+            except Exception:
+                has_invalid_cutoff = True
+
+        has_conflicting_cutoff = False
+        if len(parsed_cutoffs) > 1:
+            first_c = parsed_cutoffs[0]
+            if any(c != first_c for c in parsed_cutoffs[1:]):
+                has_conflicting_cutoff = True
+
+        if not candidates or has_invalid_cutoff or has_conflicting_cutoff:
+            reason = "Data cutoff time (data_cutoff_at) is missing or invalid"
+            if has_conflicting_cutoff:
+                reason = "Inconsistent cutoff values in payload"
+            res = AIWorker._insufficient_data_result(match_id, reason)
+            missing = ["claims", "statistics", "data_cutoff_at"] if not claims else ["data_cutoff_at"]
+            res["data_quality"]["missing_data"] = missing
+            return res
+
+        valid_cutoff_str = parsed_cutoffs[0].isoformat()
+        for k in ("data_cutoff_at", "cutoff_datetime", "cutoff"):
+            match_info[k] = valid_cutoff_str
 
         context_builder = ContextBuilder(db_path=db_path)
         context = context_builder.build_context(
@@ -58,12 +93,14 @@ class AIWorker:
 
         # Zero-hallucination check: if no claims available, return insufficient_data immediately
         if not context.get("claims"):
-            return AIWorker._insufficient_data_result(
+            res = AIWorker._insufficient_data_result(
                 match_id,
                 "Chybí ověřená tvrzení (claims) z výzkumné pipeline pro tento zápas",
             )
+            res["data_quality"]["missing_data"] = context.get("data_quality", {}).get("missing_data", ["claims"])
+            return res
 
-        cutoff = context.get("match", {}).get("data_cutoff_at", "N/A")
+        cutoff = context.get("match", {}).get("data_cutoff_at") or "N/A"
         prompt = (
             f"STRICT DATA CUTOFF: {cutoff}\n"
             "Analyze the football match using ONLY the supplied context. "
@@ -92,6 +129,23 @@ class AIWorker:
             return AIWorker._insufficient_data_result(
                 match_id,
                 f"Lokální AI služba neposkytla použitelný výstup: {exc}",
+                prompt,
+            )
+
+        # Check if cutoff was missing or invalid: AIWorker cannot produce usable result without valid cutoff
+        cutoff_valid = False
+        if cutoff and cutoff != "N/A":
+            try:
+                from app.orchestrator.match_resolver import parse_to_utc
+                parse_to_utc(cutoff)
+                cutoff_valid = True
+            except Exception:
+                cutoff_valid = False
+
+        if not cutoff_valid:
+            return AIWorker._insufficient_data_result(
+                match_id,
+                "Data cutoff time (data_cutoff_at) is missing or invalid",
                 prompt,
             )
 
