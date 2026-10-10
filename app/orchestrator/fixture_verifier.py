@@ -1,33 +1,34 @@
-"""Evidence-backed fixture verification against search results.
+"""Evidence-backed fixture verification.
 
-This module deliberately does not mark a match RESOLVED based on search ranking alone.
-A candidate must contain both teams, the competition and the exact calendar date, and
-must come from an explicitly trusted official domain. Search results are leads; when the
-snippet itself is insufficient, the verifier refuses closed and leaves the match unchanged.
+Only a pair of independent official sources that explicitly report the teams, order,
+competition and exact kickoff may transition a scheduled fixture to RESOLVED.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from app.search.engine import SearchEngine
 from app.search.models import QuerySpec
+from app.search.normalizer import normalize_searx_result
 
 
 class FixtureVerificationError(RuntimeError):
-    """Raised when available evidence cannot verify one precise fixture."""
+    """Raised if the fixture is missing or cannot be verified."""
 
 
-# Conservative defaults. Extend this list only with official fixture/schedule domains.
 OFFICIAL_SCHEDULE_DOMAINS = {
-    "sparta.cz",
-    "fotbal.cz",
     "chanceliga.cz",
+    "sparta.cz",
     "fkpardubice.cz",
+    "fotbal.cz",
 }
 
 
@@ -37,7 +38,13 @@ def _domain(url: str) -> str:
 
 
 def _normal(text: str) -> str:
-    text = (text or "").casefold()
+    # Transliterate common Czech characters before removing punctuation.
+    table = str.maketrans({
+        "á": "a", "č": "c", "ď": "d", "é": "e", "ě": "e",
+        "í": "i", "ň": "n", "ó": "o", "ř": "r", "š": "s",
+        "ť": "t", "ú": "u", "ů": "u", "ý": "y", "ž": "z",
+    })
+    text = (text or "").casefold().translate(table)
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return " ".join(text.split())
 
@@ -56,35 +63,32 @@ class FixtureVerifier:
         }
 
     def verify_sync(self, match_id: int) -> dict[str, Any]:
-        """Synchronous wrapper for CLI and FastAPI callers."""
-        import threading
-
+        """Synchronous wrapper usable from CLI, worker threads and FastAPI."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.verify(match_id))
 
-        outcome: list[dict[str, Any]] = []
+        values: list[dict[str, Any]] = []
         errors: list[BaseException] = []
 
-        def runner() -> None:
+        def run() -> None:
             try:
-                outcome.append(asyncio.run(self.verify(match_id)))
+                values.append(asyncio.run(self.verify(match_id)))
             except BaseException as exc:
                 errors.append(exc)
 
-        worker = threading.Thread(target=runner, daemon=True)
-        worker.start()
-        worker.join()
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        thread.join()
         if errors:
             raise errors[0]
-        if not outcome:
+        if not values:
             raise FixtureVerificationError("Ověřování skončilo bez výsledku.")
-        return outcome[0]
+        return values[0]
 
     @staticmethod
-    def _local_fixture_datetime(value: str) -> datetime:
-        from zoneinfo import ZoneInfo
+    def _local_datetime(value: str) -> datetime:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if dt.tzinfo is None:
             return dt.replace(tzinfo=ZoneInfo("Europe/Prague"))
@@ -92,48 +96,54 @@ class FixtureVerifier:
 
     @staticmethod
     def _parse_candidate_datetime(text: str) -> datetime | None:
-        patterns = [
-            r"(?P<day>\d{1,2})[./](?P<month>\d{1,2})[./](?P<year>20\d{2})(?:[ ,T]+(?P<hour>\d{1,2}):(?P<minute>\d{2}))?",
-            r"(?P<year>20\d{2})-(?P<month>\d{1,2})-(?P<day>\d{1,2})(?:[ T]+(?P<hour>\d{1,2}):(?P<minute>\d{2}))?",
-        ]
+        patterns = (
+            r"(?P<day>\d{1,2})[./](?P<month>\d{1,2})[./](?P<year>20\d{2})[ ,T]+(?P<hour>\d{1,2}):(?P<minute>\d{2})",
+            r"(?P<year>20\d{2})-(?P<month>\d{1,2})-(?P<day>\d{1,2})[ T]+(?P<hour>\d{1,2}):(?P<minute>\d{2})",
+        )
         for pattern in patterns:
-            match = re.search(pattern, text)
-            if not match:
+            found = re.search(pattern, text)
+            if not found:
                 continue
-            parts = match.groupdict()
+            values = found.groupdict()
             try:
-                return datetime(int(parts["year"]), int(parts["month"]), int(parts["day"]), int(parts["hour"] or 0), int(parts["minute"] or 0))
+                return datetime(
+                    int(values["year"]), int(values["month"]), int(values["day"]),
+                    int(values["hour"]), int(values["minute"]),
+                )
             except ValueError:
                 continue
         return None
 
     @staticmethod
-    def _direction_ok(text: str, home: str, away: str) -> bool:
+    def _fixture_pair_ok(text: str, home: str, away: str) -> bool:
         normalized = _normal(text)
-        h, a = _normal(home), _normal(away)
-        hpos, apos = normalized.find(h), normalized.find(a)
-        if hpos < 0 or apos < 0:
+        home_name, away_name = _normal(home), _normal(away)
+        home_pos, away_pos = normalized.find(home_name), normalized.find(away_name)
+        if home_pos < 0 or away_pos < 0 or home_pos >= away_pos:
             return False
-        if not any(separator in normalized for separator in (" vs ", " v ", " - ", " – ", " at ")):
-            return False
-        return hpos < apos
+        between = normalized[home_pos + len(home_name):away_pos]
+        # Do not accept two team names mentioned in unrelated sentences.
+        return bool(re.search(r"\b(vs|v|versus|at)\b|[-–]", between))
 
     @staticmethod
     def _competition_ok(text: str, competition: str) -> bool:
-        name = _normal(competition)
-        aliases = {"chance liga": ("chance liga", "1 liga", "ceska chance liga")}
-        normalized = _normal(text)
-        return any(_normal(alias) in normalized for alias in aliases.get(name, (name,)) if alias)
-
-    @staticmethod
-    def _team_ok(text: str, team: str) -> bool:
-        return _normal(team) in _normal(text)
+        normalized_text = _normal(text)
+        normalized_comp = _normal(competition)
+        aliases = {
+            "ceska chance liga": ("ceska chance liga", "chance liga"),
+            "chance liga": ("chance liga", "ceska chance liga"),
+        }
+        return any(
+            _normal(candidate) in normalized_text
+            for candidate in aliases.get(normalized_comp, (normalized_comp,))
+            if candidate
+        )
 
     async def verify(self, match_id: int) -> dict[str, Any]:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             match = conn.execute(
-                """SELECT m.id, m.status, m.scheduled_at, m.competition,
+                """SELECT m.id, m.status, m.scheduled_at,
                           COALESCE(c.name, m.competition, '') AS competition_name,
                           th.name AS home_team, ta.name AS away_team
                    FROM matches m
@@ -145,94 +155,91 @@ class FixtureVerifier:
             ).fetchone()
         if not match:
             raise FixtureVerificationError(f"Zápas ID {match_id} nebyl nalezen.")
+        if not match["scheduled_at"]:
+            raise FixtureVerificationError(f"Zápas ID {match_id} nemá čas výkopu.")
 
-        kickoff = self._local_fixture_datetime(match["scheduled_at"])
-        competition = match["competition_name"] or ""
+        kickoff = self._local_datetime(match["scheduled_at"])
+        competition = str(match["competition_name"] or "").strip()
         if not competition:
             raise FixtureVerificationError("Zápas nemá určenou soutěž.")
 
+        # Search both schedule-specific and Czech-language variants through the existing
+        # SearXNG backend. A failure is recorded as an unsuccessful attempt.
+        date_iso = kickoff.strftime("%Y-%m-%d")
+        date_local = kickoff.strftime("%d.%m.%Y")
+        time_local = kickoff.strftime("%H:%M")
         queries = [
             QuerySpec(
-                query=f'"{match["home_team"]}" "{match["away_team"]}" "{competition}" '
-                      f'{kickoff.strftime("%Y-%m-%d")} {kickoff.strftime("%d.%m.%Y")} {kickoff.strftime("%H:%M")} official fixture schedule',
-                language="en",
-                priority=100,
-                reason="FIXTURE_VERIFICATION",
+                query=f'"{match["home_team"]}" "{match["away_team"]}" "{competition}" {date_iso} {time_local} official fixture',
+                language="en", priority=100, reason="FIXTURE_VERIFICATION",
             ),
             QuerySpec(
-                query=f'"{match["home_team"]}" "{match["away_team"]}" "{competition}" '
-                      f'{kickoff.strftime("%d.%m.%Y")} {kickoff.strftime("%H:%M")} rozpis zápasů',
-                language="cs",
-                priority=100,
-                reason="FIXTURE_VERIFICATION",
+                query=f'"{match["home_team"]}" "{match["away_team"]}" "{competition}" {date_local} {time_local} rozpis zápasů',
+                language="cs", priority=100, reason="FIXTURE_VERIFICATION",
             ),
         ]
-        # Bypass generic identity cutoff filtering: a fixture schedule may not carry
-        # publication metadata. Still restrict what can confirm the match below.
-        results = []
+        raw_results = []
+        search_errors = []
         for query in queries:
             try:
-                raw = await self.search_engine.client.search(
+                response = await self.search_engine.client.search(
                     query.query, language=query.language, time_range=None
                 )
-                items = raw if isinstance(raw, list) else raw.get("results", []) if isinstance(raw, dict) else []
-                from app.search.normalizer import normalize_searx_result
-                results.extend(normalize_searx_result(item) for item in items)
-            except Exception:
-                continue
+                items = response if isinstance(response, list) else response.get("results", []) if isinstance(response, dict) else []
+                raw_results.extend(normalize_searx_result(item) for item in items if isinstance(item, dict))
+            except Exception as exc:
+                search_errors.append(f"{type(exc).__name__}: {exc}")
 
-        deduped = {}
-        for item in results:
-            if item.url:
-                deduped.setdefault(item.url.rstrip("/"), item)
+        by_url = {}
+        for result in raw_results:
+            if result.url:
+                by_url.setdefault(result.url.rstrip("/"), result)
 
-        evidence = []
-        rejected = []
-        for result in deduped.values():
+        accepted, rejected = [], []
+        for result in by_url.values():
             host = _domain(result.url)
-            text = f"{result.title}\n{result.content}"
-            home_ok = self._team_ok(text, match["home_team"])
-            away_ok = self._team_ok(text, match["away_team"])
-            team_ok = home_ok and away_ok
-            comp_ok = self._competition_ok(text, competition)
-            candidate_dt = self._parse_candidate_datetime(text)
+            body = f"{result.title}\n{result.content}"
+            candidate_dt = self._parse_candidate_datetime(body)
+            home_ok = _normal(match["home_team"]) in _normal(body)
+            away_ok = _normal(match["away_team"]) in _normal(body)
+            pair_ok = self._fixture_pair_ok(body, match["home_team"], match["away_team"])
+            competition_ok = self._competition_ok(body, competition)
             date_ok = candidate_dt is not None and candidate_dt.date() == kickoff.date()
-            time_ok = candidate_dt is not None and candidate_dt.hour == kickoff.hour and candidate_dt.minute == kickoff.minute
-            direction_ok = self._direction_ok(text, match["home_team"], match["away_team"])
+            time_ok = candidate_dt is not None and (candidate_dt.hour, candidate_dt.minute) == (kickoff.hour, kickoff.minute)
             official = host in self.official_domains or any(host.endswith("." + d) for d in self.official_domains)
-            item = {
+            record = {
                 "url": result.url,
                 "title": result.title,
                 "domain": host,
                 "official_domain": official,
                 "home_team_match": home_ok,
                 "away_team_match": away_ok,
-                "competition_match": comp_ok,
+                "home_away_order_match": pair_ok,
+                "competition_match": competition_ok,
                 "date_match": date_ok,
                 "time_match": time_ok,
-                "home_away_order_match": direction_ok,
                 "retrieved_at": datetime.now(timezone.utc).isoformat(),
                 "snippet": (result.content or "")[:2000],
             }
-            if official and team_ok and comp_ok and date_ok and time_ok and direction_ok:
-                evidence.append(item)
+            if official and home_ok and away_ok and pair_ok and competition_ok and date_ok and time_ok:
+                accepted.append(record)
             else:
-                rejected.append(item)
+                rejected.append(record)
 
-        # Two different official domains are required; duplicate URLs from one source
-        # cannot satisfy the independence threshold.
-        unique_domains = {e["domain"] for e in evidence}
-        verified = len(evidence) >= 2 and len(unique_domains) >= 2
+        independent_domains = {item["domain"] for item in accepted}
+        verified = len(independent_domains) >= 2
         outcome = "RESOLVED" if verified else "UNVERIFIED"
         message = (
-            "Ověření úspěšné: nejméně dva nezávislé oficiální zdroje potvrzují oba týmy, pořadí, soutěž, datum a čas."
+            "Ověření úspěšné: dva různé oficiální domény potvrzují oba týmy, jejich pořadí, soutěž, datum a čas."
             if verified else
-            "Ověření neúspěšné: systém vyžaduje nejméně dva nezávislé oficiální zdroje potvrzující oba týmy, pořadí, soutěž, datum a čas. Záznam zůstává nezměněn."
+            "Ověření neúspěšné: nebyly nalezeny dva nezávislé oficiální zdroje potvrzující oba týmy, pořadí, soutěž, datum a přesný čas. Stav zápasu nebyl změněn."
         )
+        if search_errors:
+            message += " Chyby vyhledávání: " + "; ".join(search_errors)
 
         with sqlite3.connect(self.db_path, timeout=30) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS fixture_verification_runs (
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS fixture_verification_runs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     match_id INTEGER NOT NULL,
                     outcome TEXT NOT NULL,
@@ -241,16 +248,15 @@ class FixtureVerifier:
                     rejected_json TEXT NOT NULL,
                     verified_at TEXT NOT NULL,
                     FOREIGN KEY(match_id) REFERENCES matches(id)
-                )
-            """)
-            import json
+                )"""
+            )
             conn.execute(
                 """INSERT INTO fixture_verification_runs
                    (match_id,outcome,message,evidence_json,rejected_json,verified_at)
                    VALUES(?,?,?,?,?,?)""",
                 (
                     match_id, outcome, message,
-                    json.dumps(evidence, ensure_ascii=False),
+                    json.dumps(accepted, ensure_ascii=False),
                     json.dumps(rejected, ensure_ascii=False),
                     datetime.now(timezone.utc).isoformat(),
                 ),
@@ -266,6 +272,6 @@ class FixtureVerifier:
             "match_id": match_id,
             "outcome": outcome,
             "message": message,
-            "evidence": evidence,
+            "evidence": accepted,
             "rejected_sources": rejected,
         }
