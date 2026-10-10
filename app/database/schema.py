@@ -49,6 +49,17 @@ def initialize_database(db_path: str) -> None:
         _migrate_legacy_schema(conn)
         conn.executescript(research_schema_path.read_text(encoding="utf-8"))
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS fixture_verification_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id INTEGER NOT NULL,
+                outcome TEXT NOT NULL,
+                message TEXT NOT NULL,
+                evidence_json TEXT NOT NULL,
+                rejected_json TEXT NOT NULL,
+                verified_at TEXT NOT NULL,
+                FOREIGN KEY(match_id) REFERENCES matches(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_fixture_verification_match ON fixture_verification_runs(match_id, verified_at);
             CREATE TABLE IF NOT EXISTS system_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL, run_id TEXT,
                 job_id TEXT, worker_id TEXT, payload_json TEXT,
