@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""Lehký a autentizovaný worker FootballAnalysisEngine pro Termux / Note 9.
+
+Vyžaduje proměnnou WORKER_API_TOKEN. Token se záměrně neukládá do config.json.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import signal
+import sys
+import time
+from datetime import datetime, timezone
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Any, Callable
+from urllib.parse import urlparse
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
+
+
+CONFIG_FILE = Path(__file__).with_name("config.json")
+DEFAULT_CONFIG = {
+    "worker_id": "note9-01",
+    "worker_name": "Samsung Galaxy Note 9",
+    "worker_version": "1.1.0-note9",
+    "server_url": "http://192.168.31.135:8000",
+    "heartbeat_interval": 30,
+    "poll_interval": 5,
+    "request_timeout": 30,
+    "max_retries": 3,
+    # Neuvádějte "generic": mohl by získat úlohu, kterou telefon neumí.
+    "capabilities": ["TEST", "SEARCH", "CRAWL"],
+}
+
+
+def log(message: str) -> None:
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+
+
+def load_config() -> dict[str, Any]:
+    if not CONFIG_FILE.exists():
+        CONFIG_FILE.write_text(json.dumps(DEFAULT_CONFIG, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        log(f"Vytvořen {CONFIG_FILE}; zkontrolujte server_url.")
+        return dict(DEFAULT_CONFIG)
+    try:
+        user_config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Nelze načíst {CONFIG_FILE}: {exc}") from exc
+    if not isinstance(user_config, dict):
+        raise RuntimeError("config.json musí obsahovat JSON objekt.")
+    return DEFAULT_CONFIG | user_config
+
+
+class TitleParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_title = False
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.in_title = tag.lower() == "title"
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "title":
+            self.in_title = False
+
+    def handle_data(self, data: str) -> None:
+        if self.in_title:
+            self.parts.append(data)
+
+    @property
+    def title(self) -> str:
+        return " ".join("".join(self.parts).split())[:500]
+
+
+class Note9Worker:
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config = config
+        self.server_url = str(config["server_url"]).rstrip("/")
+        parsed = urlparse(self.server_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise RuntimeError("server_url musí být platná http(s) URL.")
+        self.worker_id = str(config["worker_id"])
+        self.worker_name = str(config["worker_name"])
+        self.worker_version = str(config["worker_version"])
+        self.capabilities = [str(c) for c in config["capabilities"] if str(c) in {"TEST", "SEARCH", "CRAWL"}]
+        if not self.capabilities:
+            raise RuntimeError("capabilities musí obsahovat alespoň TEST, SEARCH nebo CRAWL.")
+        self.poll_interval = max(1.0, float(config["poll_interval"]))
+        self.heartbeat_interval = max(5.0, float(config["heartbeat_interval"]))
+        self.timeout = max(5.0, float(config["request_timeout"]))
+        self.max_retries = max(1, int(config["max_retries"]))
+        self.running = True
+        token = os.environ.get("WORKER_API_TOKEN", "").strip()
+        if not token:
+            raise RuntimeError("Chybí WORKER_API_TOKEN. Nastavte ho před spuštěním workeru.")
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[502, 503, 504],
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        self.session.headers.update({
+            "User-Agent": f"FootballAnalysisEngine-Note9-Worker/{self.worker_version}",
+            "X-Worker-Token": token,
+        })
+        self.last_heartbeat = 0.0
+
+    def request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
+        url = f"{self.server_url}{path}"
+        error: Exception | None = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                response = self.session.request(method, url, timeout=self.timeout, **kwargs)
+                response.raise_for_status()
+                return response
+            except requests.RequestException as exc:
+                error = exc
+                log(f"HTTP chyba {method} {url} (pokus {attempt}/{self.max_retries}): {exc}")
+                if attempt < self.max_retries:
+                    time.sleep(min(2 ** (attempt - 1), 8))
+        raise RuntimeError(f"HTTP požadavek selhal: {method} {url}: {error}")
+
+    def register(self) -> None:
+        response = self.request("POST", "/api/workers/register", json={
+            "worker_id": self.worker_id,
+            "worker_name": self.worker_name,
+            "worker_version": self.worker_version,
+            "capabilities": self.capabilities,
+        })
+        log(f"Registrace: {response.json().get('status', 'neznámý stav')}")
+
+    def heartbeat(self, force: bool = False) -> None:
+        if not force and time.monotonic() - self.last_heartbeat < self.heartbeat_interval:
+            return
+        self.request("POST", "/api/workers/heartbeat", json={"worker_id": self.worker_id, "status": "online"})
+        self.last_heartbeat = time.monotonic()
+
+    def claim(self) -> dict[str, Any] | None:
+        data = self.request("POST", "/api/jobs/claim", json={
+            "worker_id": self.worker_id,
+            "capabilities": self.capabilities,
+        }).json()
+        if data.get("status") == "no_job":
+            return None
+        job = data.get("job")
+        if data.get("status") != "job_assigned" or not isinstance(job, dict):
+            raise RuntimeError(f"Neplatná odpověď claim: {data}")
+        return job
+
+    def submit(self, job_id: str, status: str, result: dict[str, Any] | None = None, error: str | None = None) -> None:
+        body: dict[str, Any] = {"worker_id": self.worker_id, "status": status}
+        if result is not None:
+            body["result"] = result
+        if error:
+            body["error"] = error
+        self.request("POST", f"/api/jobs/{job_id}/result", json=body)
+
+    @staticmethod
+    def run_test(payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "status": "COMPLETED",
+            "message": "Note 9 worker provedl TEST úlohu.",
+            "processed_at": datetime.now(timezone.utc).isoformat(),
+            "payload_keys": sorted(payload.keys()),
+        }
+
+    def run_search(self, payload: dict[str, Any]) -> dict[str, Any]:
+        query = str(payload.get("query") or "").strip()
+        if not query:
+            raise ValueError("SEARCH úloha nemá query; nelze vrátit falešný úspěch.")
+        proxy_payload = {
+            "query": query,
+            "language": str(payload.get("language") or "en"),
+            "priority": int(payload.get("priority") or 50),
+            "time_range": payload.get("time_range"),
+            "reason": str(payload.get("reason") or ""),
+            "team": str(payload.get("team") or ""),
+            "topic_terms": list(payload.get("topic_terms") or []),
+            "data_cutoff_at": payload.get("data_cutoff_at") or payload.get("cutoff"),
+        }
+        result = self.request("POST", "/api/internal/search", json=proxy_payload).json()
+        if result.get("status") != "COMPLETED":
+            raise RuntimeError(f"Vyhledávací proxy nevrátila COMPLETED: {result}")
+        return result
+
+    def run_crawl(self, payload: dict[str, Any]) -> dict[str, Any]:
+        url = str(payload.get("url") or "").strip()
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("CRAWL úloha neobsahuje platnou http(s) URL.")
+        response = requests.get(url, timeout=self.timeout, headers={"User-Agent": self.session.headers["User-Agent"]})
+        response.raise_for_status()
+        # Omezíme přenášený obsah; telefon netvrdí, že provedl plný Playwright crawl.
+        content = response.content[:1_000_000]
+        text = response.text[:200_000]
+        parser = TitleParser()
+        try:
+            parser.feed(text)
+        except Exception:
+            pass
+        return {
+            "status": "COMPLETED",
+            "url": url,
+            "final_url": response.url,
+            "status_code": response.status_code,
+            "content_length": len(response.content),
+            "content_hash": hashlib.sha256(content).hexdigest(),
+            "title": parser.title or None,
+            "used_playwright": False,
+            "truncated": len(response.content) > len(content),
+        }
+
+    def process(self, job: dict[str, Any]) -> None:
+        job_id = str(job.get("id") or "")
+        job_type = str(job.get("job_type") or "").upper()
+        payload = job.get("payload") or {}
+        if not job_id or not isinstance(payload, dict):
+            raise RuntimeError(f"Neplatná úloha ze serveru: {job}")
+        handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+            "TEST": self.run_test,
+            "SEARCH": self.run_search,
+            "CRAWL": self.run_crawl,
+        }
+        handler = handlers.get(job_type)
+        if handler is None:
+            self.submit(job_id, "FAILED", error=f"Note 9 nepodporuje typ úlohy {job_type}.")
+            return
+        try:
+            result = handler(payload)
+            self.submit(job_id, "SUCCESS", result=result)
+            log(f"Úloha {job_id} ({job_type}) dokončena.")
+        except Exception as exc:
+            self.submit(job_id, "FAILED", error=f"{type(exc).__name__}: {exc}")
+            log(f"Úloha {job_id} ({job_type}) selhala: {exc}")
+
+    def run(self) -> None:
+        self.register()
+        self.heartbeat(force=True)
+        log(f"Worker {self.worker_id}; server {self.server_url}; schopnosti {', '.join(self.capabilities)}")
+        while self.running:
+            try:
+                self.heartbeat()
+                job = self.claim()
+                if job:
+                    self.process(job)
+                else:
+                    time.sleep(self.poll_interval)
+            except KeyboardInterrupt:
+                break
+            except Exception as exc:
+                log(f"Server nebo worker není dostupný: {exc}. Další pokus za 10 sekund.")
+                time.sleep(10)
+
+
+def main() -> None:
+    try:
+        worker = Note9Worker(load_config())
+    except Exception as exc:
+        print(f"CHYBA konfigurace: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    signal.signal(signal.SIGINT, lambda *_: setattr(worker, "running", False))
+    signal.signal(signal.SIGTERM, lambda *_: setattr(worker, "running", False))
+    worker.run()
+
+
+if __name__ == "__main__":
+    main()
