@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 from app.database.schema import initialize_database
 from app.orchestrator.orchestrator import MasterOrchestrator
+from app.orchestrator.match_resolver import MatchResolver
+from app.orchestrator.models import AnalysisRequest
 from app.orchestrator.state_machine import MatchState
 from app.jobs.models import JobStatus, JobPriority
 
@@ -20,6 +22,68 @@ def orch_db(tmp_path):
             "INSERT INTO matches(id, competition, home_team_id, away_team_id, scheduled_at, status) VALUES (10, 'Premier League', 1, 2, '2026-10-04T15:00:00Z', 'RESOLVED')"
         )
     return db_file
+
+
+def test_match_resolver_missing_cutoff_is_none(orch_db):
+    resolver = MatchResolver(db_path=orch_db)
+    req = AnalysisRequest(
+        home_team="Arsenal",
+        away_team="Chelsea",
+        competition="Premier League",
+        scheduled_at=datetime(2026, 10, 4, 15, 0, tzinfo=timezone.utc),
+        data_cutoff_at=None,
+    )
+    identity = resolver.resolve(req)
+    assert identity.scheduled_at == datetime(2026, 10, 4, 15, 0, tzinfo=timezone.utc)
+    assert identity.data_cutoff_at is None
+
+
+def test_match_resolver_explicit_cutoff_preserved(orch_db):
+    resolver = MatchResolver(db_path=orch_db)
+    cutoff = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+    req = AnalysisRequest(
+        home_team="Arsenal",
+        away_team="Chelsea",
+        competition="Premier League",
+        scheduled_at=datetime(2026, 10, 4, 15, 0, tzinfo=timezone.utc),
+        data_cutoff_at=cutoff,
+    )
+    identity = resolver.resolve(req)
+    assert identity.scheduled_at == datetime(2026, 10, 4, 15, 0, tzinfo=timezone.utc)
+    assert identity.data_cutoff_at == cutoff
+
+
+def test_master_orchestrator_get_match_identity_missing_cutoff(orch_db):
+    orch = MasterOrchestrator(db_path=orch_db)
+    identity = orch._get_match_identity_from_id(10)
+    assert identity is not None
+    assert identity.scheduled_at == datetime(2026, 10, 4, 15, 0, tzinfo=timezone.utc)
+    assert identity.data_cutoff_at is None
+
+
+def test_master_orchestrator_get_match_identity_explicit_cutoff(orch_db):
+    orch = MasterOrchestrator(db_path=orch_db)
+    cutoff = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+    identity = orch._get_match_identity_from_id(10, data_cutoff_at=cutoff)
+    assert identity is not None
+    assert identity.scheduled_at == datetime(2026, 10, 4, 15, 0, tzinfo=timezone.utc)
+    assert identity.data_cutoff_at == cutoff
+
+
+def test_research_tasks_and_job_payloads_preserve_missing_cutoff(orch_db):
+    orch = MasterOrchestrator(db_path=orch_db)
+    run_id = orch.start_pipeline(10, data_cutoff_at=None)
+
+    with sqlite3.connect(orch_db) as conn:
+        conn.row_factory = sqlite3.Row
+        task = conn.execute("SELECT data_cutoff_at FROM research_tasks WHERE run_id = ?", (run_id,)).fetchone()
+        job = conn.execute("SELECT payload_json FROM jobs WHERE run_id = ?", (run_id,)).fetchone()
+
+    assert task["data_cutoff_at"] is None
+    payload = json.loads(job["payload_json"])
+    assert payload.get("data_cutoff_at") is None
+    assert payload.get("cutoff_datetime") is None
+    assert payload.get("cutoff") is None
 
 
 def test_missing_cutoff_cannot_lead_to_completed(orch_db):

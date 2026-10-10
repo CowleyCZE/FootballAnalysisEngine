@@ -11,6 +11,7 @@ class AnalysisRequest(BaseModel):
     timezone: str = "Europe/Prague"
     requested_by: str = "user"
     priority: int = 50
+    data_cutoff_at: Optional[datetime] = None
 
 
 class MatchIdentity(BaseModel):
@@ -22,7 +23,7 @@ class MatchIdentity(BaseModel):
     away_team: str = ""
     competition: str = ""
     scheduled_at: datetime
-    data_cutoff_at: datetime
+    data_cutoff_at: Optional[datetime] = None
     venue: Optional[str] = None
     status: str = "RESOLVED"
 
