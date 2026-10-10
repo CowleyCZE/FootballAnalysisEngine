@@ -125,7 +125,7 @@ class FixtureVerifier:
             return False
         between = raw[home_pos + len(home_raw):away_pos]
         # Both teams must form one explicit fixture pair, not unrelated mentions.
-        return bool(re.search(r"\\b(vs|v|versus|at)\\b|[-–]", between))
+        return bool(re.search(r"\b(vs|v|versus|at)\b|[-–]", between))
     @staticmethod
     def _competition_ok(text: str, competition: str) -> bool:
         normalized_text = _normal(text)
@@ -171,11 +171,27 @@ class FixtureVerifier:
         time_local = kickoff.strftime("%H:%M")
         queries = [
             QuerySpec(
-                query=f'"{match["home_team"]}" "{match["away_team"]}" "{competition}" {date_iso} {time_local} official fixture',
-                language="en", priority=100, reason="FIXTURE_VERIFICATION",
+                query=f'"{match["home_team"]}" "{match["away_team"]}" {date_iso}',
+                language="all", priority=100, reason="FIXTURE_VERIFICATION",
             ),
             QuerySpec(
-                query=f'"{match["home_team"]}" "{match["away_team"]}" "{competition}" {date_local} {time_local} rozpis zápasů',
+                query=f'"{match["home_team"]}" "{match["away_team"]}" {date_local}',
+                language="cs", priority=100, reason="FIXTURE_VERIFICATION",
+            ),
+            QuerySpec(
+                query=f'"{match["home_team"]}" "{match["away_team"]}" "{competition}"',
+                language="all", priority=95, reason="FIXTURE_VERIFICATION",
+            ),
+            QuerySpec(
+                query=f'site:chanceliga.cz "{match["home_team"]}" "{match["away_team"]}"',
+                language="cs", priority=100, reason="FIXTURE_VERIFICATION",
+            ),
+            QuerySpec(
+                query=f'site:fkpardubice.cz "{match["home_team"]}" "{match["away_team"]}"',
+                language="cs", priority=100, reason="FIXTURE_VERIFICATION",
+            ),
+            QuerySpec(
+                query=f'site:sparta.cz "{match["home_team"]}" "{match["away_team"]}"',
                 language="cs", priority=100, reason="FIXTURE_VERIFICATION",
             ),
         ]
@@ -272,6 +288,10 @@ class FixtureVerifier:
         return {
             "match_id": match_id,
             "outcome": outcome,
+            "queries_attempted": len(queries),
+            "raw_results_count": len(raw_results),
+            "unique_results_count": len(by_url),
+            "search_errors": search_errors,
             "message": message,
             "evidence": accepted,
             "rejected_sources": rejected,
