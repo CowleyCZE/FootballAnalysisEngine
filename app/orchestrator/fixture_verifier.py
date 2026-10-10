@@ -16,7 +16,6 @@ from urllib.parse import urlparse
 
 from app.search.engine import SearchEngine
 from app.search.models import QuerySpec
-from app.search.searxng_client import SearXNGClient
 
 
 class FixtureVerificationError(RuntimeError):
