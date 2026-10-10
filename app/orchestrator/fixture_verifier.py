@@ -95,8 +95,14 @@ class FixtureVerifier:
         return dt.astimezone(ZoneInfo("Europe/Prague"))
 
     @staticmethod
-    def _parse_candidate_datetimes(text: str) -> list[datetime]:
-        """Parse every date/time candidate; search snippets can mention older fixtures first."""
+    def _parse_candidate_datetimes(
+        text: str, reference_year: int | None = None
+    ) -> list[datetime]:
+        """Parse every date/time candidate, including Czech dates that omit the year.
+
+        The reference year must come from the fixture being verified; it is never
+        guessed from the current date, because schedules may refer to another season.
+        """
         patterns = (
             r"(?P<day>\d{1,2})\s*[./]\s*(?P<month>\d{1,2})\s*[./]\s*(?P<year>20\d{2})\.?\s*[ ,T]+\s*(?P<hour>\d{1,2}):(?P<minute>\d{2})",
             r"(?P<year>20\d{2})-(?P<month>\d{1,2})-(?P<day>\d{1,2})[ T]+(?P<hour>\d{1,2}):(?P<minute>\d{2})",
@@ -114,12 +120,33 @@ class FixtureVerifier:
                     continue
                 if candidate not in candidates:
                     candidates.append(candidate)
+
+        # Official fixture cards often display e.g. "11. 10., 18:00" without a year.
+        # Only interpret this form when the expected fixture supplies an explicit year.
+        if reference_year is not None:
+            no_year_pattern = (
+                r"(?P<day>\d{1,2})\s*[./]\s*(?P<month>\d{1,2})\.?\s*,\s*"
+                r"(?P<hour>\d{1,2}):(?P<minute>\d{2})"
+            )
+            for found in re.finditer(no_year_pattern, text or ""):
+                values = found.groupdict()
+                try:
+                    candidate = datetime(
+                        reference_year, int(values["month"]), int(values["day"]),
+                        int(values["hour"]), int(values["minute"]),
+                    )
+                except ValueError:
+                    continue
+                if candidate not in candidates:
+                    candidates.append(candidate)
         return sorted(candidates)
 
     @staticmethod
-    def _parse_candidate_datetime(text: str) -> datetime | None:
+    def _parse_candidate_datetime(
+        text: str, reference_year: int | None = None
+    ) -> datetime | None:
         """Backward-compatible helper returning the first parsed date/time."""
-        candidates = FixtureVerifier._parse_candidate_datetimes(text)
+        candidates = FixtureVerifier._parse_candidate_datetimes(text, reference_year)
         return candidates[0] if candidates else None
 
     @staticmethod
@@ -140,6 +167,20 @@ class FixtureVerifier:
                     continue
                 if re.search(r"\b(vs|v|versus|at)\b|[-–—]", between):
                     return True
+
+        # Some official fixture cards flatten visual elements into snippets, e.g.
+        # "Příští zápas ... 11. 10., 18:00 ... AC Sparta Praha ... 01D ... FK Pardubice".
+        # Allow this layout only with an explicit next-match marker and close, ordered
+        # team mentions. Date, exact time, competition and official domain are still
+        # independently required by verify() before a source can be accepted.
+        normalized = _normal(raw)
+        if "pristi zapas" in normalized or "next match" in normalized:
+            normalized_home = _normal(home)
+            normalized_away = _normal(away)
+            home_pos = normalized.find(normalized_home)
+            away_pos = normalized.find(normalized_away, home_pos + len(normalized_home))
+            if home_pos >= 0 and away_pos > home_pos and away_pos - home_pos <= 260:
+                return True
         return False
     @staticmethod
     def _competition_ok(text: str, competition: str) -> bool:
@@ -231,7 +272,7 @@ class FixtureVerifier:
         for result in by_url.values():
             host = _domain(result.url)
             body = f"{result.title}\n{result.content}"
-            candidate_datetimes = self._parse_candidate_datetimes(body)
+            candidate_datetimes = self._parse_candidate_datetimes(body, reference_year=kickoff.year)
             home_ok = _normal(match["home_team"]) in _normal(body)
             away_ok = _normal(match["away_team"]) in _normal(body)
             pair_ok = self._fixture_pair_ok(body, match["home_team"], match["away_team"])
