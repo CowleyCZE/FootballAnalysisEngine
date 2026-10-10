@@ -175,6 +175,22 @@ def internal_search(req: SearchInternalRequest):
     }
 
 
+@app.post("/api/matches/{match_id}/verify", dependencies=[Depends(verify_api_auth)])
+def verify_match_fixture(match_id: int):
+    """Verify an existing fixture against official schedule search results."""
+    from app.orchestrator.fixture_verifier import FixtureVerifier, FixtureVerificationError
+
+    try:
+        report = asyncio.run(FixtureVerifier(db_path=DB_PATH).verify(match_id))
+    except FixtureVerificationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Fixture verification failed: {exc}") from exc
+    if report["outcome"] != "RESOLVED":
+        raise HTTPException(status_code=409, detail=report)
+    return report
+
+
 @app.post("/api/analysis/start", dependencies=[Depends(verify_api_auth)])
 def start_analysis(req: AnalysisStartRequest):
     if req.match_id is not None:
