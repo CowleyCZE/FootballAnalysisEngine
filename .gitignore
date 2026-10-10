@@ -20,6 +20,7 @@ env/
 # Secrets & Local Config
 .env
 services/searxng/.env
+services/searxng/local-config/
 
 # Logs
 logs/*.log
