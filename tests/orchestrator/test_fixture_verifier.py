@@ -53,7 +53,7 @@ def test_official_exact_fixture_resolves_and_records_evidence(fixture_db, url):
         db_path=fixture_db,
         search_engine=FakeSearchEngine([
             result(url, "AC Sparta Praha - FK Pardubice",
-                   "AC Sparta Praha vs FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
+                   "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
         ]),
         official_domains={"chanceliga.cz", "sparta.cz"},
     )
@@ -106,3 +106,38 @@ def test_unofficial_article_cannot_resolve(fixture_db):
     report = asyncio.run(verifier.verify(7))
     assert report["outcome"] == "UNVERIFIED"
     assert report["rejected_sources"][0]["official_domain"] is False
+
+def test_requires_two_independent_official_domains(fixture_db):
+    verifier = FixtureVerifier(
+        db_path=fixture_db,
+        search_engine=FakeSearchEngine([
+            result("https://www.chanceliga.cz/zapasy/123", "Fixture 1",
+                   "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
+            result("https://www.chanceliga.cz/zapasy/456", "Fixture 2",
+                   "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
+        ]),
+        official_domains={"chanceliga.cz"},
+    )
+    import asyncio
+    report = asyncio.run(verifier.verify(7))
+    assert report["outcome"] == "UNVERIFIED"
+    with sqlite3.connect(fixture_db) as conn:
+        assert conn.execute("SELECT status FROM matches WHERE id=7").fetchone()[0] == "scheduled"
+
+
+def test_swapped_home_away_order_cannot_verify(fixture_db):
+    verifier = FixtureVerifier(
+        db_path=fixture_db,
+        search_engine=FakeSearchEngine([
+            result("https://www.chanceliga.cz/zapasy/1", "Fixture 1",
+                   "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
+            result("https://www.fotbal.cz/zapasy/1", "Fixture 2",
+                   "FK Pardubice - AC Sparta Praha, Chance Liga, 11.10.2026, 18:00"),
+        ]),
+        official_domains={"chanceliga.cz", "fotbal.cz"},
+    )
+    import asyncio
+    report = asyncio.run(verifier.verify(7))
+    assert report["outcome"] == "UNVERIFIED"
+    with sqlite3.connect(fixture_db) as conn:
+        assert conn.execute("SELECT status FROM matches WHERE id=7").fetchone()[0] == "scheduled"
