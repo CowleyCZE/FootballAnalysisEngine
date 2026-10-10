@@ -463,6 +463,8 @@ class MasterOrchestrator:
                 and j["status"] in terminal
             ]
             if research_jobs:
+                match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
+                cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
                 self.state_machine.transition_to(run_id, MatchState.REANALYZING, "Research data collected")
                 with sqlite3.connect(self.db_path) as conn:
                     conn.execute(
@@ -479,6 +481,19 @@ class MasterOrchestrator:
                         "match_id": match_id,
                         "run_db_id": self._get_run_db_id(run_id),
                         "cycle": cycle + 1,
+                        "db_path": self.db_path,
+                        "data_cutoff_at": cutoff_str,
+                        "cutoff_datetime": cutoff_str,
+                        "cutoff": cutoff_str,
+                        "match": {
+                            "match_id": match_id,
+                            "home_team": match_ident.home_team if match_ident else "",
+                            "away_team": match_ident.away_team if match_ident else "",
+                            "competition": match_ident.competition if match_ident else "",
+                            "scheduled_at": match_ident.scheduled_at.isoformat() if match_ident else "",
+                            "data_cutoff_at": cutoff_str,
+                            "venue": match_ident.venue if match_ident else None,
+                        } if match_ident else None,
                     },
                     priority=JobPriority.HIGH,
                     run_id=run_id,

@@ -278,6 +278,99 @@ def test_missing_cutoff_transition_to_unresolved_despite_audit_complete(orch_db)
     assert state == MatchState.UNRESOLVED
 
 
+def test_reanalysis_payload_contains_cutoff_and_match(orch_db):
+    orch = MasterOrchestrator(db_path=orch_db)
+    cutoff = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+    run_id = orch.start_pipeline(10, data_cutoff_at=cutoff)
+
+    # Set state to RESEARCHING and insert a finished research job
+    with sqlite3.connect(orch_db) as conn:
+        conn.execute("UPDATE pipeline_runs SET state = 'RESEARCHING' WHERE run_id = ?", (run_id,))
+        conn.execute(
+            "INSERT INTO jobs(job_id, job_type, match_id, run_id, status, priority) VALUES ('J-RES-1', 'RESEARCH', 10, ?, 'SUCCESS', 50)",
+            (run_id,)
+        )
+
+    orch.tick(run_id)
+
+    with sqlite3.connect(orch_db) as conn:
+        conn.row_factory = sqlite3.Row
+        job = conn.execute(
+            "SELECT payload_json FROM jobs WHERE run_id = ? AND job_type = 'AI_ANALYSIS' AND payload_json LIKE '%re_analysis%'",
+            (run_id,)
+        ).fetchone()
+
+    assert job is not None
+    payload = json.loads(job["payload_json"])
+    assert payload.get("data_cutoff_at") == cutoff.isoformat()
+    assert payload.get("cutoff_datetime") == cutoff.isoformat()
+    assert payload.get("cutoff") == cutoff.isoformat()
+    assert payload.get("match") is not None
+    assert payload["match"].get("data_cutoff_at") == cutoff.isoformat()
+    assert payload["match"].get("home_team") == "Arsenal"
+    assert payload["match"].get("away_team") == "Chelsea"
+
+
+def test_reanalysis_cutoff_preserved_new_orchestrator_instance(orch_db):
+    cutoff = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+    orch1 = MasterOrchestrator(db_path=orch_db)
+    run_id = orch1.start_pipeline(10, data_cutoff_at=cutoff)
+
+    # Set state to RESEARCHING and insert a finished research job
+    with sqlite3.connect(orch_db) as conn:
+        conn.execute("UPDATE pipeline_runs SET state = 'RESEARCHING' WHERE run_id = ?", (run_id,))
+        conn.execute(
+            "INSERT INTO jobs(job_id, job_type, match_id, run_id, status, priority) VALUES ('J-RES-NEW-INST', 'RESEARCH', 10, ?, 'SUCCESS', 50)",
+            (run_id,)
+        )
+
+    # Create new instance of MasterOrchestrator over same DB
+    orch2 = MasterOrchestrator(db_path=orch_db)
+    orch2.tick(run_id)
+
+    with sqlite3.connect(orch_db) as conn:
+        conn.row_factory = sqlite3.Row
+        job = conn.execute(
+            "SELECT payload_json FROM jobs WHERE run_id = ? AND job_type = 'AI_ANALYSIS' AND payload_json LIKE '%re_analysis%'",
+            (run_id,)
+        ).fetchone()
+
+    assert job is not None
+    payload = json.loads(job["payload_json"])
+    assert payload.get("data_cutoff_at") == cutoff.isoformat()
+    assert payload["match"].get("data_cutoff_at") == cutoff.isoformat()
+
+
+def test_concurrent_reanalysis_distinct_cutoffs(orch_db):
+    orch = MasterOrchestrator(db_path=orch_db)
+    cutoff1 = datetime(2026, 10, 2, 10, 0, tzinfo=timezone.utc)
+    cutoff2 = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+
+    run_id1 = orch.start_pipeline(10, data_cutoff_at=cutoff1)
+    run_id2 = orch.start_pipeline(10, data_cutoff_at=cutoff2)
+
+    with sqlite3.connect(orch_db) as conn:
+        conn.execute("UPDATE pipeline_runs SET state = 'RESEARCHING' WHERE run_id IN (?, ?)", (run_id1, run_id2))
+        conn.execute("INSERT INTO jobs(job_id, job_type, match_id, run_id, status, priority) VALUES ('J-R1', 'RESEARCH', 10, ?, 'SUCCESS', 50)", (run_id1,))
+        conn.execute("INSERT INTO jobs(job_id, job_type, match_id, run_id, status, priority) VALUES ('J-R2', 'RESEARCH', 10, ?, 'SUCCESS', 50)", (run_id2,))
+
+    orch.tick(run_id1)
+    orch.tick(run_id2)
+
+    with sqlite3.connect(orch_db) as conn:
+        conn.row_factory = sqlite3.Row
+        job1 = conn.execute("SELECT payload_json FROM jobs WHERE run_id = ? AND job_type = 'AI_ANALYSIS' AND payload_json LIKE '%re_analysis%'", (run_id1,)).fetchone()
+        job2 = conn.execute("SELECT payload_json FROM jobs WHERE run_id = ? AND job_type = 'AI_ANALYSIS' AND payload_json LIKE '%re_analysis%'", (run_id2,)).fetchone()
+
+    payload1 = json.loads(job1["payload_json"])
+    payload2 = json.loads(job2["payload_json"])
+
+    assert payload1.get("data_cutoff_at") == cutoff1.isoformat()
+    assert payload2.get("data_cutoff_at") == cutoff2.isoformat()
+    assert payload1["match"].get("data_cutoff_at") == cutoff1.isoformat()
+    assert payload2["match"].get("data_cutoff_at") == cutoff2.isoformat()
+
+
 def test_valid_verified_match_completes_end_to_end(orch_db):
     orch = MasterOrchestrator(db_path=orch_db)
     cutoff = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
