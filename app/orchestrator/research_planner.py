@@ -24,12 +24,14 @@ class ResearchPlanner:
             elif domain in ["FORM_HOME", "FORM_AWAY", "STATISTICS", "HEAD_TO_HEAD"]:
                 task_type = "STAT_COLLECTION"
                 caps = ["STATISTICS"]
-                desc = f"Získej statistická data pro doménu {domain} před časem {match_identity.data_cutoff_at.isoformat()}."
+                cutoff_str = match_identity.data_cutoff_at.isoformat() if match_identity.data_cutoff_at else "N/A"
+                desc = f"Získej statistická data pro doménu {domain} před časem {cutoff_str}."
                 deps = [identity_task_uuid]
             elif domain in ["ABSENCES_HOME", "ABSENCES_AWAY", "EXPECTED_LINEUPS"]:
                 task_type = "NEWS_COLLECTION"
                 caps = ["SEARCH", "CRAWL"]
-                desc = f"Získej aktuální novinky a absence pro {domain} před časem {match_identity.data_cutoff_at.isoformat()}."
+                cutoff_str = match_identity.data_cutoff_at.isoformat() if match_identity.data_cutoff_at else "N/A"
+                desc = f"Získej aktuální novinky a absence pro {domain} před časem {cutoff_str}."
                 deps = [identity_task_uuid]
             else:
                 task_type = "FACT_COLLECTION"

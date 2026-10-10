@@ -16,6 +16,7 @@ def test_ai_worker_returns_explicit_insufficient_data_on_ollama_failure(monkeypa
 
     result = AIWorker.execute({
         "match_id": 123,
+        "data_cutoff_at": "2026-10-04T12:00:00Z",
         "claims": [{"claim_id": 1, "subject": "Sparta", "predicate": "form", "object": "good"}]
     })
 

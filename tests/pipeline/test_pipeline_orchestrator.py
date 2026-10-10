@@ -101,7 +101,7 @@ def test_14_deadlock_detection(test_db):
 
 def test_15_full_autonomous_pipeline(test_db):
     orc = MasterOrchestrator(db_path=test_db)
-    run_id = orc.start_pipeline(123)
+    run_id = orc.start_pipeline(123, data_cutoff_at=datetime(2026, 10, 10, 17, 0, tzinfo=timezone.utc))
     worker = BaseWorkerDaemon(worker_id="notebook-01", capabilities=["SEARCH", "CRAWL", "STATISTICS", "AI_ANALYSIS", "AUDIT", "RESEARCH"], db_path=test_db)
     handlers = {
         "SEARCH": SearchWorker.execute,

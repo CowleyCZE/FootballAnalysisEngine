@@ -34,12 +34,12 @@ def phase3_db(tmp_path):
 
 def test_context_builder_loads_claims_and_enrich_match_info(phase3_db):
     cb = ContextBuilder(db_path=phase3_db)
-    context = cb.build_context(match_info={"match_id": 88, "data_cutoff_at": "2026-10-20 20:00:00"}, run_db_id=1)
+    context = cb.build_context(match_info={"match_id": 88, "data_cutoff_at": "2026-10-20T20:00:00+00:00"}, run_db_id=1)
 
     assert context["match"]["home_team"] == "Arsenal"
     assert context["match"]["away_team"] == "Chelsea"
     assert context["match"]["competition"] == "Premier League"
-    assert context["match"]["data_cutoff_at"] == "2026-10-20 20:00:00"
+    assert context["match"]["data_cutoff_at"] == "2026-10-20T20:00:00+00:00"
     assert len(context["claims"]) == 1
     assert context["claims"][0]["subject"] == "Arsenal"
     assert context["claims"][0]["evidence"][0]["url"] == "https://bbc.com/saka"
@@ -47,7 +47,7 @@ def test_context_builder_loads_claims_and_enrich_match_info(phase3_db):
 
 def test_ai_worker_returns_insufficient_data_when_no_claims_in_db(phase3_db):
     # Execute AIWorker on match 99 (no claims in DB)
-    res = AIWorker.execute({"match_id": 99, "db_path": phase3_db})
+    res = AIWorker.execute({"match_id": 99, "db_path": phase3_db, "data_cutoff_at": "2026-10-20T20:00:00+00:00"})
 
     assert res["status"] == "insufficient_data"
     assert res["home_team_analysis"] is None
@@ -97,7 +97,7 @@ def test_ai_worker_executes_with_valid_claims_mock(phase3_db, monkeypatch):
 
     monkeypatch.setattr("app.workers.ai_worker.OllamaClient", MockOllama)
 
-    res = AIWorker.execute({"match_id": 88, "run_db_id": 1, "db_path": phase3_db})
+    res = AIWorker.execute({"match_id": 88, "run_db_id": 1, "db_path": phase3_db, "data_cutoff_at": "2026-10-20T20:00:00+00:00"})
 
     assert res["status"] == "complete"
     assert res["match_id"] == 88

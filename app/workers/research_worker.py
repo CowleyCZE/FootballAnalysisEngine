@@ -48,12 +48,26 @@ class ResearchWorker:
         venue = payload.get("venue") or match.get("venue")
 
         scheduled_raw = payload.get("scheduled_at") or match.get("scheduled_at")
-        cutoff_raw = (
-            payload.get("data_cutoff_at") or payload.get("cutoff_datetime") or payload.get("cutoff")
-            or match.get("data_cutoff_at") or match.get("cutoff_datetime") or match.get("cutoff")
-        )
 
-        if not home_team or not away_team or not competition or str(home_team).isdigit() or str(away_team).isdigit() or not scheduled_raw or not cutoff_raw:
+        cutoff_candidates = [
+            payload.get("data_cutoff_at"),
+            payload.get("cutoff_datetime"),
+            payload.get("cutoff"),
+            match.get("data_cutoff_at"),
+            match.get("cutoff_datetime"),
+            match.get("cutoff"),
+        ]
+        non_null_cutoffs = [c for c in cutoff_candidates if c is not None and str(c).strip() != ""]
+
+        run_id_val = payload.get("run_id")
+        if not non_null_cutoffs and run_id_val:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                r_row = conn.execute("SELECT data_cutoff_at FROM pipeline_runs WHERE run_id = ?", (str(run_id_val),)).fetchone()
+                if r_row and r_row["data_cutoff_at"]:
+                    non_null_cutoffs.append(r_row["data_cutoff_at"])
+
+        if not home_team or not away_team or not competition or str(home_team).isdigit() or str(away_team).isdigit() or not scheduled_raw or not non_null_cutoffs:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 row = conn.execute("""
@@ -79,12 +93,31 @@ class ResearchWorker:
 
         if not scheduled_raw:
             raise ValueError("Match kickoff time (scheduled_at) is missing.")
-        if not cutoff_raw:
-            raise ValueError("Data cutoff time (data_cutoff_at) is missing.")
 
         tz_override = payload.get("timezone") or match.get("timezone") or "Europe/Prague"
+
+        parsed_cutoffs = []
+        has_invalid = False
+        invalid_err = ""
+        for c in non_null_cutoffs:
+            try:
+                parsed_cutoffs.append(self._parse_datetime(c, default_tz_name=tz_override))
+            except Exception as e:
+                has_invalid = True
+                invalid_err = str(e)
+
+        has_conflict = False
+        if len(parsed_cutoffs) > 1:
+            first_c = parsed_cutoffs[0]
+            if any(c != first_c for c in parsed_cutoffs[1:]):
+                has_conflict = True
+
+        if not non_null_cutoffs or has_invalid or has_conflict:
+            err_detail = invalid_err if has_invalid and invalid_err else "Data cutoff time (data_cutoff_at) is missing or invalid."
+            raise ValueError(f"Match context resolution failed: Invalid timestamp or cutoff: {err_detail}")
+
         scheduled_at = self._parse_datetime(scheduled_raw, default_tz_name=tz_override)
-        cutoff = self._parse_datetime(cutoff_raw, default_tz_name=tz_override)
+        cutoff = parsed_cutoffs[0]
 
         return {
             "home_team": str(home_team or f"Team_{match_id}"),
