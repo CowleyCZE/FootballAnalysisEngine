@@ -85,6 +85,33 @@ class FixtureVerifier:
             _domain("https://" + d) for d in (official_domains or OFFICIAL_SCHEDULE_DOMAINS)
         }
 
+    def verify_sync(self, match_id: int) -> dict[str, Any]:
+        """Synchronous wrapper for CLI and FastAPI callers."""
+        import threading
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.verify(match_id))
+
+        outcome: list[dict[str, Any]] = []
+        errors: list[BaseException] = []
+
+        def runner() -> None:
+            try:
+                outcome.append(asyncio.run(self.verify(match_id)))
+            except BaseException as exc:
+                errors.append(exc)
+
+        worker = threading.Thread(target=runner, daemon=True)
+        worker.start()
+        worker.join()
+        if errors:
+            raise errors[0]
+        if not outcome:
+            raise FixtureVerificationError("Ověřování skončilo bez výsledku.")
+        return outcome[0]
+
     async def verify(self, match_id: int) -> dict[str, Any]:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
