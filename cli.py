@@ -33,9 +33,8 @@ def main():
     orchestrator = MasterOrchestrator()
 
     if args.command == "verify":
-        import asyncio
         from app.orchestrator.fixture_verifier import FixtureVerifier
-        report = asyncio.run(FixtureVerifier(db_path=orchestrator.db_path).verify(args.match_id))
+        report = FixtureVerifier(db_path=orchestrator.db_path).verify_sync(args.match_id)
         print(json.dumps(report, ensure_ascii=False, indent=2))
         if report["outcome"] != "RESOLVED":
             raise SystemExit(2)
