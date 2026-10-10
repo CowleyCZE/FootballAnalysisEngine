@@ -87,8 +87,9 @@ class ResearchRepository:
             run = conn.execute("SELECT run_id FROM runs WHERE id=?", (int(run_id),)).fetchone()
             if not run:
                 raise KeyError(f"run {run_id}")
-            # research_sessions historically stores the canonical run string FK.
-            cur = conn.execute("INSERT INTO research_sessions(session_uuid, run_id, task_id, strategy, started_at, status) VALUES (?, ?, ?, ?, ?, 'RUNNING')", (session_uuid, run["run_id"], int(task_id), strategy, now))
+            # research_sessions.run_id is an INTEGER FK to runs.id.
+            # Store the internal numeric ID, not the public run_id string.
+            cur = conn.execute("INSERT INTO research_sessions(session_uuid, run_id, task_id, strategy, started_at, status) VALUES (?, ?, ?, ?, ?, 'RUNNING')", (session_uuid, int(run_id), int(task_id), strategy, now))
             return int(cur.lastrowid)
 
     def save_query(self, session_id: int, query: str, query_type: str, query_hash: str, result_count: int = 0) -> None:
