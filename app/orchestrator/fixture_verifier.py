@@ -126,20 +126,19 @@ class FixtureVerifier:
     def _fixture_pair_ok(text: str, home: str, away: str) -> bool:
         """Find an explicit home-away pair even if a page title mentions the away team first."""
         raw = (text or "").casefold()
-        home_pattern = re.sub(r"\\s+", r"\\s+", re.escape(home.casefold()))
-        away_pattern = re.sub(r"\\s+", r"\\s+", re.escape(away.casefold()))
-        home_positions = [m.start() for m in re.finditer(home_pattern, raw)]
-        away_positions = [m.start() for m in re.finditer(away_pattern, raw)]
-        for home_pos in home_positions:
-            home_end = home_pos + len(home.casefold())
-            for away_pos in away_positions:
-                if away_pos <= home_end:
+        home_pattern = re.escape(home.casefold()).replace(r"\ ", r"\s+")
+        away_pattern = re.escape(away.casefold()).replace(r"\ ", r"\s+")
+        home_matches = list(re.finditer(home_pattern, raw))
+        away_matches = list(re.finditer(away_pattern, raw))
+        for home_match in home_matches:
+            for away_match in away_matches:
+                if away_match.start() <= home_match.end():
                     continue
-                between = raw[home_end:away_pos]
+                between = raw[home_match.end():away_match.start()]
                 # Keep the pair local to a fixture row; reject distant mentions and prose sentences.
                 if len(between) > 100 or re.search(r"[.!?]\s", between):
                     continue
-                if re.search(r"\\b(vs|v|versus|at)\\b|[-–—]", between):
+                if re.search(r"\b(vs|v|versus|at)\b|[-–—]", between):
                     return True
         return False
     @staticmethod
