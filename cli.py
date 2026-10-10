@@ -8,10 +8,6 @@ def main():
     parser = argparse.ArgumentParser(description="Football Analysis Engine Pipeline CLI")
     subparsers = parser.add_subparsers(dest="command")
 
-    # verify MATCH_ID against trusted fixture sources
-    verify_p = subparsers.add_parser("verify")
-    verify_p.add_argument("match_id", type=int, help="Match ID to verify before analysis")
-
     # analyze MATCH_ID
     analyze_p = subparsers.add_parser("analyze")
     analyze_p.add_argument("match_id", type=int, help="Match ID to analyze")
@@ -32,14 +28,7 @@ def main():
     args = parser.parse_args()
     orchestrator = MasterOrchestrator()
 
-    if args.command == "verify":
-        from app.orchestrator.fixture_verifier import FixtureVerifier
-        report = FixtureVerifier(db_path=orchestrator.db_path).verify_sync(args.match_id)
-        print(json.dumps(report, ensure_ascii=False, indent=2))
-        if report["outcome"] != "RESOLVED":
-            raise SystemExit(2)
-
-    elif args.command == "analyze":
+    if args.command == "analyze":
         run_id = orchestrator.start_pipeline(args.match_id)
         print(f"Pipeline initialized successfully.")
         print(f"Run ID: {run_id}")
