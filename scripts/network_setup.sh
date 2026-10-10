@@ -16,6 +16,19 @@ ask_yes_no() {
   [[ "$answer" =~ ^([Aa]([Nn][Oo])?|[Yy]([Ee][Ss])?)$ ]]
 }
 
+wait_for_http() {
+  local url=$1 service=$2 attempt
+  for attempt in {1..15}; do
+    if curl --fail --silent --show-error --max-time 3 "$url" >/dev/null 2>&1; then
+      note "$service je dostupný."
+      return 0
+    fi
+    sleep 2
+  done
+  note "$service se do 30 sekund nepřipravil; zkontrolujte: cd services/searxng && docker compose logs --tail=100 core"
+  return 1
+}
+
 is_ipv4() {
   [[ $1 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
   local IFS=. octet
@@ -63,7 +76,7 @@ SEARX_PORT="${SEARXNG_PORT:-8080}"     # services/searxng/docker-compose.yml def
 OLLAMA_PORT="${OLLAMA_PORT:-11434}"    # app/workers/ai_worker.py default
 note "FastAPI: http://$LAN_IP:$API_PORT (port lze změnit přes FAE_API_PORT)"
 note "SearXNG: http://127.0.0.1:$SEARX_PORT (SEARXNG_PORT)"
-note "Ollama:  http://127.0.0.1:$OLLAMA_PORT (OLLAMA_URL may override this in the app)"
+note "Ollama:  http://127.0.0.1:$OLLAMA_PORT (aplikace může adresu změnit přes OLLAMA_URL)"
 note "Skript na telefonu neotevírá žádný port."
 
 say "Prostředí Pythonu"
@@ -100,14 +113,15 @@ PY
       note "Vytvořena ignorovaná místní konfigurace SearXNG s vygenerovaným tajným klíčem."
     fi
     ( cd services/searxng && SEARXNG_CONFIG_DIR=./local-config docker compose up -d )
-    sleep 2
-    curl --fail --silent --show-error "http://127.0.0.1:$SEARX_PORT/" >/dev/null && note "SearXNG je dostupný." || note "SearXNG byl spuštěn, ale ještě není připraven; zkontrolujte: cd services/searxng && docker compose logs --tail=100 core"
+    # První start stáhne image a inicializuje worker; jednorázová kontrola po
+    # dvou sekundách často ještě není vypovídající.
+    wait_for_http "http://127.0.0.1:$SEARX_PORT/" "SearXNG" || true
   fi
 else
   note "Docker Compose není dostupný; SearXNG nebyl spuštěn. Docker instalujte či nastavte jen pro živé vyhledávání."
 fi
 
-say "Ollama (volitelná AI závislost)"
+say "Ollama – volitelná AI závislost"
 if curl --fail --silent --max-time 2 "http://127.0.0.1:$OLLAMA_PORT/api/tags" >/dev/null; then
   note "Ollama je již dostupná."
 elif command_exists ollama; then
