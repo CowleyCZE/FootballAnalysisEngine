@@ -44,11 +44,7 @@ def result(url, title, content):
     return {"url": url, "title": title, "content": content, "publishedDate": None}
 
 
-@pytest.mark.parametrize(
-    "url",
-    ["https://www.chanceliga.cz/zapasy", "https://sparta.cz/zapas/123"],
-)
-def test_official_exact_fixture_resolves_and_records_evidence(fixture_db):
+def test_insufficient_single_official_source_does_not_resolve(fixture_db):
     verifier = FixtureVerifier(
         db_path=fixture_db,
         search_engine=FakeSearchEngine([
