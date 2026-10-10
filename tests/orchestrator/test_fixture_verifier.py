@@ -150,6 +150,53 @@ def test_candidate_datetimes_keeps_later_target_after_old_fixture():
     ]
 
 
+def test_candidate_datetime_parses_czech_date_without_year_using_fixture_year():
+    parsed = FixtureVerifier._parse_candidate_datetime(
+        "Chance LIGA. 10. kolo, 11. 10., 18:00. AC Sparta Praha",
+        reference_year=2026,
+    )
+    assert parsed is not None
+    assert (parsed.year, parsed.month, parsed.day, parsed.hour, parsed.minute) == (
+        2026, 10, 11, 18, 0
+    )
+
+
+def test_fixture_card_with_countdown_noise_keeps_team_order():
+    text = (
+        "Zápasy - Kalendář - AC Sparta Praha. Příští zápas. Chance LIGA. "
+        "10. kolo, 11. 10., 18:00. AC Sparta Praha epet ARENA. "
+        "AC Sparta Praha. 01D. 15H. 59MIN. FK Pardubice."
+    )
+    assert FixtureVerifier._fixture_pair_ok(text, "AC Sparta Praha", "FK Pardubice")
+
+
+def test_yearless_official_fixture_card_can_resolve_with_independent_source(fixture_db):
+    verifier = FixtureVerifier(
+        db_path=fixture_db,
+        search_engine=FakeSearchEngine([
+            result(
+                "https://sparta.cz/cs/zapasy",
+                "Zápasy - Kalendář - AC Sparta Praha",
+                "Příští zápas. Chance LIGA. 10. kolo, 11. 10., 18:00. "
+                "AC Sparta Praha epet ARENA. AC Sparta Praha. 01D. 15H. "
+                "59MIN. 54SEC. FK Pardubice.",
+            ),
+            result(
+                "https://www.chanceliga.cz/zapasy/123",
+                "AC Sparta Praha - FK Pardubice",
+                "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00",
+            ),
+        ]),
+        official_domains={"sparta.cz", "chanceliga.cz"},
+    )
+    import asyncio
+    report = asyncio.run(verifier.verify(7))
+    assert report["outcome"] == "RESOLVED"
+    assert {source["domain"] for source in report["evidence"]} == {
+        "sparta.cz", "chanceliga.cz"
+    }
+
+
 def test_fixture_pair_ignores_earlier_away_team_mention():
     text = "FK Pardubice schedule. AC Sparta Praha – FK Pardubice, Chance Liga"
     assert FixtureVerifier._fixture_pair_ok(text, "AC Sparta Praha", "FK Pardubice")
