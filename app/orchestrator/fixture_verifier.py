@@ -95,37 +95,53 @@ class FixtureVerifier:
         return dt.astimezone(ZoneInfo("Europe/Prague"))
 
     @staticmethod
-    def _parse_candidate_datetime(text: str) -> datetime | None:
+    def _parse_candidate_datetimes(text: str) -> list[datetime]:
+        """Parse every date/time candidate; search snippets can mention older fixtures first."""
         patterns = (
             r"(?P<day>\d{1,2})\s*[./]\s*(?P<month>\d{1,2})\s*[./]\s*(?P<year>20\d{2})\.?\s*[ ,T]+\s*(?P<hour>\d{1,2}):(?P<minute>\d{2})",
             r"(?P<year>20\d{2})-(?P<month>\d{1,2})-(?P<day>\d{1,2})[ T]+(?P<hour>\d{1,2}):(?P<minute>\d{2})",
         )
+        candidates: list[datetime] = []
         for pattern in patterns:
-            found = re.search(pattern, text)
-            if not found:
-                continue
-            values = found.groupdict()
-            try:
-                return datetime(
-                    int(values["year"]), int(values["month"]), int(values["day"]),
-                    int(values["hour"]), int(values["minute"]),
-                )
-            except ValueError:
-                continue
-        return None
+            for found in re.finditer(pattern, text or ""):
+                values = found.groupdict()
+                try:
+                    candidate = datetime(
+                        int(values["year"]), int(values["month"]), int(values["day"]),
+                        int(values["hour"]), int(values["minute"]),
+                    )
+                except ValueError:
+                    continue
+                if candidate not in candidates:
+                    candidates.append(candidate)
+        return sorted(candidates)
+
+    @staticmethod
+    def _parse_candidate_datetime(text: str) -> datetime | None:
+        """Backward-compatible helper returning the first parsed date/time."""
+        candidates = FixtureVerifier._parse_candidate_datetimes(text)
+        return candidates[0] if candidates else None
 
     @staticmethod
     def _fixture_pair_ok(text: str, home: str, away: str) -> bool:
-        # Locate full team names in the original string so punctuation between
-        # them (for example the dash in "Sparta - Pardubice") remains available.
+        """Find an explicit home-away pair even if a page title mentions the away team first."""
         raw = (text or "").casefold()
-        home_raw, away_raw = home.casefold(), away.casefold()
-        home_pos, away_pos = raw.find(home_raw), raw.find(away_raw)
-        if home_pos < 0 or away_pos < 0 or home_pos >= away_pos:
-            return False
-        between = raw[home_pos + len(home_raw):away_pos]
-        # Both teams must form one explicit fixture pair, not unrelated mentions.
-        return bool(re.search(r"\b(vs|v|versus|at)\b|[-–]", between))
+        home_pattern = re.sub(r"\\s+", r"\\s+", re.escape(home.casefold()))
+        away_pattern = re.sub(r"\\s+", r"\\s+", re.escape(away.casefold()))
+        home_positions = [m.start() for m in re.finditer(home_pattern, raw)]
+        away_positions = [m.start() for m in re.finditer(away_pattern, raw)]
+        for home_pos in home_positions:
+            home_end = home_pos + len(home.casefold())
+            for away_pos in away_positions:
+                if away_pos <= home_end:
+                    continue
+                between = raw[home_end:away_pos]
+                # Keep the pair local to a fixture row; reject distant mentions and prose sentences.
+                if len(between) > 100 or re.search(r"[.!?]\s", between):
+                    continue
+                if re.search(r"\\b(vs|v|versus|at)\\b|[-–—]", between):
+                    return True
+        return False
     @staticmethod
     def _competition_ok(text: str, competition: str) -> bool:
         normalized_text = _normal(text)
@@ -216,13 +232,17 @@ class FixtureVerifier:
         for result in by_url.values():
             host = _domain(result.url)
             body = f"{result.title}\n{result.content}"
-            candidate_dt = self._parse_candidate_datetime(body)
+            candidate_datetimes = self._parse_candidate_datetimes(body)
             home_ok = _normal(match["home_team"]) in _normal(body)
             away_ok = _normal(match["away_team"]) in _normal(body)
             pair_ok = self._fixture_pair_ok(body, match["home_team"], match["away_team"])
             competition_ok = self._competition_ok(body, competition)
-            date_ok = candidate_dt is not None and candidate_dt.date() == kickoff.date()
-            time_ok = candidate_dt is not None and (candidate_dt.hour, candidate_dt.minute) == (kickoff.hour, kickoff.minute)
+            date_ok = any(candidate.date() == kickoff.date() for candidate in candidate_datetimes)
+            time_ok = any(
+                candidate.date() == kickoff.date()
+                and (candidate.hour, candidate.minute) == (kickoff.hour, kickoff.minute)
+                for candidate in candidate_datetimes
+            )
             official = host in self.official_domains or any(host.endswith("." + d) for d in self.official_domains)
             record = {
                 "url": result.url,
