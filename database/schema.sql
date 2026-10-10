@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS audit_issues (id INTEGER PRIMARY KEY AUTOINCREMENT, a
 CREATE TABLE IF NOT EXISTS audit_issue_evidence (audit_issue_id INTEGER NOT NULL, evidence_id INTEGER NOT NULL, PRIMARY KEY (audit_issue_id, evidence_id));
 CREATE TABLE IF NOT EXISTS audit_issue_claims (audit_issue_id INTEGER NOT NULL, claim_id INTEGER NOT NULL, PRIMARY KEY (audit_issue_id, claim_id));
 CREATE TABLE IF NOT EXISTS workers (id INTEGER PRIMARY KEY AUTOINCREMENT, worker_id TEXT NOT NULL UNIQUE, worker_type TEXT, status TEXT NOT NULL DEFAULT 'IDLE', capabilities_json TEXT, last_heartbeat TEXT, current_job_id TEXT, metadata_json TEXT, registered_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS fixture_verification_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, match_id INTEGER NOT NULL, outcome TEXT NOT NULL, message TEXT NOT NULL, evidence_json TEXT NOT NULL, rejected_json TEXT NOT NULL, verified_at TEXT NOT NULL, FOREIGN KEY (match_id) REFERENCES matches(id));
+CREATE INDEX IF NOT EXISTS idx_fixture_verification_match ON fixture_verification_runs(match_id, verified_at);
 CREATE TABLE IF NOT EXISTS system_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL, run_id TEXT, job_id TEXT, worker_id TEXT, payload_json TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(content_hash);
 CREATE INDEX IF NOT EXISTS idx_documents_canonical_url ON documents(canonical_url);
