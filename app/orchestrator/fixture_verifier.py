@@ -84,11 +84,11 @@ class FixtureVerifier:
 
     @staticmethod
     def _local_fixture_datetime(value: str) -> datetime:
+        from zoneinfo import ZoneInfo
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            from zoneinfo import ZoneInfo
-            dt = dt.replace(tzinfo=ZoneInfo("Europe/Prague"))
-        return dt
+            return dt.replace(tzinfo=ZoneInfo("Europe/Prague"))
+        return dt.astimezone(ZoneInfo("Europe/Prague"))
 
     @staticmethod
     def _parse_candidate_datetime(text: str) -> datetime | None:
