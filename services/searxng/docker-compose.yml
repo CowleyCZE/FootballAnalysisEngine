@@ -12,7 +12,10 @@ services:
       - ${SEARXNG_HOST:+${SEARXNG_HOST}:}${SEARXNG_PORT:-8080}:${SEARXNG_PORT:-8080}
     env_file: ./.env
     volumes:
-      - ./core-config/:/etc/searxng/:Z
+      # The network helper may generate a private local-config directory with
+      # a non-placeholder SearXNG secret.  The tracked core-config remains a
+      # safe template and is used when no local configuration exists.
+      - ${SEARXNG_CONFIG_DIR:-./core-config}/:/etc/searxng/:Z
       - core-data:/var/cache/searxng/
 
   valkey:
