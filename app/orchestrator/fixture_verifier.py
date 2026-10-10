@@ -185,14 +185,14 @@ class FixtureVerifier:
         queries = [
             QuerySpec(
                 query=f'"{match["home_team"]}" "{match["away_team"]}" "{competition}" '
-                      f'{kickoff.strftime("%Y-%m-%d")} official fixture schedule',
+                      f'{kickoff.strftime("%Y-%m-%d")} {kickoff.strftime("%d.%m.%Y")} {kickoff.strftime("%H:%M")} official fixture schedule',
                 language="en",
                 priority=100,
                 reason="FIXTURE_VERIFICATION",
             ),
             QuerySpec(
                 query=f'"{match["home_team"]}" "{match["away_team"]}" "{competition}" '
-                      f'{kickoff.strftime("%d.%m.%Y")} rozpis zápasů',
+                      f'{kickoff.strftime("%d.%m.%Y")} {kickoff.strftime("%H:%M")} rozpis zápasů',
                 language="cs",
                 priority=100,
                 reason="FIXTURE_VERIFICATION",
