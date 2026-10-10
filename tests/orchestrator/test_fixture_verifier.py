@@ -40,24 +40,26 @@ def result(url, title, content):
     return {"url": url, "title": title, "content": content, "publishedDate": None}
 
 
-def test_insufficient_single_official_source_does_not_resolve(fixture_db):
+def test_two_independent_official_sources_resolve_and_record_evidence(fixture_db):
     verifier = FixtureVerifier(
         db_path=fixture_db,
         search_engine=FakeSearchEngine([
             result("https://www.chanceliga.cz/zapasy/1", "AC Sparta Praha - FK Pardubice",
                    "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
+            result("https://www.fotbal.cz/zapasy/2", "AC Sparta Praha - FK Pardubice",
+                   "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
         ]),
-        official_domains={"chanceliga.cz"},
+        official_domains={"chanceliga.cz", "fotbal.cz"},
     )
     import asyncio
     report = asyncio.run(verifier.verify(7))
-    assert report["outcome"] == "UNVERIFIED"
+    assert report["outcome"] == "RESOLVED"
     with sqlite3.connect(fixture_db) as conn:
-        assert conn.execute("SELECT status FROM matches WHERE id=7").fetchone()[0] == "scheduled"
+        assert conn.execute("SELECT status FROM matches WHERE id=7").fetchone()[0] == "RESOLVED"
         audit = conn.execute(
             "SELECT outcome,evidence_json FROM fixture_verification_runs WHERE match_id=7"
         ).fetchone()
-        assert audit[0] == "UNVERIFIED"
+        assert audit[0] == "RESOLVED"
         assert "chanceliga.cz" in audit[1]
 
 
