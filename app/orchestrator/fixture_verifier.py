@@ -236,8 +236,8 @@ class FixtureVerifier:
                 "title": result.title,
                 "domain": host,
                 "official_domain": official,
-                "home_team_match": _has_team(text, match["home_team"]),
-                "away_team_match": _has_team(text, match["away_team"]),
+                "home_team_match": home_ok,
+                "away_team_match": away_ok,
                 "competition_match": comp_ok,
                 "date_match": date_ok,
                 "time_match": time_ok,
@@ -250,8 +250,8 @@ class FixtureVerifier:
             else:
                 rejected.append(item)
 
-        # A single source can be a direct official schedule. If the search provider
-        # gives no explicit match/date snippet, we do not promote the record.
+        # Two different official domains are required; duplicate URLs from one source
+        # cannot satisfy the independence threshold.
         unique_domains = {e["domain"] for e in evidence}
         verified = len(evidence) >= 2 and len(unique_domains) >= 2
         outcome = "RESOLVED" if verified else "UNVERIFIED"
