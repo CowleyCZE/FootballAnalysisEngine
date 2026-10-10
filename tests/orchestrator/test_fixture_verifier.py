@@ -1,13 +1,9 @@
-import json
 import sqlite3
-from datetime import datetime, timezone
 
 import pytest
 
 from app.database.schema import initialize_database
 from app.orchestrator.fixture_verifier import FixtureVerifier
-from app.search.models import SearchResult
-
 
 class FakeSearXNGClient:
     def __init__(self, results):
