@@ -1,7 +1,7 @@
-# FootballAnalysisEngine on another Wi-Fi (Linux Mint)
+# FootballAnalysisEngine na jiné Wi-Fi (Linux Mint)
 
-Run the interactive helper from the project root after the notebook and, if it
-is used as a client, the Samsung Note 9 have joined the same Wi-Fi:
+Po připojení notebooku a případně Samsungu Note 9 ke stejné Wi-Fi spusťte
+z kořene projektu interaktivního pomocníka:
 
 ```bash
 git switch football-engine
@@ -9,44 +9,43 @@ git pull --ff-only
 ./scripts/network_setup.sh
 ```
 
-The helper discovers the notebook's active default-route interface, IPv4/CIDR
-and gateway. It deliberately rejects Docker, bridge, veth and Tailscale as the
-default LAN connection. It asks for the phone's IPv4 only to perform optional
-reachability checks; this repository does not establish that the phone hosts a
-service.
+Pomocník zjistí aktivní výchozí rozhraní notebooku, IPv4/CIDR a bránu. Docker,
+bridge, veth a Tailscale záměrně odmítne jako výchozí LAN připojení. IPv4
+telefonu žádá pouze pro volitelnou kontrolu spojení; repozitář neprokazuje, že
+telefon hostuje službu.
 
-## What the repository actually runs
+## Co repozitář skutečně spouští
 
-1. `scripts/init_database.py` creates/updates the local SQLite database.
-2. The optional SearXNG Docker Compose stack provides the local search service.
-   Its repository default is `127.0.0.1:8080`.
-3. FastAPI is launched as `uvicorn app.main:app`; the local proxy default in
-   the repository is port `8000`.
-4. `scripts/run_worker.py` launches the pull-based local worker.
-5. Ollama is optional. Its application default is `127.0.0.1:11434`; the
-   helper never downloads a model automatically.
+1. `scripts/init_database.py` vytvoří či aktualizuje místní SQLite databázi.
+2. Volitelný SearXNG Docker Compose poskytuje lokální vyhledávání; výchozí
+   adresa repozitáře je `127.0.0.1:8080`.
+3. FastAPI se spouští jako `uvicorn app.main:app`; výchozí port místní proxy
+   v repozitáři je `8000`.
+4. `scripts/run_worker.py` spouští místního pull-based workera.
+5. Ollama je volitelná; její výchozí adresa v aplikaci je `127.0.0.1:11434`.
+   Pomocník model nestahuje automaticky.
 
-The helper creates an ignored `services/searxng/local-config/settings.yml` on
-first SearXNG start and replaces the template secret with a random local one.
-It does not place secrets in Git.
+Při prvním spuštění SearXNG vytvoří pomocník ignorovaný soubor
+`services/searxng/local-config/settings.yml` a šablonový tajný klíč nahradí
+náhodným místním klíčem. Tajné údaje se do Gitu neukládají.
 
-## Phone access and safety
+## Přístup z telefonu a bezpečnost
 
-Keep the API loopback-only unless the phone must call it. When asked to expose
-it, the helper requires `WORKER_API_TOKEN` or `API_SECRET_TOKEN` already be
-exported in that terminal, then binds FastAPI to the LAN. For example, choose a
-new value locally and do not commit it:
+Nechte API dostupné pouze lokálně, pokud ho telefon skutečně nepotřebuje. Při
+zvolení LAN přístupu pomocník vyžaduje, aby už byl v terminálu nastaven
+`WORKER_API_TOKEN` nebo `API_SECRET_TOKEN`; poté FastAPI naváže na LAN. Novou
+hodnotu zvolte lokálně a neukládejte ji do Gitu:
 
 ```bash
 export WORKER_API_TOKEN='replace-with-a-long-random-secret'
 ./scripts/network_setup.sh
 ```
 
-The only unauthenticated endpoints are health checks. Protected API calls must
-send `X-Worker-Token` (or a Bearer token). The script never changes firewall
-rules, uses no `sudo`, and does not open a phone-side port.
+Jediné neověřené endpointy jsou kontroly stavu. Chráněná API volání musí
+odesílat `X-Worker-Token` (nebo Bearer token). Skript nemění pravidla
+firewallu, nepoužívá `sudo` a neotevírá port na telefonu.
 
-## Useful commands
+## Užitečné příkazy
 
 ```bash
 curl -fsS http://127.0.0.1:8000/health
@@ -56,14 +55,14 @@ pkill -f 'uvicorn app.main:app'
 pkill -f 'scripts/run_worker.py'
 ```
 
-If SearXNG does not become ready, use:
+Pokud se SearXNG nepřipraví, použijte:
 
 ```bash
 cd services/searxng
 docker compose logs --tail=100 core
 ```
 
-If the phone cannot reach the notebook after LAN exposure, first confirm both
-devices are on the same Wi-Fi and that client isolation is disabled on the
-router. Then test `http://NOTEBOOK_IP:8000/health`. Only after that evidence,
-review any local firewall rule manually.
+Pokud telefon po zpřístupnění LAN nedosáhne na notebook, nejprve ověřte, že
+obě zařízení jsou na stejné Wi-Fi a router nemá zapnutou izolaci klientů. Poté
+otestujte `http://IP_NOTEBOOKU:8000/health`. Teprve potom ručně prověřte
+případné pravidlo firewallu.

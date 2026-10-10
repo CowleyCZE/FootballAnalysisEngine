@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Interactive, local-only setup for moving FootballAnalysisEngine to another Wi-Fi.
-# It never changes firewall rules and never writes an application token.
+# Interaktivní místní nastavení FootballAnalysisEngine po změně Wi-Fi.
+# Nikdy nemění pravidla firewallu ani nezapisuje aplikační token.
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,12 +8,12 @@ cd "$ROOT_DIR"
 
 say() { printf '\n== %s ==\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
-die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+die() { printf 'CHYBA: %s\n' "$*" >&2; exit 1; }
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 ask_yes_no() {
   local prompt=$1 answer
-  read -r -p "$prompt [y/N] " answer
-  [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
+  read -r -p "$prompt [a/N] " answer
+  [[ "$answer" =~ ^([Aa]([Nn][Oo])?|[Yy]([Ee][Ss])?)$ ]]
 }
 
 is_ipv4() {
@@ -23,70 +23,69 @@ is_ipv4() {
   for octet in "${octet[@]}"; do (( 10#$octet <= 255 )) || return 1; done
 }
 
-say "Repository and Python"
-[[ -f requirements.txt ]] || die "Run this script from a FootballAnalysisEngine checkout."
-note "Repository: $ROOT_DIR"
-note "Branch: $(git branch --show-current 2>/dev/null || printf 'not a Git checkout')"
-command_exists python3 || die "python3 is required."
+say "Repozitář a Python"
+[[ -f requirements.txt ]] || die "Skript musí běžet z checkoutu FootballAnalysisEngine."
+note "Repozitář: $ROOT_DIR"
+note "Větev: $(git branch --show-current 2>/dev/null || printf 'nejde o Git checkout')"
+command_exists python3 || die "Je nutný python3."
 
-say "Active LAN connection"
-# A route lookup picks the actual default LAN interface, avoiding Docker, veth
-# and Tailscale interfaces even when they are up.
+say "Aktivní LAN připojení"
+# Výchozí trasa vybere skutečné LAN rozhraní a vynechá Docker, veth a Tailscale.
 ROUTE="$(ip -4 route get 1.1.1.1 2>/dev/null | head -n1 || true)"
 LAN_IF="$(awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}' <<< "$ROUTE")"
 GATEWAY="$(awk '{for (i=1;i<=NF;i++) if ($i=="via") {print $(i+1); exit}}' <<< "$ROUTE")"
-[[ -n "$LAN_IF" ]] || die "No active IPv4 default route was found. Connect the notebook to Wi-Fi or Ethernet first."
-case "$LAN_IF" in docker*|br-*|veth*|tailscale*) die "Default route selected '$LAN_IF', which is not a normal LAN interface. Check the network connection first.";; esac
+[[ -n "$LAN_IF" ]] || die "Nenalezena aktivní výchozí IPv4 trasa. Nejprve připojte notebook k Wi-Fi nebo Ethernetu."
+case "$LAN_IF" in docker*|br-*|veth*|tailscale*) die "Výchozí trasa vybrala '$LAN_IF', což není běžné LAN rozhraní. Zkontrolujte připojení.";; esac
 LAN_CIDR="$(ip -o -4 addr show dev "$LAN_IF" scope global | awk 'NR==1 {print $4}')"
-[[ -n "$LAN_CIDR" ]] || die "Interface $LAN_IF has no global IPv4 address."
+[[ -n "$LAN_CIDR" ]] || die "Rozhraní $LAN_IF nemá globální IPv4 adresu."
 LAN_IP="${LAN_CIDR%/*}"; PREFIX="${LAN_CIDR#*/}"
 TYPE="Ethernet"; [[ -d "/sys/class/net/$LAN_IF/wireless" ]] && TYPE="Wi-Fi"
-note "Connection: $TYPE on $LAN_IF"
-note "Notebook IPv4/subnet: $LAN_CIDR"
-note "Gateway: ${GATEWAY:-not reported by route}"
-note "Docker/Tailscale are intentionally not selected as the LAN path."
+note "Připojení: $TYPE přes $LAN_IF"
+note "IPv4/podsíť notebooku: $LAN_CIDR"
+note "Brána: ${GATEWAY:-trasa ji neuvádí}"
+note "Docker/Tailscale nejsou záměrně vybrány jako LAN cesta."
 
-say "Samsung Note 9 (optional client)"
-note "On the Note 9, open Wi-Fi details for the same network and read its IPv4 address."
-note "The repository contains a notebook-hosted FastAPI search proxy; it does not prove that the Note 9 hosts a service."
+say "Samsung Note 9 (volitelný klient)"
+note "Na Note 9 otevřete podrobnosti stejné Wi-Fi a zjistěte jeho IPv4 adresu."
+note "Repozitář obsahuje vyhledávací proxy FastAPI na notebooku; nedokazuje, že službu hostuje Note 9."
 PHONE_IP=""
-read -r -p "Note 9 IPv4 (press Enter to skip): " PHONE_IP
+read -r -p "IPv4 Note 9 (Enter = přeskočit): " PHONE_IP
 if [[ -n "$PHONE_IP" ]]; then
-  is_ipv4 "$PHONE_IP" || die "'$PHONE_IP' is not a valid IPv4 address."
+  is_ipv4 "$PHONE_IP" || die "'$PHONE_IP' není platná IPv4 adresa."
   if command_exists ping; then
-    if ping -c 1 -W 2 "$PHONE_IP" >/dev/null 2>&1; then note "Phone responds to ping."; else note "Phone did not respond to ping (Android may block ICMP; this alone is not a failure)."; fi
+    if ping -c 1 -W 2 "$PHONE_IP" >/dev/null 2>&1; then note "Telefon odpovídá na ping."; else note "Telefon na ping neodpověděl (Android může ICMP blokovat; samo o sobě nejde o chybu)."; fi
   fi
 fi
 
-say "Local services discovered in this repository"
+say "Lokální služby nalezené v repozitáři"
 API_PORT="${FAE_API_PORT:-8000}"       # app SearchWorker's documented local proxy default
 SEARX_PORT="${SEARXNG_PORT:-8080}"     # services/searxng/docker-compose.yml default
 OLLAMA_PORT="${OLLAMA_PORT:-11434}"    # app/workers/ai_worker.py default
-note "FastAPI: http://$LAN_IP:$API_PORT (uvicorn port can be overridden with FAE_API_PORT)"
+note "FastAPI: http://$LAN_IP:$API_PORT (port lze změnit přes FAE_API_PORT)"
 note "SearXNG: http://127.0.0.1:$SEARX_PORT (SEARXNG_PORT)"
 note "Ollama:  http://127.0.0.1:$OLLAMA_PORT (OLLAMA_URL may override this in the app)"
-note "No port is opened on the phone by this script."
+note "Skript na telefonu neotevírá žádný port."
 
-say "Python environment"
+say "Prostředí Pythonu"
 if [[ ! -x .venv/bin/python ]]; then
-  if ask_yes_no "Create .venv and install requirements now?"; then
+  if ask_yes_no "Vytvořit .venv a nyní nainstalovat závislosti?"; then
     python3 -m venv .venv
     .venv/bin/python -m pip install --upgrade pip
     .venv/bin/python -m pip install -r requirements.txt
   else
-    die "A project virtual environment is required to start the API and worker."
+    die "Pro spuštění API a workeru je nutné virtuální prostředí projektu."
   fi
 fi
 PYTHON="$ROOT_DIR/.venv/bin/python"
-"$PYTHON" -c 'import fastapi, uvicorn; print("Python dependencies are available")' || die "Install dependencies with: $PYTHON -m pip install -r requirements.txt"
+"$PYTHON" -c 'import fastapi, uvicorn; print("Závislosti Pythonu jsou dostupné")' || die "Nainstalujte závislosti příkazem: $PYTHON -m pip install -r requirements.txt"
 
-say "Database"
+say "Databáze"
 "$PYTHON" scripts/init_database.py
-note "Database initialized: database/football.db"
+note "Databáze inicializována: database/football.db"
 
 say "SearXNG"
 if command_exists docker && docker compose version >/dev/null 2>&1; then
-  if ask_yes_no "Start or refresh the repository's local SearXNG stack?"; then
+  if ask_yes_no "Spustit nebo obnovit lokální SearXNG z tohoto repozitáře?"; then
     mkdir -p services/searxng/local-config
     if [[ ! -f services/searxng/local-config/settings.yml ]]; then
       cp services/searxng/core-config/settings.yml services/searxng/local-config/settings.yml
@@ -98,60 +97,60 @@ p = Path("services/searxng/local-config/settings.yml")
 p.write_text(p.read_text().replace("CHANGE_ME_SEARXNG_SECRET_KEY_ENV_VAR", sys.argv[1]))
 PY
       unset SECRET
-      note "Created ignored local SearXNG configuration with a generated secret."
+      note "Vytvořena ignorovaná místní konfigurace SearXNG s vygenerovaným tajným klíčem."
     fi
     ( cd services/searxng && SEARXNG_CONFIG_DIR=./local-config docker compose up -d )
     sleep 2
-    curl --fail --silent --show-error "http://127.0.0.1:$SEARX_PORT/" >/dev/null && note "SearXNG is reachable." || note "SearXNG was started but is not ready yet; inspect: cd services/searxng && docker compose logs --tail=100 core"
+    curl --fail --silent --show-error "http://127.0.0.1:$SEARX_PORT/" >/dev/null && note "SearXNG je dostupný." || note "SearXNG byl spuštěn, ale ještě není připraven; zkontrolujte: cd services/searxng && docker compose logs --tail=100 core"
   fi
 else
-  note "Docker Compose is unavailable; SearXNG was not started. Install/configure Docker only if you want live search."
+  note "Docker Compose není dostupný; SearXNG nebyl spuštěn. Docker instalujte či nastavte jen pro živé vyhledávání."
 fi
 
-say "Ollama (optional AI dependency)"
+say "Ollama (volitelná AI závislost)"
 if curl --fail --silent --max-time 2 "http://127.0.0.1:$OLLAMA_PORT/api/tags" >/dev/null; then
-  note "Ollama is already reachable."
+  note "Ollama je již dostupná."
 elif command_exists ollama; then
-  note "Ollama is installed but not responding. Start it separately if AI_ANALYSIS is needed: ollama serve"
-  note "Do not download a model automatically; the repository defaults to qwen2.5:7b and this laptop has limited RAM."
+  note "Ollama je nainstalovaná, ale neodpovídá. Pro AI_ANALYSIS ji spusťte zvlášť: ollama serve"
+  note "Model se nestahuje automaticky; repo používá qwen2.5:7b, který je pro tento notebook náročný na RAM."
 else
-  note "Ollama is not installed. The engine's tested fallback reports insufficient_data for unavailable AI."
+  note "Ollama není nainstalovaná. Ověřený fallback enginu pro nedostupnou AI vrátí insufficient_data."
 fi
 
-say "Start Football Analysis Engine"
+say "Spuštění Football Analysis Enginu"
 mkdir -p logs
 API_BIND=127.0.0.1
-if [[ -n "$PHONE_IP" ]] && ask_yes_no "Expose the authenticated API to the LAN for the Note 9?"; then
-  [[ -n "${WORKER_API_TOKEN:-${API_SECRET_TOKEN:-}}" ]] || die "Set WORKER_API_TOKEN or API_SECRET_TOKEN in this terminal before exposing protected API endpoints."
+if [[ -n "$PHONE_IP" ]] && ask_yes_no "Zpřístupnit ověřené API do LAN pro Note 9?"; then
+  [[ -n "${WORKER_API_TOKEN:-${API_SECRET_TOKEN:-}}" ]] || die "Před zpřístupněním chráněných API endpointů nastavte v tomto terminálu WORKER_API_TOKEN nebo API_SECRET_TOKEN."
   API_BIND=0.0.0.0
 fi
 if curl --fail --silent --max-time 2 "http://127.0.0.1:$API_PORT/health" >/dev/null; then
-  note "FastAPI is already responding on port $API_PORT; it was not started twice."
+  note "FastAPI již odpovídá na portu $API_PORT; nebyla spuštěna podruhé."
 else
   nohup "$PYTHON" -m uvicorn app.main:app --host "$API_BIND" --port "$API_PORT" >logs/api.log 2>&1 &
   API_PID=$!
   sleep 2
-  curl --fail --silent --show-error "http://127.0.0.1:$API_PORT/health" >/dev/null || { tail -n 80 logs/api.log >&2 || true; die "FastAPI did not start."; }
-  note "FastAPI started (PID $API_PID, log: logs/api.log)."
+  curl --fail --silent --show-error "http://127.0.0.1:$API_PORT/health" >/dev/null || { tail -n 80 logs/api.log >&2 || true; die "FastAPI se nespustila."; }
+  note "FastAPI spuštěna (PID $API_PID, log: logs/api.log)."
 fi
-if ask_yes_no "Start the local all-capabilities worker now?"; then
+if ask_yes_no "Spustit nyní místní worker se všemi schopnostmi?"; then
   if pgrep -f '[s]cripts/run_worker.py' >/dev/null; then
-    note "A worker launcher is already running; it was not started twice."
+    note "Spouštěč workeru již běží; nebyl spuštěn podruhé."
   else
     nohup "$PYTHON" scripts/run_worker.py >logs/worker.log 2>&1 &
-    note "Worker started (PID $!, log: logs/worker.log)."
+    note "Worker spuštěn (PID $!, log: logs/worker.log)."
   fi
 fi
 
-say "Connectivity checks and exact commands"
-note "Notebook health: curl -fsS http://127.0.0.1:$API_PORT/health"
+say "Kontroly spojení a přesné příkazy"
+note "Stav notebooku: curl -fsS http://127.0.0.1:$API_PORT/health"
 if [[ "$API_BIND" == 0.0.0.0 ]]; then
-  note "From Note 9 (same Wi-Fi): http://$LAN_IP:$API_PORT/health"
-  note "Protected endpoint port check: nc -vz $LAN_IP $API_PORT  (run where nc is available)"
+  note "Z Note 9 (stejná Wi-Fi): http://$LAN_IP:$API_PORT/health"
+  note "Kontrola portu chráněného endpointu: nc -vz $LAN_IP $API_PORT  (spusťte tam, kde je nc dostupné)"
 else
-  note "API remains loopback-only. Re-run and choose LAN exposure only after exporting a token."
+  note "API zůstává dostupné jen lokálně. Znovu spusťte skript a LAN zvolte až po nastavení tokenu."
 fi
-note "Worker log: tail -f logs/worker.log"
-note "API log: tail -f logs/api.log"
-note "Stop local launchers: pkill -f 'uvicorn app.main:app'; pkill -f 'scripts/run_worker.py'"
-note "Firewall rules were not inspected or changed. If a firewall blocks the chosen LAN port, review it and explicitly approve a rule yourself."
+note "Log workeru: tail -f logs/worker.log"
+note "Log API: tail -f logs/api.log"
+note "Zastavení místních procesů: pkill -f 'uvicorn app.main:app'; pkill -f 'scripts/run_worker.py'"
+note "Pravidla firewallu nebyla zkoumána ani měněna. Pokud firewall blokuje zvolený LAN port, nejprve ho zkontrolujte a pravidlo schvalte sami."
