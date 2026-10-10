@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-from app.orchestrator.match_resolver import parse_to_utc
 from app.search.engine import SearchEngine
 from app.search.models import QuerySpec
 from app.search.searxng_client import SearXNGClient
@@ -28,9 +27,8 @@ class FixtureVerificationError(RuntimeError):
 OFFICIAL_SCHEDULE_DOMAINS = {
     "sparta.cz",
     "fotbal.cz",
-    "ligafotbal.cz",
     "chanceliga.cz",
-    "www.chanceliga.cz",
+    "fkpardubice.cz",
 }
 
 
@@ -43,33 +41,6 @@ def _normal(text: str) -> str:
     text = (text or "").casefold()
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return " ".join(text.split())
-
-
-def _has_team(text: str, name: str) -> bool:
-    normalized_text = _normal(text)
-    normalized_name = _normal(name)
-    if not normalized_name:
-        return False
-    if normalized_name in normalized_text:
-        return True
-    # Permit a shortened name only where a distinctive token (>3 chars) is present.
-    tokens = [t for t in normalized_name.split() if len(t) > 3 and t not in {"football", "club"}]
-    return bool(tokens) and all(t in normalized_text for t in tokens)
-
-
-def _has_date(text: str, kickoff: datetime) -> bool:
-    local = kickoff.date()
-    candidates = {
-        kickoff.strftime("%Y-%m-%d"),
-        kickoff.strftime("%d.%m.%Y"),
-        kickoff.strftime("%d/%m/%Y"),
-        kickoff.strftime("%d.%m.%y"),
-        kickoff.strftime("%d/%m"),
-        kickoff.strftime("%d/%m").lstrip("0"),
-        kickoff.strftime("%B %d, %Y"),
-        kickoff.strftime("%d %B %Y"),
-    }
-    return any(c and c.casefold() in (text or "").casefold() for c in candidates)
 
 
 class FixtureVerifier:
