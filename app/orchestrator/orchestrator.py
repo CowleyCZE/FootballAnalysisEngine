@@ -196,6 +196,7 @@ class MasterOrchestrator:
         run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_M{match_id}_{uuid.uuid4().hex[:4]}"
         now_iso = datetime.now(timezone.utc).isoformat()
         max_cycles = self.config["orchestrator"]["audit_max_cycles"]
+        cutoff_iso = match_identity.data_cutoff_at.isoformat() if match_identity.data_cutoff_at else None
 
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
@@ -206,8 +207,8 @@ class MasterOrchestrator:
                 "SELECT id FROM runs WHERE run_id=?", (run_id,)
             ).fetchone()[0]
             conn.execute(
-                "INSERT INTO pipeline_runs(run_id,match_id,state,cycle,max_cycles,started_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-                (run_id, match_id, MatchState.NEW, 1, max_cycles, now_iso, now_iso),
+                "INSERT INTO pipeline_runs(run_id,match_id,state,cycle,max_cycles,data_cutoff_at,started_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                (run_id, match_id, MatchState.NEW, 1, max_cycles, cutoff_iso, now_iso, now_iso),
             )
 
         self.state_machine.transition_to(run_id, MatchState.DISCOVERY, "Match Identity resolved")
@@ -230,7 +231,7 @@ class MasterOrchestrator:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             run = conn.execute(
-                "SELECT match_id, state, cycle, max_cycles FROM pipeline_runs WHERE run_id = ?",
+                "SELECT match_id, state, cycle, max_cycles, data_cutoff_at FROM pipeline_runs WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
             if not run:
@@ -240,6 +241,14 @@ class MasterOrchestrator:
             state = run["state"]
             cycle = int(run["cycle"])
             max_cycles = int(run["max_cycles"])
+
+            raw_cutoff = run["data_cutoff_at"] if "data_cutoff_at" in run.keys() else None
+            run_cutoff_dt = None
+            if raw_cutoff:
+                try:
+                    run_cutoff_dt = parse_to_utc(raw_cutoff)
+                except Exception:
+                    run_cutoff_dt = None
 
             jobs = conn.execute(
                 "SELECT id, job_type, status, result_json, payload_json "
@@ -282,7 +291,7 @@ class MasterOrchestrator:
             statistics_jobs = [j for j in jobs if j["job_type"] == "STATISTICS"]
             if statistics_jobs and all(j["status"] in terminal for j in statistics_jobs):
                 if any(j["status"] == JobStatus.SUCCESS for j in statistics_jobs):
-                    match_ident = self._get_match_identity_from_id(match_id)
+                    match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                     self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
                     cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
                     self.queue.create_job(
@@ -319,7 +328,7 @@ class MasterOrchestrator:
             )
             if ai_job:
                 ai_res = json.loads(ai_job["result_json"]) if ai_job["result_json"] else {}
-                match_ident = self._get_match_identity_from_id(match_id)
+                match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                 run_db_id = self._get_run_db_id(run_id)
                 self.state_machine.transition_to(run_id, MatchState.AUDITING, "AI Analysis complete")
                 cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
@@ -372,7 +381,9 @@ class MasterOrchestrator:
             )
 
             if audit_status in {"AUDIT_COMPLETE", "PASS", "OK", "COMPLETED"}:
-                if has_critical_cutoff:
+                if run_cutoff_dt is None:
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Pipeline cannot complete because per-run data_cutoff_at is missing or invalid")
+                elif has_critical_cutoff:
                     self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Audit contains critical cutoff issue")
                 elif audit_score is not None and float(audit_score) < 0.3:
                     self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Audit score too low ({audit_score})")
@@ -382,7 +393,7 @@ class MasterOrchestrator:
                         reasons = ", ".join(readiness.blocking_reasons)
                         if cycle < max_cycles:
                             self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Coverage check failed ({reasons}) - cycle {cycle}")
-                            match_ident = self._get_match_identity_from_id(match_id)
+                            match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                             if match_ident:
                                 task_reqs = [
                                     TaskRequirement(
@@ -409,7 +420,7 @@ class MasterOrchestrator:
                     if not required_research:
                         required_research = [{"domain": "GENERAL", "reason": "audit_required"}]
 
-                    match_ident = self._get_match_identity_from_id(match_id)
+                    match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                     if match_ident:
                         task_reqs = []
                         for item in required_research:
@@ -476,7 +487,9 @@ class MasterOrchestrator:
             return
 
         if state == MatchState.FINALIZING and self._are_all_jobs_completed(run_id):
-            if not self._are_all_required_jobs_successful(run_id):
+            if run_cutoff_dt is None:
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Finalizing failed because per-run data_cutoff_at is missing or invalid")
+            elif not self._are_all_required_jobs_successful(run_id):
                 self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Finalizing failed because required jobs were failed or cancelled")
             else:
                 readiness = self.coverage_engine.evaluate_run(run_id, self._get_run_db_id(run_id))

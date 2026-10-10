@@ -228,9 +228,60 @@ def test_insufficient_data_remains_unresolved(orch_db):
     assert state == MatchState.UNRESOLVED
 
 
+def test_concurrent_runs_same_match_different_cutoffs(orch_db):
+    orch = MasterOrchestrator(db_path=orch_db)
+    cutoff1 = datetime(2026, 10, 2, 10, 0, tzinfo=timezone.utc)
+    cutoff2 = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+
+    run_id1 = orch.start_pipeline(10, data_cutoff_at=cutoff1)
+    run_id2 = orch.start_pipeline(10, data_cutoff_at=cutoff2)
+
+    assert run_id1 != run_id2
+
+    # Mark all initial jobs as SUCCESS and set state to CALCULATING for both
+    with sqlite3.connect(orch_db) as conn:
+        conn.execute("UPDATE jobs SET status = 'SUCCESS' WHERE run_id IN (?, ?)", (run_id1, run_id2))
+        conn.execute("UPDATE pipeline_runs SET state = 'CALCULATING' WHERE run_id IN (?, ?)", (run_id1, run_id2))
+
+    orch.tick(run_id1)
+    orch.tick(run_id2)
+
+    with sqlite3.connect(orch_db) as conn:
+        conn.row_factory = sqlite3.Row
+        ai_job1 = conn.execute("SELECT payload_json FROM jobs WHERE run_id = ? AND job_type = 'AI_ANALYSIS'", (run_id1,)).fetchone()
+        ai_job2 = conn.execute("SELECT payload_json FROM jobs WHERE run_id = ? AND job_type = 'AI_ANALYSIS'", (run_id2,)).fetchone()
+
+    payload1 = json.loads(ai_job1["payload_json"])
+    payload2 = json.loads(ai_job2["payload_json"])
+
+    assert payload1["data_cutoff_at"] == cutoff1.isoformat()
+    assert payload2["data_cutoff_at"] == cutoff2.isoformat()
+
+
+def test_missing_cutoff_transition_to_unresolved_despite_audit_complete(orch_db):
+    orch = MasterOrchestrator(db_path=orch_db)
+    run_id = orch.start_pipeline(10, data_cutoff_at=None)
+
+    with sqlite3.connect(orch_db) as conn:
+        conn.execute("UPDATE pipeline_runs SET state = 'AUDITING' WHERE run_id = ?", (run_id,))
+        audit_res = {"status": "AUDIT_COMPLETE", "audit_score": 1.0, "issues": []}
+        conn.execute(
+            "INSERT INTO jobs(job_id, job_type, match_id, run_id, status, result_json, priority) VALUES ('JOB-AUDIT-NONE', 'AUDIT', 10, ?, 'SUCCESS', ?, 100)",
+            (run_id, json.dumps(audit_res)),
+        )
+
+    orch.tick(run_id)
+
+    with sqlite3.connect(orch_db) as conn:
+        state = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()[0]
+
+    assert state == MatchState.UNRESOLVED
+
+
 def test_valid_verified_match_completes_end_to_end(orch_db):
     orch = MasterOrchestrator(db_path=orch_db)
-    run_id = orch.start_pipeline(10)
+    cutoff = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+    run_id = orch.start_pipeline(10, data_cutoff_at=cutoff)
 
     # 1. Complete research tasks
     with sqlite3.connect(orch_db) as conn:

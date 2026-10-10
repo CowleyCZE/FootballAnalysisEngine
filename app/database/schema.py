@@ -31,7 +31,7 @@ def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
         ("finished_at", "TEXT"), ("heartbeat_at", "TEXT"), ("next_attempt_at", "TEXT"), ("error", "TEXT"), ("error_text", "TEXT"),
     ):
         _ensure_column(conn, "jobs", column, definition)
-    for column, definition in (("match_id", "INTEGER"), ("cycle", "INTEGER NOT NULL DEFAULT 1"), ("max_cycles", "INTEGER NOT NULL DEFAULT 3"), ("finished_at", "TEXT"), ("error_text", "TEXT")):
+    for column, definition in (("match_id", "INTEGER"), ("cycle", "INTEGER NOT NULL DEFAULT 1"), ("max_cycles", "INTEGER NOT NULL DEFAULT 3"), ("data_cutoff_at", "TEXT"), ("finished_at", "TEXT"), ("error_text", "TEXT")):
         _ensure_column(conn, "pipeline_runs", column, definition)
     for column, definition in (("worker_name", "TEXT"), ("worker_version", "TEXT"), ("worker_type", "TEXT"), ("status", "TEXT"), ("capabilities_json", "TEXT"), ("last_heartbeat", "TEXT"), ("last_seen", "TEXT"), ("updated_at", "TEXT"), ("current_job_id", "TEXT"), ("metadata_json", "TEXT"), ("registered_at", "TEXT")):
         _ensure_column(conn, "workers", column, definition)
