@@ -116,15 +116,16 @@ class FixtureVerifier:
 
     @staticmethod
     def _fixture_pair_ok(text: str, home: str, away: str) -> bool:
-        normalized = _normal(text)
-        home_name, away_name = _normal(home), _normal(away)
-        home_pos, away_pos = normalized.find(home_name), normalized.find(away_name)
+        # Locate full team names in the original string so punctuation between
+        # them (for example the dash in "Sparta - Pardubice") remains available.
+        raw = (text or "").casefold()
+        home_raw, away_raw = home.casefold(), away.casefold()
+        home_pos, away_pos = raw.find(home_raw), raw.find(away_raw)
         if home_pos < 0 or away_pos < 0 or home_pos >= away_pos:
             return False
-        between = normalized[home_pos + len(home_name):away_pos]
-        # Do not accept two team names mentioned in unrelated sentences.
-        return bool(re.search(r"\b(vs|v|versus|at)\b|[-–]", between))
-
+        between = raw[home_pos + len(home_raw):away_pos]
+        # Both teams must form one explicit fixture pair, not unrelated mentions.
+        return bool(re.search(r"\\b(vs|v|versus|at)\\b|[-–]", between))
     @staticmethod
     def _competition_ok(text: str, competition: str) -> bool:
         normalized_text = _normal(text)
