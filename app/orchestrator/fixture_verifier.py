@@ -97,7 +97,7 @@ class FixtureVerifier:
     @staticmethod
     def _parse_candidate_datetime(text: str) -> datetime | None:
         patterns = (
-            r"(?P<day>\d{1,2})[./](?P<month>\d{1,2})[./](?P<year>20\d{2})[ ,T]+(?P<hour>\d{1,2}):(?P<minute>\d{2})",
+            r"(?P<day>\d{1,2})\s*[./]\s*(?P<month>\d{1,2})\s*[./]\s*(?P<year>20\d{2})\.?\s*[ ,T]+\s*(?P<hour>\d{1,2}):(?P<minute>\d{2})",
             r"(?P<year>20\d{2})-(?P<month>\d{1,2})-(?P<day>\d{1,2})[ T]+(?P<hour>\d{1,2}):(?P<minute>\d{2})",
         )
         for pattern in patterns:
