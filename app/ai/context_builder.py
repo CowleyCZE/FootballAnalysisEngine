@@ -45,11 +45,21 @@ class ContextBuilder:
             except Exception as err:
                 logger.warning(f"Failed to enrich match_info from DB: {err}")
 
-        if not info.get("data_cutoff_at"):
-            if info.get("cutoff_datetime"):
-                info["data_cutoff_at"] = info["cutoff_datetime"]
-            elif info.get("cutoff"):
-                info["data_cutoff_at"] = info["cutoff"]
+        raw_cutoff = (
+            info.get("data_cutoff_at")
+            or info.get("cutoff_datetime")
+            or info.get("cutoff")
+            or info.get("scheduled_at")
+        )
+        if raw_cutoff:
+            try:
+                from app.orchestrator.match_resolver import parse_to_utc
+                parse_to_utc(raw_cutoff)
+                info["data_cutoff_at"] = str(raw_cutoff)
+            except Exception:
+                info["data_cutoff_at"] = None
+        else:
+            info["data_cutoff_at"] = None
 
         info["match_id"] = match_id
         return info

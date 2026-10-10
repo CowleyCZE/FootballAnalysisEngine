@@ -64,11 +64,14 @@ class AdversarialAuditor:
         issues.extend(ev_issues)
 
         # 2. Cutoff & Freshness Audit
-        cutoff_raw = (
-            data_cutoff_at
-            or ai_analysis.get("data_cutoff_at")
-            or ai_analysis.get("match", {}).get("data_cutoff_at")
-        )
+        cutoff_candidates = [
+            data_cutoff_at,
+            ai_analysis.get("data_cutoff_at"),
+            ai_analysis.get("match", {}).get("data_cutoff_at")
+        ]
+        non_null_candidates = [c for c in cutoff_candidates if c is not None and str(c).strip() != ""]
+
+        cutoff_raw = non_null_candidates[0] if non_null_candidates else None
 
         parsed_cutoff = None
         cutoff_valid = False
@@ -80,11 +83,33 @@ class AdversarialAuditor:
                 logger.warning(f"Invalid data_cutoff_at format '{cutoff_raw}': {e}")
                 cutoff_valid = False
 
+        # Check for conflicting cutoff values if multiple provided
+        parsed_candidates = []
+        for cand in non_null_candidates:
+            try:
+                parsed_candidates.append(parse_to_utc(cand))
+            except Exception:
+                pass
+
+        has_conflicting_cutoff = False
+        if len(parsed_candidates) > 1:
+            first_c = parsed_candidates[0]
+            if any(c != first_c for c in parsed_candidates[1:]):
+                has_conflicting_cutoff = True
+
         if not cutoff_valid or parsed_cutoff is None:
             issues.append({
                 "type": "cutoff_missing",
                 "severity": "CRITICAL",
                 "description": "Není k dispozici žádný platný data_cutoff_at pro audit.",
+                "evidence_ids": [],
+                "requires_research": False,
+            })
+        elif has_conflicting_cutoff:
+            issues.append({
+                "type": "cutoff_violation",
+                "severity": "CRITICAL",
+                "description": "Detekovány konfliktní hodnoty data_cutoff_at v různých polích.",
                 "evidence_ids": [],
                 "requires_research": False,
             })

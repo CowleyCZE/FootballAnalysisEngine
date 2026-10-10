@@ -466,11 +466,14 @@ class MasterOrchestrator:
             return
 
         if state == MatchState.FINALIZING and self._are_all_jobs_completed(run_id):
-            readiness = self.coverage_engine.evaluate_run(run_id, self._get_run_db_id(run_id))
-            if readiness.ready:
-                self.state_machine.transition_to(run_id, MatchState.COMPLETED, "All jobs completed and coverage passed")
+            if not self._are_all_required_jobs_successful(run_id):
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Finalizing failed because required jobs were failed or cancelled")
             else:
-                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Finalizing failed coverage check: {', '.join(readiness.blocking_reasons)}")
+                readiness = self.coverage_engine.evaluate_run(run_id, self._get_run_db_id(run_id))
+                if readiness.ready:
+                    self.state_machine.transition_to(run_id, MatchState.COMPLETED, "All jobs completed and coverage passed")
+                else:
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Finalizing failed coverage check: {', '.join(readiness.blocking_reasons)}")
 
     def _get_run_db_id(self, run_id: str) -> int:
         with sqlite3.connect(self.db_path) as conn:
@@ -493,6 +496,33 @@ class MasterOrchestrator:
             return False
         terminal = {JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.CANCELLED}
         return all(row["status"] in terminal for row in rows)
+
+    def _are_all_required_jobs_successful(self, run_id: str) -> bool:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, status, payload_json FROM jobs WHERE run_id = ?",
+            (run_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            return False
+
+        for row in rows:
+            status = row["status"]
+            payload = {}
+            if row["payload_json"]:
+                try:
+                    payload = json.loads(row["payload_json"])
+                except Exception:
+                    pass
+
+            is_required = payload.get("required", True)
+            if is_required and status != JobStatus.SUCCESS:
+                return False
+        return True
 
 
 class MatchOrchestrator:
