@@ -112,6 +112,54 @@ class FixtureVerifier:
             raise FixtureVerificationError("Ověřování skončilo bez výsledku.")
         return outcome[0]
 
+    @staticmethod
+    def _local_fixture_datetime(value: str) -> datetime:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            from zoneinfo import ZoneInfo
+            dt = dt.replace(tzinfo=ZoneInfo("Europe/Prague"))
+        return dt
+
+    @staticmethod
+    def _parse_candidate_datetime(text: str) -> datetime | None:
+        patterns = [
+            r"(?P<day>\d{1,2})[./](?P<month>\d{1,2})[./](?P<year>20\d{2})(?:[ ,T]+(?P<hour>\d{1,2}):(?P<minute>\d{2}))?",
+            r"(?P<year>20\d{2})-(?P<month>\d{1,2})-(?P<day>\d{1,2})(?:[ T]+(?P<hour>\d{1,2}):(?P<minute>\d{2}))?",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if not match:
+                continue
+            parts = match.groupdict()
+            try:
+                return datetime(int(parts["year"]), int(parts["month"]), int(parts["day"]), int(parts["hour"] or 0), int(parts["minute"] or 0))
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
+    def _direction_ok(text: str, home: str, away: str) -> bool:
+        normalized = _normal(text)
+        h, a = _normal(home), _normal(away)
+        hpos, apos = normalized.find(h), normalized.find(a)
+        if hpos < 0 or apos < 0:
+            return False
+        if not any(separator in normalized for separator in (" vs ", " v ", " - ", " – ", " at ")):
+            return False
+        return hpos < apos
+
+    @staticmethod
+    def _competition_ok(text: str, competition: str) -> bool:
+        name = _normal(competition)
+        aliases = {"chance liga": ("chance liga", "1 liga", "ceska chance liga")}
+        normalized = _normal(text)
+        return any(_normal(alias) in normalized for alias in aliases.get(name, (name,)) if alias)
+
+    @staticmethod
+    def _team_ok(text: str, team: str) -> bool:
+        return _normal(team) in _normal(text)
+
+
     async def verify(self, match_id: int) -> dict[str, Any]:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -129,7 +177,7 @@ class FixtureVerifier:
         if not match:
             raise FixtureVerificationError(f"Zápas ID {match_id} nebyl nalezen.")
 
-        kickoff = parse_to_utc(match["scheduled_at"])
+        kickoff = self._local_fixture_datetime(match["scheduled_at"])
         competition = match["competition_name"] or ""
         if not competition:
             raise FixtureVerificationError("Zápas nemá určenou soutěž.")
@@ -174,9 +222,14 @@ class FixtureVerifier:
         for result in deduped.values():
             host = _domain(result.url)
             text = f"{result.title}\n{result.content}"
-            team_ok = _has_team(text, match["home_team"]) and _has_team(text, match["away_team"])
-            comp_ok = _has_team(text, competition)
-            date_ok = _has_date(text, kickoff)
+            home_ok = self._team_ok(text, match["home_team"])
+            away_ok = self._team_ok(text, match["away_team"])
+            team_ok = home_ok and away_ok
+            comp_ok = self._competition_ok(text, competition)
+            candidate_dt = self._parse_candidate_datetime(text)
+            date_ok = candidate_dt is not None and candidate_dt.date() == kickoff.date()
+            time_ok = candidate_dt is not None and candidate_dt.hour == kickoff.hour and candidate_dt.minute == kickoff.minute
+            direction_ok = self._direction_ok(text, match["home_team"], match["away_team"])
             official = host in self.official_domains or any(host.endswith("." + d) for d in self.official_domains)
             item = {
                 "url": result.url,
@@ -187,10 +240,12 @@ class FixtureVerifier:
                 "away_team_match": _has_team(text, match["away_team"]),
                 "competition_match": comp_ok,
                 "date_match": date_ok,
+                "time_match": time_ok,
+                "home_away_order_match": direction_ok,
                 "retrieved_at": datetime.now(timezone.utc).isoformat(),
                 "snippet": (result.content or "")[:2000],
             }
-            if official and team_ok and comp_ok and date_ok:
+            if official and team_ok and comp_ok and date_ok and time_ok and direction_ok:
                 evidence.append(item)
             else:
                 rejected.append(item)
@@ -198,12 +253,12 @@ class FixtureVerifier:
         # A single source can be a direct official schedule. If the search provider
         # gives no explicit match/date snippet, we do not promote the record.
         unique_domains = {e["domain"] for e in evidence}
-        verified = len(evidence) >= 1 and len(unique_domains) >= 1
+        verified = len(evidence) >= 2 and len(unique_domains) >= 2
         outcome = "RESOLVED" if verified else "UNVERIFIED"
         message = (
-            "Ověření úspěšné: nalezen oficiální zdroj s oběma týmy, soutěží a přesným datem."
+            "Ověření úspěšné: nejméně dva nezávislé oficiální zdroje potvrzují oba týmy, pořadí, soutěž, datum a čas."
             if verified else
-            "Ověření neúspěšné: nebyl nalezen oficiální výsledek obsahující oba týmy, soutěž a přesné datum. Záznam zůstává nezměněn."
+            "Ověření neúspěšné: systém vyžaduje nejméně dva nezávislé oficiální zdroje potvrzující oba týmy, pořadí, soutěž, datum a čas. Záznam zůstává nezměněn."
         )
 
         with sqlite3.connect(self.db_path, timeout=30) as conn:
