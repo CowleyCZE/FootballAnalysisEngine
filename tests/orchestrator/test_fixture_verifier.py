@@ -5,6 +5,7 @@ import pytest
 from app.database.schema import initialize_database
 from app.orchestrator.fixture_verifier import FixtureVerifier
 
+
 class FakeSearXNGClient:
     def __init__(self, results):
         self.results = results
@@ -66,19 +67,21 @@ def test_two_independent_official_sources_resolve_and_record_evidence(fixture_db
 @pytest.mark.parametrize(
     "title,content",
     [
-        ("Sparta - Pardubice", "AC Sparta Praha vs FK Pardubice, Chance Liga, 18.10.2026"),
-        ("Sparta - Pardubice", "AC Sparta Praha vs FK Pardubice, Premier League, 11.10.2026"),
-        ("Sparta news", "AC Sparta Praha transfer news. Chance Liga."),
-        ("Sparta - Pardubice", "FK Pardubice vs AC Sparta Praha, Chance Liga, 11.10.2026"),
+        ("Sparta - Pardubice", "AC Sparta Praha vs FK Pardubice, Chance Liga, 18.10.2026, 18:00"),
+        ("Sparta - Pardubice", "AC Sparta Praha vs FK Pardubice, Premier League, 11.10.2026, 18:00"),
+        ("Sparta news", "AC Sparta Praha transfer news. Chance Liga, 11.10.2026, 18:00"),
+        ("Sparta - Pardubice", "FK Pardubice - AC Sparta Praha, Chance Liga, 11.10.2026, 18:00"),
+        ("Sparta - Pardubice", "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 19:00"),
     ],
 )
-def test_invalid_fixture_does_not_resolve(fixture_db, title, content):
+def test_wrong_or_incomplete_fixture_does_not_resolve(fixture_db, title, content):
     verifier = FixtureVerifier(
         db_path=fixture_db,
         search_engine=FakeSearchEngine([
             result("https://www.chanceliga.cz/zapasy", title, content),
+            result("https://www.fotbal.cz/zapasy", title, content),
         ]),
-        official_domains={"chanceliga.cz"},
+        official_domains={"chanceliga.cz", "fotbal.cz"},
     )
     import asyncio
     report = asyncio.run(verifier.verify(7))
@@ -92,16 +95,19 @@ def test_unofficial_article_cannot_resolve(fixture_db):
         db_path=fixture_db,
         search_engine=FakeSearchEngine([
             result("https://example.com/news", "Match preview",
-                   "AC Sparta Praha vs FK Pardubice, Chance Liga, 11.10.2026"),
+                   "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
+            result("https://example.org/news", "Match preview",
+                   "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
         ]),
-        official_domains={"chanceliga.cz"},
+        official_domains={"chanceliga.cz", "fotbal.cz"},
     )
     import asyncio
     report = asyncio.run(verifier.verify(7))
     assert report["outcome"] == "UNVERIFIED"
-    assert report["rejected_sources"][0]["official_domain"] is False
+    assert all(source["official_domain"] is False for source in report["rejected_sources"])
 
-def test_requires_two_independent_official_domains(fixture_db):
+
+def test_two_urls_from_same_official_domain_are_insufficient(fixture_db):
     verifier = FixtureVerifier(
         db_path=fixture_db,
         search_engine=FakeSearchEngine([
@@ -111,24 +117,6 @@ def test_requires_two_independent_official_domains(fixture_db):
                    "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
         ]),
         official_domains={"chanceliga.cz"},
-    )
-    import asyncio
-    report = asyncio.run(verifier.verify(7))
-    assert report["outcome"] == "UNVERIFIED"
-    with sqlite3.connect(fixture_db) as conn:
-        assert conn.execute("SELECT status FROM matches WHERE id=7").fetchone()[0] == "scheduled"
-
-
-def test_swapped_home_away_order_cannot_verify(fixture_db):
-    verifier = FixtureVerifier(
-        db_path=fixture_db,
-        search_engine=FakeSearchEngine([
-            result("https://www.chanceliga.cz/zapasy/1", "Fixture 1",
-                   "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
-            result("https://www.fotbal.cz/zapasy/1", "Fixture 2",
-                   "FK Pardubice - AC Sparta Praha, Chance Liga, 11.10.2026, 18:00"),
-        ]),
-        official_domains={"chanceliga.cz", "fotbal.cz"},
     )
     import asyncio
     report = asyncio.run(verifier.verify(7))
