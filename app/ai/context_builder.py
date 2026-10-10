@@ -42,14 +42,44 @@ class ContextBuilder:
                             info["scheduled_at"] = row["scheduled_at"]
                         if not info.get("venue") and row["venue"]:
                             info["venue"] = row["venue"]
+
+                    if not info.get("data_cutoff_at") and not info.get("cutoff_datetime") and not info.get("cutoff"):
+                        r_row = None
+                        if info.get("run_id"):
+                            r_row = conn.execute("SELECT data_cutoff_at FROM pipeline_runs WHERE run_id = ?", (str(info["run_id"]),)).fetchone()
+                        elif info.get("run_db_id"):
+                            r_row = conn.execute("SELECT pr.data_cutoff_at FROM pipeline_runs pr JOIN runs r ON r.run_id = pr.run_id WHERE r.id = ?", (int(info["run_db_id"]),)).fetchone()
+                        if r_row and r_row["data_cutoff_at"]:
+                            info["data_cutoff_at"] = r_row["data_cutoff_at"]
             except Exception as err:
                 logger.warning(f"Failed to enrich match_info from DB: {err}")
 
-        if not info.get("data_cutoff_at"):
-            if info.get("cutoff_datetime"):
-                info["data_cutoff_at"] = info["cutoff_datetime"]
-            elif info.get("cutoff"):
-                info["data_cutoff_at"] = info["cutoff"]
+        cutoff_candidates = [
+            info.get("data_cutoff_at"),
+            info.get("cutoff_datetime"),
+            info.get("cutoff")
+        ]
+        non_null_candidates = [c for c in cutoff_candidates if c is not None and str(c).strip() != ""]
+
+        parsed_candidates = []
+        has_invalid = False
+        for cand in non_null_candidates:
+            try:
+                from app.orchestrator.match_resolver import parse_to_utc
+                parsed_candidates.append(parse_to_utc(cand))
+            except Exception:
+                has_invalid = True
+
+        has_conflict = False
+        if len(parsed_candidates) > 1:
+            first_c = parsed_candidates[0]
+            if any(c != first_c for c in parsed_candidates[1:]):
+                has_conflict = True
+
+        if not non_null_candidates or has_invalid or has_conflict:
+            info["data_cutoff_at"] = None
+        else:
+            info["data_cutoff_at"] = parsed_candidates[0].isoformat()
 
         info["match_id"] = match_id
         return info
@@ -160,6 +190,9 @@ class ContextBuilder:
         run_db_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         match_id = match_info.get("match_id") or match_info.get("id")
+        if run_db_id is not None and "run_db_id" not in match_info:
+            match_info = dict(match_info)
+            match_info["run_db_id"] = run_db_id
         enriched_match_info = self.enrich_match_info(match_info, match_id)
 
         if not claims and match_id and self.db_path:

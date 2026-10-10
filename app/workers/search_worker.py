@@ -59,11 +59,21 @@ class SearchWorker:
             reason=str(payload.get("reason") or ""),
         )
 
+        cutoff_raw = payload.get("data_cutoff_at") or payload.get("cutoff_datetime") or payload.get("cutoff")
+        cutoff_dt = None
+        if cutoff_raw:
+            try:
+                from app.orchestrator.match_resolver import parse_to_utc
+                cutoff_dt = parse_to_utc(cutoff_raw)
+            except Exception:
+                cutoff_dt = None
+
         results = asyncio.run(
             engine.search(
                 query=spec,
                 team=str(payload.get("team") or ""),
                 topic_terms=list(payload.get("topic_terms") or []),
+                data_cutoff_at=cutoff_dt,
             )
         )
 

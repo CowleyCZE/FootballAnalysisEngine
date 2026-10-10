@@ -146,6 +146,10 @@ class MatchResolver:
                 f"(pouze explicitní stav RESOLVED je povolen pro spuštění analýzy)."
             )
 
+        cutoff_dt = None
+        if getattr(request, "data_cutoff_at", None) is not None:
+            cutoff_dt = parse_to_utc(request.data_cutoff_at, getattr(request, "timezone", "Europe/Prague"))
+
         return MatchIdentity(
             match_id=match_data["match_id"],
             home_team_id=match_data["home_team_id"],
@@ -155,7 +159,7 @@ class MatchResolver:
             away_team=match_data["away_team"] or request.away_team,
             competition=match_data["competition"] or request.competition,
             scheduled_at=db_utc,
-            data_cutoff_at=db_utc,
+            data_cutoff_at=cutoff_dt,
             venue=match_data["venue"] if "venue" in match_data.keys() else None,
             status=match_status,
         )

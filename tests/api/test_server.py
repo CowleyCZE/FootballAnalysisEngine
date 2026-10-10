@@ -170,3 +170,25 @@ def test_job_result_triggers_autonomous_tick(api_test_db):
     # Pipeline should have advanced past DISCOVERY automatically
     status_resp = client.get(f"/api/analysis/{run_id}", headers=AUTH_HEADERS)
     assert status_resp.json()["state"] != "DISCOVERY"
+
+
+def test_api_result_unresolved_returns_insufficient_data(api_test_db):
+    client = TestClient(server_module.app)
+    start_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)
+    run_id = start_resp.json()["run_id"]
+
+    # Force run into UNRESOLVED state
+    with sqlite3.connect(api_test_db) as conn:
+        conn.execute("UPDATE pipeline_runs SET state = 'UNRESOLVED', error_text = 'Cutoff missing' WHERE run_id = ?", (run_id,))
+        # Insert mock successful AI analysis job
+        conn.execute(
+            "INSERT INTO jobs (job_id, job_type, match_id, run_id, status, result_json, priority) VALUES ('J-AI-1', 'AI_ANALYSIS', 101, ?, 'SUCCESS', ?, 100)",
+            (run_id, '{"status": "complete", "conclusion": "Fake success"}')
+        )
+
+    res_resp = client.get(f"/api/analysis/{run_id}/result", headers=AUTH_HEADERS)
+    assert res_resp.status_code == 200
+    res_data = res_resp.json()
+    assert res_data["state"] == "UNRESOLVED"
+    assert res_data["ai_analysis"]["status"] == "insufficient_data"
+    assert "nelze prezentovat jako úspěšnou" in res_data["ai_analysis"]["conclusion"]
