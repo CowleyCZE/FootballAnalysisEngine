@@ -141,7 +141,7 @@ fi
 if curl --fail --silent --max-time 2 "http://127.0.0.1:$API_PORT/health" >/dev/null; then
   note "FastAPI již odpovídá na portu $API_PORT; nebyla spuštěna podruhé."
 else
-  nohup "$PYTHON" -m uvicorn app.main:app --host "$API_BIND" --port "$API_PORT" >logs/api.log 2>&1 &
+  nohup "$PYTHON" -m uvicorn app.main:app --host "$API_BIND" --port "$API_PORT" --timeout-keep-alive 65 >logs/api.log 2>&1 &
   API_PID=$!
   sleep 2
   curl --fail --silent --show-error "http://127.0.0.1:$API_PORT/health" >/dev/null || { tail -n 80 logs/api.log >&2 || true; die "FastAPI se nespustila."; }
