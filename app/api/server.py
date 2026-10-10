@@ -181,7 +181,7 @@ def verify_match_fixture(match_id: int):
     from app.orchestrator.fixture_verifier import FixtureVerifier, FixtureVerificationError
 
     try:
-        report = asyncio.run(FixtureVerifier(db_path=DB_PATH).verify(match_id))
+        report = FixtureVerifier(db_path=DB_PATH).verify_sync(match_id)
     except FixtureVerificationError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
