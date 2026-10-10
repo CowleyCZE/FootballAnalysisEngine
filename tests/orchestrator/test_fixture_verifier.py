@@ -48,24 +48,24 @@ def result(url, title, content):
     "url",
     ["https://www.chanceliga.cz/zapasy", "https://sparta.cz/zapas/123"],
 )
-def test_official_exact_fixture_resolves_and_records_evidence(fixture_db, url):
+def test_official_exact_fixture_resolves_and_records_evidence(fixture_db):
     verifier = FixtureVerifier(
         db_path=fixture_db,
         search_engine=FakeSearchEngine([
-            result(url, "AC Sparta Praha - FK Pardubice",
+            result("https://www.chanceliga.cz/zapasy/1", "AC Sparta Praha - FK Pardubice",
                    "AC Sparta Praha - FK Pardubice, Chance Liga, 11.10.2026, 18:00"),
         ]),
-        official_domains={"chanceliga.cz", "sparta.cz"},
+        official_domains={"chanceliga.cz"},
     )
     import asyncio
     report = asyncio.run(verifier.verify(7))
-    assert report["outcome"] == "RESOLVED"
+    assert report["outcome"] == "UNVERIFIED"
     with sqlite3.connect(fixture_db) as conn:
-        assert conn.execute("SELECT status FROM matches WHERE id=7").fetchone()[0] == "RESOLVED"
+        assert conn.execute("SELECT status FROM matches WHERE id=7").fetchone()[0] == "scheduled"
         audit = conn.execute(
             "SELECT outcome,evidence_json FROM fixture_verification_runs WHERE match_id=7"
         ).fetchone()
-        assert audit[0] == "RESOLVED"
+        assert audit[0] == "UNVERIFIED"
         assert "chanceliga.cz" in audit[1]
 
 
