@@ -49,7 +49,6 @@ class ContextBuilder:
             info.get("data_cutoff_at")
             or info.get("cutoff_datetime")
             or info.get("cutoff")
-            or info.get("scheduled_at")
         )
         if raw_cutoff:
             try:

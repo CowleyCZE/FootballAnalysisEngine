@@ -83,13 +83,20 @@ class AdversarialAuditor:
                 logger.warning(f"Invalid data_cutoff_at format '{cutoff_raw}': {e}")
                 cutoff_valid = False
 
-        # Check for conflicting cutoff values if multiple provided
+        # Parse all provided non-null candidates and ensure none are invalid
         parsed_candidates = []
-        for cand in non_null_candidates:
-            try:
-                parsed_candidates.append(parse_to_utc(cand))
-            except Exception:
-                pass
+        has_invalid_candidate = False
+
+        if not non_null_candidates:
+            cutoff_valid = False
+        else:
+            for cand in non_null_candidates:
+                try:
+                    p = parse_to_utc(cand)
+                    parsed_candidates.append(p)
+                except Exception as e:
+                    logger.warning(f"Invalid candidate data_cutoff_at format '{cand}': {e}")
+                    has_invalid_candidate = True
 
         has_conflicting_cutoff = False
         if len(parsed_candidates) > 1:
@@ -97,7 +104,8 @@ class AdversarialAuditor:
             if any(c != first_c for c in parsed_candidates[1:]):
                 has_conflicting_cutoff = True
 
-        if not cutoff_valid or parsed_cutoff is None:
+        if not non_null_candidates or (has_invalid_candidate and not parsed_candidates):
+            cutoff_valid = False
             issues.append({
                 "type": "cutoff_missing",
                 "severity": "CRITICAL",
@@ -105,14 +113,19 @@ class AdversarialAuditor:
                 "evidence_ids": [],
                 "requires_research": False,
             })
-        elif has_conflicting_cutoff:
+        elif has_invalid_candidate or has_conflicting_cutoff:
+            cutoff_valid = False
+            desc = "Detekována neplatná hodnota data_cutoff_at v některém z polí." if has_invalid_candidate else "Detekovány konfliktní hodnoty data_cutoff_at v různých polích."
             issues.append({
                 "type": "cutoff_violation",
                 "severity": "CRITICAL",
-                "description": "Detekovány konfliktní hodnoty data_cutoff_at v různých polích.",
+                "description": desc,
                 "evidence_ids": [],
                 "requires_research": False,
             })
+        else:
+            parsed_cutoff = parsed_candidates[0]
+            cutoff_valid = True
 
         for c in claims:
             for ev in c.get("evidence", []):

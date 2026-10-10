@@ -97,7 +97,7 @@ def test_ai_worker_executes_with_valid_claims_mock(phase3_db, monkeypatch):
 
     monkeypatch.setattr("app.workers.ai_worker.OllamaClient", MockOllama)
 
-    res = AIWorker.execute({"match_id": 88, "run_db_id": 1, "db_path": phase3_db})
+    res = AIWorker.execute({"match_id": 88, "run_db_id": 1, "db_path": phase3_db, "data_cutoff_at": "2026-10-20T20:00:00+00:00"})
 
     assert res["status"] == "complete"
     assert res["match_id"] == 88
