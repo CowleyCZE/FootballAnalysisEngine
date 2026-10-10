@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS research_tasks (
     required INTEGER NOT NULL DEFAULT 0,
     priority INTEGER NOT NULL DEFAULT 50,
     capabilities_json TEXT NOT NULL DEFAULT '[]',
-    data_cutoff_at TEXT NOT NULL,
+    data_cutoff_at TEXT,
     home_team TEXT NOT NULL,
     away_team TEXT NOT NULL,
     competition TEXT NOT NULL,

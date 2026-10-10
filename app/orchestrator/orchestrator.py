@@ -43,7 +43,7 @@ class MasterOrchestrator:
         self.coverage_engine = CoverageEngine(db_path=db_path)
         init_database_schema(db_path)
 
-    def _get_match_identity_from_id(self, match_id: int) -> Optional[MatchIdentity]:
+    def _get_match_identity_from_id(self, match_id: int, data_cutoff_at: Optional[datetime] = None) -> Optional[MatchIdentity]:
         """Načte MatchIdentity z databáze na základě match_id."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -74,6 +74,11 @@ class MasterOrchestrator:
                 scheduled_dt = parse_to_utc(scheduled_str)
             except Exception:
                 return None
+
+            cutoff_dt = None
+            if data_cutoff_at is not None:
+                cutoff_dt = parse_to_utc(data_cutoff_at)
+
             return MatchIdentity(
                 match_id=row["match_id"],
                 home_team_id=row["home_team_id"],
@@ -83,7 +88,7 @@ class MasterOrchestrator:
                 away_team=row["away_team"] or f"Team_{row['away_team_id']}",
                 competition=row["competition"] or "Unknown Competition",
                 scheduled_at=scheduled_dt,
-                data_cutoff_at=scheduled_dt,
+                data_cutoff_at=cutoff_dt,
                 venue=row["venue"] if "venue" in row.keys() else None,
                 status=match_status,
             )
@@ -114,10 +119,12 @@ class MasterOrchestrator:
                     task_uuid_to_job_pk[task.task_uuid] = int(job_pk)
                     continue
 
+                cutoff_iso = match_identity.data_cutoff_at.isoformat() if match_identity.data_cutoff_at else None
+
                 if row:
                     task_id = int(row["id"])
                 else:
-                    cur = conn.execute("INSERT INTO research_tasks(run_id,run_db_id,match_id,task_uuid,domain,task_type,description,required,priority,capabilities_json,data_cutoff_at,home_team,away_team,competition,scheduled_at,venue,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id,run_db_id,match_id,task.task_uuid,task.domain,task.task_type,task.description,1 if task.required else 0,task.priority,json.dumps(task.capabilities_required),match_identity.data_cutoff_at.isoformat(),match_identity.home_team,match_identity.away_team,match_identity.competition,match_identity.scheduled_at.isoformat(),match_identity.venue,"PLANNED"))
+                    cur = conn.execute("INSERT INTO research_tasks(run_id,run_db_id,match_id,task_uuid,domain,task_type,description,required,priority,capabilities_json,data_cutoff_at,home_team,away_team,competition,scheduled_at,venue,status) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (run_id,run_db_id,match_id,task.task_uuid,task.domain,task.task_type,task.description,1 if task.required else 0,task.priority,json.dumps(task.capabilities_required),cutoff_iso,match_identity.home_team,match_identity.away_team,match_identity.competition,match_identity.scheduled_at.isoformat(),match_identity.venue,"PLANNED"))
                     task_id = int(cur.lastrowid)
 
                 job_type = _TASK_TYPE_TO_JOB_TYPE.get(task.task_type, "RESEARCH")
@@ -138,8 +145,9 @@ class MasterOrchestrator:
                     "competition": match_identity.competition,
                     "scheduled_at": match_identity.scheduled_at.isoformat(),
                     "venue": match_identity.venue,
-                    "cutoff_datetime": match_identity.data_cutoff_at.isoformat(),
-                    "cutoff": match_identity.data_cutoff_at.isoformat(),
+                    "data_cutoff_at": cutoff_iso,
+                    "cutoff_datetime": cutoff_iso,
+                    "cutoff": cutoff_iso,
                     "capabilities_required": task.capabilities_required,
                     "worker_capability": job_type,
                 }
@@ -172,9 +180,9 @@ class MasterOrchestrator:
             conn.commit()
         return created
 
-    def start_pipeline(self, match_id: int) -> str:
+    def start_pipeline(self, match_id: int, data_cutoff_at: Optional[datetime] = None) -> str:
         """Spustí pipeline pro existující zápas: Match Identity → Research Planner → Jobs."""
-        match_identity = self._get_match_identity_from_id(match_id)
+        match_identity = self._get_match_identity_from_id(match_id, data_cutoff_at=data_cutoff_at)
         if not match_identity:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -188,6 +196,7 @@ class MasterOrchestrator:
         run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_M{match_id}_{uuid.uuid4().hex[:4]}"
         now_iso = datetime.now(timezone.utc).isoformat()
         max_cycles = self.config["orchestrator"]["audit_max_cycles"]
+        cutoff_iso = match_identity.data_cutoff_at.isoformat() if match_identity.data_cutoff_at else None
 
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
@@ -198,8 +207,8 @@ class MasterOrchestrator:
                 "SELECT id FROM runs WHERE run_id=?", (run_id,)
             ).fetchone()[0]
             conn.execute(
-                "INSERT INTO pipeline_runs(run_id,match_id,state,cycle,max_cycles,started_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-                (run_id, match_id, MatchState.NEW, 1, max_cycles, now_iso, now_iso),
+                "INSERT INTO pipeline_runs(run_id,match_id,state,cycle,max_cycles,data_cutoff_at,started_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                (run_id, match_id, MatchState.NEW, 1, max_cycles, cutoff_iso, now_iso, now_iso),
             )
 
         self.state_machine.transition_to(run_id, MatchState.DISCOVERY, "Match Identity resolved")
@@ -212,7 +221,7 @@ class MasterOrchestrator:
         """Vyhledá nebo založí zápas v DB a spustí pro něj kanonickou pipeline."""
         resolver = MatchResolver(db_path=self.db_path)
         match_identity = resolver.resolve_or_create(request)
-        return self.start_pipeline(match_identity.match_id)
+        return self.start_pipeline(match_identity.match_id, data_cutoff_at=match_identity.data_cutoff_at)
 
     def tick(self, run_id: str):
         """Provede jeden deterministický krok pipeline a řídí joby pouze daného runu."""
@@ -222,7 +231,7 @@ class MasterOrchestrator:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             run = conn.execute(
-                "SELECT match_id, state, cycle, max_cycles FROM pipeline_runs WHERE run_id = ?",
+                "SELECT match_id, state, cycle, max_cycles, data_cutoff_at FROM pipeline_runs WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
             if not run:
@@ -232,6 +241,14 @@ class MasterOrchestrator:
             state = run["state"]
             cycle = int(run["cycle"])
             max_cycles = int(run["max_cycles"])
+
+            raw_cutoff = run["data_cutoff_at"] if "data_cutoff_at" in run.keys() else None
+            run_cutoff_dt = None
+            if raw_cutoff:
+                try:
+                    run_cutoff_dt = parse_to_utc(raw_cutoff)
+                except Exception:
+                    run_cutoff_dt = None
 
             jobs = conn.execute(
                 "SELECT id, job_type, status, result_json, payload_json "
@@ -274,8 +291,9 @@ class MasterOrchestrator:
             statistics_jobs = [j for j in jobs if j["job_type"] == "STATISTICS"]
             if statistics_jobs and all(j["status"] in terminal for j in statistics_jobs):
                 if any(j["status"] == JobStatus.SUCCESS for j in statistics_jobs):
-                    match_ident = self._get_match_identity_from_id(match_id)
+                    match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                     self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
+                    cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
                     self.queue.create_job(
                         "AI_ANALYSIS",
                         match_id,
@@ -285,14 +303,14 @@ class MasterOrchestrator:
                             "match_id": match_id,
                             "run_db_id": self._get_run_db_id(run_id),
                             "db_path": self.db_path,
-                            "data_cutoff_at": match_ident.data_cutoff_at.isoformat() if match_ident else None,
+                            "data_cutoff_at": cutoff_str,
                             "match": {
                                 "match_id": match_id,
                                 "home_team": match_ident.home_team if match_ident else "",
                                 "away_team": match_ident.away_team if match_ident else "",
                                 "competition": match_ident.competition if match_ident else "",
                                 "scheduled_at": match_ident.scheduled_at.isoformat() if match_ident else "",
-                                "data_cutoff_at": match_ident.data_cutoff_at.isoformat() if match_ident else "",
+                                "data_cutoff_at": cutoff_str,
                                 "venue": match_ident.venue if match_ident else None,
                             } if match_ident else None,
                         },
@@ -310,9 +328,10 @@ class MasterOrchestrator:
             )
             if ai_job:
                 ai_res = json.loads(ai_job["result_json"]) if ai_job["result_json"] else {}
-                match_ident = self._get_match_identity_from_id(match_id)
+                match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                 run_db_id = self._get_run_db_id(run_id)
                 self.state_machine.transition_to(run_id, MatchState.AUDITING, "AI Analysis complete")
+                cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
                 self.queue.create_job(
                     "AUDIT",
                     match_id,
@@ -321,7 +340,7 @@ class MasterOrchestrator:
                         "ai_analysis": ai_res,
                         "run_id": run_id,
                         "run_db_id": run_db_id,
-                        "data_cutoff_at": match_ident.data_cutoff_at.isoformat() if match_ident else None,
+                        "data_cutoff_at": cutoff_str,
                         "cycle": cycle,
                         "db_path": self.db_path,
                     },
@@ -362,7 +381,9 @@ class MasterOrchestrator:
             )
 
             if audit_status in {"AUDIT_COMPLETE", "PASS", "OK", "COMPLETED"}:
-                if has_critical_cutoff:
+                if run_cutoff_dt is None:
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Pipeline cannot complete because per-run data_cutoff_at is missing or invalid")
+                elif has_critical_cutoff:
                     self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Audit contains critical cutoff issue")
                 elif audit_score is not None and float(audit_score) < 0.3:
                     self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Audit score too low ({audit_score})")
@@ -372,7 +393,7 @@ class MasterOrchestrator:
                         reasons = ", ".join(readiness.blocking_reasons)
                         if cycle < max_cycles:
                             self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Coverage check failed ({reasons}) - cycle {cycle}")
-                            match_ident = self._get_match_identity_from_id(match_id)
+                            match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                             if match_ident:
                                 task_reqs = [
                                     TaskRequirement(
@@ -399,7 +420,7 @@ class MasterOrchestrator:
                     if not required_research:
                         required_research = [{"domain": "GENERAL", "reason": "audit_required"}]
 
-                    match_ident = self._get_match_identity_from_id(match_id)
+                    match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                     if match_ident:
                         task_reqs = []
                         for item in required_research:
@@ -442,6 +463,8 @@ class MasterOrchestrator:
                 and j["status"] in terminal
             ]
             if research_jobs:
+                match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
+                cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
                 self.state_machine.transition_to(run_id, MatchState.REANALYZING, "Research data collected")
                 with sqlite3.connect(self.db_path) as conn:
                     conn.execute(
@@ -458,6 +481,19 @@ class MasterOrchestrator:
                         "match_id": match_id,
                         "run_db_id": self._get_run_db_id(run_id),
                         "cycle": cycle + 1,
+                        "db_path": self.db_path,
+                        "data_cutoff_at": cutoff_str,
+                        "cutoff_datetime": cutoff_str,
+                        "cutoff": cutoff_str,
+                        "match": {
+                            "match_id": match_id,
+                            "home_team": match_ident.home_team if match_ident else "",
+                            "away_team": match_ident.away_team if match_ident else "",
+                            "competition": match_ident.competition if match_ident else "",
+                            "scheduled_at": match_ident.scheduled_at.isoformat() if match_ident else "",
+                            "data_cutoff_at": cutoff_str,
+                            "venue": match_ident.venue if match_ident else None,
+                        } if match_ident else None,
                     },
                     priority=JobPriority.HIGH,
                     run_id=run_id,
@@ -466,11 +502,16 @@ class MasterOrchestrator:
             return
 
         if state == MatchState.FINALIZING and self._are_all_jobs_completed(run_id):
-            readiness = self.coverage_engine.evaluate_run(run_id, self._get_run_db_id(run_id))
-            if readiness.ready:
-                self.state_machine.transition_to(run_id, MatchState.COMPLETED, "All jobs completed and coverage passed")
+            if run_cutoff_dt is None:
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Finalizing failed because per-run data_cutoff_at is missing or invalid")
+            elif not self._are_all_required_jobs_successful(run_id):
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Finalizing failed because required jobs were failed or cancelled")
             else:
-                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Finalizing failed coverage check: {', '.join(readiness.blocking_reasons)}")
+                readiness = self.coverage_engine.evaluate_run(run_id, self._get_run_db_id(run_id))
+                if readiness.ready:
+                    self.state_machine.transition_to(run_id, MatchState.COMPLETED, "All jobs completed and coverage passed")
+                else:
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Finalizing failed coverage check: {', '.join(readiness.blocking_reasons)}")
 
     def _get_run_db_id(self, run_id: str) -> int:
         with sqlite3.connect(self.db_path) as conn:
@@ -494,6 +535,33 @@ class MasterOrchestrator:
         terminal = {JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.CANCELLED}
         return all(row["status"] in terminal for row in rows)
 
+    def _are_all_required_jobs_successful(self, run_id: str) -> bool:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, status, payload_json FROM jobs WHERE run_id = ?",
+            (run_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            return False
+
+        for row in rows:
+            status = row["status"]
+            payload = {}
+            if row["payload_json"]:
+                try:
+                    payload = json.loads(row["payload_json"])
+                except Exception:
+                    pass
+
+            is_required = payload.get("required", True)
+            if is_required and status != JobStatus.SUCCESS:
+                return False
+        return True
+
 
 class MatchOrchestrator:
     """
@@ -512,7 +580,7 @@ class MatchOrchestrator:
         Spustí nový analytický běh delegací na MasterOrchestrator.
         """
         match_identity = self.resolver.resolve_or_create(request)
-        run_id = self.master.start_pipeline(match_identity.match_id)
+        run_id = self.master.start_pipeline(match_identity.match_id, data_cutoff_at=match_identity.data_cutoff_at)
 
         with sqlite3.connect(self.db_path) as conn:
             tasks_count = conn.execute("SELECT COUNT(*) FROM research_tasks WHERE run_id=?", (run_id,)).fetchone()[0]

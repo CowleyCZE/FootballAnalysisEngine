@@ -92,7 +92,7 @@ def test_full_autonomous_pipeline_e2e(e2e_db):
     client = TestClient(server_module.app)
 
     # 1. API Start
-    start_resp = client.post("/api/analysis/start", json={"match_id": 500}, headers=AUTH_HEADERS)
+    start_resp = client.post("/api/analysis/start", json={"match_id": 500, "data_cutoff_at": "2026-10-25T14:00:00Z"}, headers=AUTH_HEADERS)
     assert start_resp.status_code == 200
     run_id = start_resp.json()["run_id"]
     assert run_id
@@ -134,7 +134,7 @@ def test_pipeline_missing_data_insufficient_fallback(e2e_db):
     # Test pipeline execution when AI worker returns insufficient_data fallback.
     # Pipeline MUST finish in UNRESOLVED state (never COMPLETED) when required data is missing.
     client = TestClient(server_module.app)
-    start_resp = client.post("/api/analysis/start", json={"match_id": 500}, headers=AUTH_HEADERS)
+    start_resp = client.post("/api/analysis/start", json={"match_id": 500, "data_cutoff_at": "2026-10-25T14:00:00Z"}, headers=AUTH_HEADERS)
     run_id = start_resp.json()["run_id"]
 
     orchestrator = MasterOrchestrator(db_path=e2e_db)

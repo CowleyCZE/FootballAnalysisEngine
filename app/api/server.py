@@ -59,6 +59,7 @@ class AnalysisStartRequest(BaseModel):
     away_team: Optional[str] = None
     competition: Optional[str] = None
     scheduled_at: Optional[str] = None
+    data_cutoff_at: Optional[str] = None
     timezone: str = "Europe/Prague"
     priority: int = 50
 
@@ -177,10 +178,18 @@ def internal_search(req: SearchInternalRequest):
 
 @app.post("/api/analysis/start", dependencies=[Depends(verify_api_auth)])
 def start_analysis(req: AnalysisStartRequest):
+    cutoff_dt = None
+    if req.data_cutoff_at:
+        try:
+            from app.orchestrator.match_resolver import parse_to_utc
+            cutoff_dt = parse_to_utc(req.data_cutoff_at, req.timezone)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid data_cutoff_at ISO timestamp")
+
     if req.match_id is not None:
         master = MasterOrchestrator(db_path=DB_PATH)
         try:
-            run_id = master.start_pipeline(req.match_id)
+            run_id = master.start_pipeline(req.match_id, data_cutoff_at=cutoff_dt)
             return {
                 "status": "started",
                 "run_id": run_id,
@@ -202,6 +211,7 @@ def start_analysis(req: AnalysisStartRequest):
             scheduled_at=scheduled_dt,
             timezone=req.timezone,
             priority=req.priority,
+            data_cutoff_at=cutoff_dt,
         )
         orchestrator = MatchOrchestrator(db_path=DB_PATH)
         try:
@@ -321,9 +331,20 @@ def get_analysis_result(run_id: str, include_historical: bool = False):
         warnings = []
         if audit_res and isinstance(audit_res, dict) and audit_res.get("warnings"):
             warnings.extend(audit_res.get("warnings"))
-        if run["state"] == "UNRESOLVED":
+
+        is_unresolved = (run["state"] == "UNRESOLVED")
+        missing_cutoff = (not data_cutoff_at or str(data_cutoff_at).strip() == "")
+        missing_required_audit = (audit_res is None or audit_res.get("status") not in ("AUDIT_COMPLETE", "PASS", "OK", "COMPLETED"))
+
+        if is_unresolved or missing_cutoff or missing_required_audit:
             err_msg = run["error_text"] if "error_text" in run.keys() and run["error_text"] else "insufficient data or audit failed"
-            warnings.append(f"Pipeline finished in state UNRESOLVED: {err_msg}")
+            warnings.append(f"Pipeline finished in state UNRESOLVED or unverified audit: {err_msg}")
+            if ai_res and isinstance(ai_res, dict):
+                ai_res = dict(ai_res)
+                ai_res["status"] = "insufficient_data"
+                ai_res["conclusion"] = f"AI analýzu nelze prezentovat jako úspěšnou: {err_msg}"
+                ai_res["home_team_analysis"] = None
+                ai_res["away_team_analysis"] = None
 
         return {
             "run_id": run_id,
