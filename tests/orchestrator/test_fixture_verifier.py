@@ -123,3 +123,18 @@ def test_two_urls_from_same_official_domain_are_insufficient(fixture_db):
     assert report["outcome"] == "UNVERIFIED"
     with sqlite3.connect(fixture_db) as conn:
         assert conn.execute("SELECT status FROM matches WHERE id=7").fetchone()[0] == "scheduled"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("11.10.2026, 18:00", (2026, 10, 11, 18, 0)),
+        ("11. 10. 2026. 18:00", (2026, 10, 11, 18, 0)),
+        ("Sun, 11. 10. 2026. 18:00, AC Sparta Praha - FK Pardubice", (2026, 10, 11, 18, 0)),
+        ("2026-10-11T18:00:00+02:00", (2026, 10, 11, 18, 0)),
+    ],
+)
+def test_candidate_datetime_parses_common_schedule_formats(value, expected):
+    parsed = FixtureVerifier._parse_candidate_datetime(value)
+    assert parsed is not None
+    assert (parsed.year, parsed.month, parsed.day, parsed.hour, parsed.minute) == expected
