@@ -129,7 +129,6 @@ class FixtureVerifier:
     def _team_ok(text: str, team: str) -> bool:
         return _normal(team) in _normal(text)
 
-
     async def verify(self, match_id: int) -> dict[str, Any]:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
