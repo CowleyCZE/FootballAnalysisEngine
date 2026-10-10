@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - football-engine
       - 'fix/**'
   pull_request:
     branches:
