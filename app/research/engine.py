@@ -99,6 +99,8 @@ class ResearchEngine:
             queries = self.query_builder.build_queries(task)
             metrics.queries_count = len(queries)
             search_results = []
+            diag_warnings: List[str] = []
+
             for q in queries[: self.source_policy.get_strategy(task.domain).get("max_queries", len(queries))]:
                 team_name = task.home_team if "HOME" in task.domain else task.away_team if "AWAY" in task.domain else ""
                 res = []
@@ -115,6 +117,10 @@ class ResearchEngine:
                 except Exception as exc:
                     search_err = exc
 
+                diag = getattr(res, "diagnostics", None) or getattr(self.search_adapter, "last_diagnostics", None)
+                if diag and hasattr(diag, "drop_reasons") and diag.drop_reasons:
+                    diag_warnings.extend(diag.drop_reasons)
+
                 try:
                     self.repository.save_query(session_id, q["query"], q["type"], q["hash"], len(res) if res else 0)
                 except Exception as q_err:
@@ -128,7 +134,17 @@ class ResearchEngine:
             metrics.search_results_count = len(search_results)
             if not search_results:
                 self.repository.complete_execution(exec_id, "NO_RESULT")
-                return ResearchResult(task_id=task.task_id, execution_id=exec_uuid, status=ResearchStatus.NO_RESULT, metrics=metrics)
+                metrics.duration_ms = int((time.time() - start_time) * 1000)
+                final_warnings = diag_warnings if diag_warnings else [
+                    f"Vyhledávání nevrátilo žádné použitelné výsledky pro doménu '{task.domain}' (raw_count=0 nebo vše vyřazeno filtrem)."
+                ]
+                return ResearchResult(
+                    task_id=task.task_id,
+                    execution_id=exec_uuid,
+                    status=ResearchStatus.NO_RESULT,
+                    warnings=final_warnings,
+                    metrics=metrics,
+                )
 
             selector_results = [
                 {

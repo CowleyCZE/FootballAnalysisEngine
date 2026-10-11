@@ -148,6 +148,8 @@ class Note9Worker:
             "X-Worker-Token": token,
         })
         self.last_heartbeat = 0.0
+        self.is_online = False
+        self.consecutive_failures = 0
 
     def request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
         url = f"{self.server_url}{path}"
@@ -157,6 +159,10 @@ class Note9Worker:
             try:
                 response = self.session.request(method, url, timeout=self.timeout, **kwargs)
                 response.raise_for_status()
+                if not self.is_online:
+                    log(f"Spojení se serverem navázáno/obnoveno (ONLINE): {safe_url}")
+                    self.is_online = True
+                self.consecutive_failures = 0
                 return response
             except requests.RequestException as exc:
                 error = exc
@@ -169,10 +175,16 @@ class Note9Worker:
                         body = str(detail or payload)
                     except (ValueError, requests.RequestException):
                         body = response.text[:500]
-                err_clean = sanitize_text(f"{exc}; odpověď serveru: {body}" if body else str(exc))
-                log(f"HTTP chyba {method} {safe_url} (pokus {attempt}/{self.max_retries}): {err_clean}")
+                if response is not None and response.status_code in (401, 403):
+                    self.is_online = False
+                    self.consecutive_failures += 1
+                    raise RuntimeError(sanitize_text(f"HTTP {response.status_code}: {body or exc}")) from exc
                 if attempt < self.max_retries:
-                    time.sleep(min(2 ** (attempt - 1), 8))
+                    time.sleep(min(2 ** (attempt - 1), 4))
+
+        was_online = self.is_online
+        self.is_online = False
+        self.consecutive_failures += 1
         response = getattr(error, "response", None)
         server_detail = ""
         if response is not None:
@@ -182,7 +194,12 @@ class Note9Worker:
             except (ValueError, requests.RequestException):
                 server_detail = response.text[:500]
         message = f"{error}; odpověď serveru: {server_detail}" if server_detail else str(error)
-        raise RuntimeError(f"HTTP požadavek selhal: {method} {safe_url}: {sanitize_text(message)}")
+        clean_message = sanitize_text(message)
+        if was_online:
+            log(f"Spojení se serverem přerušeno (OFFLINE): {clean_message}")
+        elif self.consecutive_failures == 1:
+            log(f"Server zatím není dostupný: {clean_message}")
+        raise RuntimeError(f"HTTP požadavek selhal: {method} {safe_url}: {clean_message}") from error
 
     def register(self) -> None:
         response = self.request("POST", "/api/workers/register", json={
@@ -315,12 +332,15 @@ class Note9Worker:
             log(f"Úloha {job_id} ({job_type}) selhala: {sanitize_text(err_msg)}")
 
     def run(self) -> None:
+        import random
         log(f"Start Note9Worker ID={self.worker_id}, Name='{self.worker_name}', Ver={self.worker_version}, Server={sanitize_url(self.server_url)}, Schopnosti={', '.join(self.capabilities)}")
-        self.register()
-        self.heartbeat(force=True)
         while self.running:
             try:
-                self.heartbeat()
+                if not self.is_online:
+                    self.register()
+                    self.heartbeat(force=True)
+                else:
+                    self.heartbeat()
                 job = self.claim()
                 if job:
                     self.process(job)
@@ -329,8 +349,11 @@ class Note9Worker:
             except KeyboardInterrupt:
                 break
             except Exception as exc:
-                log(f"Server nebo worker není dostupný: {sanitize_text(str(exc))}. Další pokus za 10 sekund.")
-                time.sleep(10)
+                err_text = str(exc)
+                if ("401" in err_text or "403" in err_text or "503" in err_text) and self.consecutive_failures <= 1:
+                    log(f"Server vrátil chybový status: {sanitize_text(err_text)}")
+                backoff = min(60.0, (2 ** min(self.consecutive_failures, 6)) + random.uniform(0.5, 2.0))
+                time.sleep(backoff)
         log(f"Ukončování Note9Worker ID={self.worker_id}...")
 
 

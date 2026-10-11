@@ -426,6 +426,42 @@ def show_analysis_results() -> None:
         else:
             print(f"  Audit nebyl vytvořen (aktuální stav pipeline: {st}).")
 
+    # Diagnostika vyhledávání / Research
+    research_jobs = conn.execute(
+        "SELECT job_id, payload_json, result_json, error_text FROM jobs "
+        "WHERE run_id = ? AND job_type = 'RESEARCH' ORDER BY id",
+        (run_id,),
+    ).fetchall() if run_id else []
+    print("\n  --- Diagnostika vyhledávání (Research) ---")
+    if research_jobs:
+        for rj in research_jobs:
+            domain_str = "?"
+            if rj["payload_json"]:
+                try:
+                    p = json.loads(rj["payload_json"])
+                    domain_str = p.get("domain", "?")
+                except Exception:
+                    pass
+            print(f"  Doména {domain_str}:")
+            if rj["result_json"]:
+                try:
+                    res_dict = json.loads(rj["result_json"])
+                    warns = res_dict.get("warnings", []) if isinstance(res_dict, dict) else []
+                    if warns:
+                        for w in warns:
+                            print(f"    ! {w}")
+                    else:
+                        st = res_dict.get("status", "SUCCESS")
+                        print(f"    ✔ Výzkum dokončen se stavem '{st}' (důkazů: {res_dict.get('evidence_count', 0)}, zdrojů: {res_dict.get('sources_count', 0)}).")
+                except Exception:
+                    print(f"    ! {str(rj['result_json'])[:200]}")
+            elif rj["error_text"]:
+                print(f"    ! Chyba: {rj['error_text']}")
+            else:
+                print("    (Čeká na zpracování nebo probíhá.)")
+    else:
+        print("  (Žádné výzkumné joby.)")
+
     # Claims
     run_db = conn.execute("SELECT id FROM runs WHERE run_id = ?", (run_id,)).fetchone() if run_id else None
     claims = conn.execute(

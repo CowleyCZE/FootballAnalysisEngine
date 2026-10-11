@@ -318,3 +318,99 @@ def test_init_database_deduplicates_snapshots_before_unique_index(tmp_path):
         ).fetchall()
     assert rows == [(3.0,)]
     assert indexes == [("uidx_statistical_snapshots_stable",)]
+
+def test_note9_worker_remote_disconnected_reconnect_and_no_job(monkeypatch):
+    from scripts.note9_worker import Note9Worker, DEFAULT_CONFIG
+    import requests
+
+    monkeypatch.setenv("WORKER_API_TOKEN", "test-token")
+    worker = Note9Worker(dict(DEFAULT_CONFIG))
+
+    responses = [
+        requests.exceptions.ConnectionError("RemoteDisconnected: Remote end closed connection without response"),
+        requests.exceptions.ConnectionError("RemoteDisconnected: Remote end closed connection without response"),
+        requests.exceptions.ConnectionError("RemoteDisconnected: Remote end closed connection without response"),
+    ]
+
+    def mock_request(method, url, **kwargs):
+        if responses:
+            res = responses.pop(0)
+            if isinstance(res, Exception):
+                raise res
+            return res
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"status": "no_job"}
+        mock_resp.raise_for_status = MagicMock()
+        return mock_resp
+
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(worker.session, "request", mock_request)
+
+    # Initial request fails due to RemoteDisconnected
+    with pytest.raises(RuntimeError, match="RemoteDisconnected"):
+        worker.claim()
+
+    assert not worker.is_online
+    assert worker.consecutive_failures == 1
+
+    # Next request succeeds with no_job
+    job = worker.claim()
+    assert job is None
+    assert worker.is_online
+    assert worker.consecutive_failures == 0
+
+
+def test_search_diagnostics_recorded_and_warning_generated():
+    from app.search.engine import SearchEngine
+    from app.search.models import QuerySpec
+    from app.research.engine import ResearchEngine
+    from app.research.models import ResearchTask
+    import asyncio
+    from datetime import datetime, timezone
+
+    class MockSearXNGClient:
+        async def search(self, query, language="all", time_range=None):
+            return {
+                "results": [
+                    {
+                        "title": "Arsenal vs Chelsea post-cutoff news",
+                        "url": "https://sports.example/post-cutoff",
+                        "content": "Arsenal vs Chelsea news",
+                        "published_at": "2026-10-05T10:00:00Z",
+                    }
+                ]
+            }
+
+    search_engine = SearchEngine(client=MockSearXNGClient())
+    results = asyncio.run(
+        search_engine.search(
+            QuerySpec(query="Arsenal Chelsea"),
+            team="Arsenal",
+            data_cutoff_at=datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert len(results) == 0
+    assert search_engine.last_diagnostics is not None
+    assert search_engine.last_diagnostics.raw_count == 1
+    assert search_engine.last_diagnostics.cutoff_filtered_count == 0
+    assert len(search_engine.last_diagnostics.drop_reasons) > 0
+
+
+def test_optional_domain_failure_does_not_block_pipeline(fix_db):
+    orc = MasterOrchestrator(db_path=fix_db)
+    run_id = orc.start_pipeline(10, data_cutoff_at=datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc))
+
+    with sqlite3.connect(fix_db) as conn:
+        # Mark required jobs as SUCCESS
+        conn.execute("UPDATE jobs SET status='SUCCESS', result_json='{\"status\": \"SUCCESS\"}' WHERE run_id=? AND job_type IN ('RESEARCH', 'STATISTICS')", (run_id,))
+        # Mark optional job as FAILED
+        conn.execute("INSERT INTO jobs(job_id, run_id, match_id, job_type, status, priority, payload_json) VALUES ('OPT-1', ?, 10, 'RESEARCH', 'FAILED', 30, '{\"required\": false, \"domain\": \"WEATHER\"}')", (run_id,))
+
+    orc.tick(run_id)
+
+    with sqlite3.connect(fix_db) as conn:
+        state = conn.execute("SELECT state FROM pipeline_runs WHERE run_id=?", (run_id,)).fetchone()[0]
+
+    assert state not in ("UNRESOLVED", "FAILED", "DISCOVERY")

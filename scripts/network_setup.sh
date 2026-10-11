@@ -145,43 +145,45 @@ find_terminal_emulator() {
 }
 
 launch_in_new_terminal() {
-  local title=$1 cmd=$2 pass_api_token=${3:-false} term env_file='' quoted_env_file='' launch_cmd
+  local title=$1 cmd=$2 term
   term="$(find_terminal_emulator || true)"
   if [[ -z "$term" ]]; then
     return 1
   fi
 
-  if [[ "$pass_api_token" == true ]]; then
-    local api_token="${WORKER_API_TOKEN:-${API_SECRET_TOKEN:-}}"
-    [[ -n "$api_token" ]] || return 1
-    # Terminal emulators may delegate window creation to a long-lived process
-    # that does not inherit this script's environment. Pass credentials through
-    # a mode-600 temporary file instead of exposing them in argv or logs.
-    umask 077
-    env_file="$(mktemp "${TMPDIR:-/tmp}/fae-api-env.XXXXXX")" || return 1
-    printf 'export WORKER_API_TOKEN=%q\n' "$api_token" > "$env_file"
-    unset api_token
-    printf -v quoted_env_file '%q' "$env_file"
-    launch_cmd="source $quoted_env_file && rm -f $quoted_env_file && cd '$ROOT_DIR' && $cmd; exec bash"
-  else
-    launch_cmd="cd '$ROOT_DIR' && $cmd; exec bash"
-  fi
+  # Bezpečné předání proměnných prostředí bez expozice tokenu v argv/ps
+  local env_file
+  umask 077
+  env_file="$(mktemp "${TMPDIR:-/tmp}/fae_env.XXXXXX")" || return 1
+  chmod 600 "$env_file"
+
+  {
+    printf 'export ROOT_DIR=%q\n' "$ROOT_DIR"
+    if [[ -n "${WORKER_API_TOKEN:-}" ]]; then
+      printf 'export WORKER_API_TOKEN=%q\n' "$WORKER_API_TOKEN"
+    fi
+    if [[ -n "${API_SECRET_TOKEN:-}" ]]; then
+      printf 'export API_SECRET_TOKEN=%q\n' "$API_SECRET_TOKEN"
+    fi
+  } > "$env_file"
+
+  local shell_cmd="source '$env_file' && rm -f '$env_file' && cd '$ROOT_DIR' && $cmd; exec bash"
 
   case "$term" in
     gnome-terminal)
-      gnome-terminal --title="$title" -- bash -c "$launch_cmd" &
+      gnome-terminal --title="$title" -- bash -c "$shell_cmd" &
       ;;
     konsole)
-      konsole -p tabtitle="$title" -e bash -c "$launch_cmd" &
+      konsole -p tabtitle="$title" -e bash -c "$shell_cmd" &
       ;;
     xfce4-terminal)
-      xfce4-terminal --title="$title" --command="bash -c \"$launch_cmd\"" &
+      xfce4-terminal --title="$title" --command="bash -c \"$shell_cmd\"" &
       ;;
     x-terminal-emulator|xterm)
-      "$term" -title "$title" -e bash -c "$launch_cmd" &
+      "$term" -title "$title" -e bash -c "$shell_cmd" &
       ;;
     *)
-      [[ -z "$env_file" ]] || rm -f "$env_file"
+      rm -f "$env_file"
       return 1
       ;;
   esac
@@ -197,13 +199,13 @@ if [[ -n "$PHONE_IP" ]] && ask_yes_no "Zpřístupnit ověřené API do LAN pro N
 fi
 
 if curl --fail --silent --max-time 2 "http://127.0.0.1:$API_PORT/health" >/dev/null; then
-  note "FastAPI již odpovídá na portu $API_PORT; nebyla spuštěna podruhé."
+  note "UPOZORNĚNÍ: FastAPI již odpovídá na portu $API_PORT; nebylo spuštěno podruhé."
   if [[ "$API_BIND" == 0.0.0.0 ]]; then
-    note "Pozor: běžící API nepřevezme token z tohoto spuštění skriptu. Pokud bylo spuštěno bez tokenu, zastavte ho a spusťte setup znovu."
+    note "Běžící API nepřevezme token z tohoto spuštění. Pokud bylo spuštěno bez tokenu nebo se starým tokenem, zastavte ho a spusťte setup znovu."
   fi
 else
   API_CMD="\"$PYTHON\" -m uvicorn app.main:app --host \"$API_BIND\" --port \"$API_PORT\" --timeout-keep-alive 65"
-  if launch_in_new_terminal "Football Analysis Engine API" "$API_CMD" true; then
+  if launch_in_new_terminal "Football Analysis Engine API" "$API_CMD"; then
     note "FastAPI spuštěna v samostatném terminálovém okně."
   else
     note "Grafická relace nebo akceptovatelný emulátor terminálu nejsou k dispozici."
