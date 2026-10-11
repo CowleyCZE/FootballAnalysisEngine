@@ -131,6 +131,46 @@ else
   note "Ollama není nainstalovaná. Ověřený fallback enginu pro nedostupnou AI vrátí insufficient_data."
 fi
 
+find_terminal_emulator() {
+  if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+    return 1
+  fi
+  for term in gnome-terminal konsole xfce4-terminal x-terminal-emulator xterm; do
+    if command_exists "$term"; then
+      printf '%s' "$term"
+      return 0
+    fi
+  done
+  return 1
+}
+
+launch_in_new_terminal() {
+  local title=$1 cmd=$2 term
+  term="$(find_terminal_emulator || true)"
+  if [[ -z "$term" ]]; then
+    return 1
+  fi
+
+  case "$term" in
+    gnome-terminal)
+      gnome-terminal --title="$title" -- bash -c "cd '$ROOT_DIR' && $cmd; exec bash" &
+      ;;
+    konsole)
+      konsole -p tabtitle="$title" -e bash -c "cd '$ROOT_DIR' && $cmd; exec bash" &
+      ;;
+    xfce4-terminal)
+      xfce4-terminal --title="$title" --command="bash -c \"cd '$ROOT_DIR' && $cmd; exec bash\"" &
+      ;;
+    x-terminal-emulator|xterm)
+      "$term" -title "$title" -e bash -c "cd '$ROOT_DIR' && $cmd; exec bash" &
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
 say "Spuštění Football Analysis Enginu"
 mkdir -p logs
 API_BIND=127.0.0.1
@@ -138,21 +178,36 @@ if [[ -n "$PHONE_IP" ]] && ask_yes_no "Zpřístupnit ověřené API do LAN pro N
   [[ -n "${WORKER_API_TOKEN:-${API_SECRET_TOKEN:-}}" ]] || die "Před zpřístupněním chráněných API endpointů nastavte v tomto terminálu WORKER_API_TOKEN nebo API_SECRET_TOKEN."
   API_BIND=0.0.0.0
 fi
+
 if curl --fail --silent --max-time 2 "http://127.0.0.1:$API_PORT/health" >/dev/null; then
   note "FastAPI již odpovídá na portu $API_PORT; nebyla spuštěna podruhé."
 else
-  nohup "$PYTHON" -m uvicorn app.main:app --host "$API_BIND" --port "$API_PORT" --timeout-keep-alive 65 >logs/api.log 2>&1 &
-  API_PID=$!
-  sleep 2
-  curl --fail --silent --show-error "http://127.0.0.1:$API_PORT/health" >/dev/null || { tail -n 80 logs/api.log >&2 || true; die "FastAPI se nespustila."; }
-  note "FastAPI spuštěna (PID $API_PID, log: logs/api.log)."
+  API_CMD="\"$PYTHON\" -m uvicorn app.main:app --host \"$API_BIND\" --port \"$API_PORT\" --timeout-keep-alive 65"
+  if launch_in_new_terminal "Football Analysis Engine API" "$API_CMD"; then
+    note "FastAPI spuštěna v samostatném terminálovém okně."
+  else
+    note "Grafická relace nebo akceptovatelný emulátor terminálu nejsou k dispozici."
+    note "Spouštím API na pozadí jako fallback: nohup $PYTHON -m uvicorn ... > logs/api.log 2>&1 &"
+    nohup "$PYTHON" -m uvicorn app.main:app --host "$API_BIND" --port "$API_PORT" --timeout-keep-alive 65 >logs/api.log 2>&1 &
+  fi
+  wait_for_http "http://127.0.0.1:$API_PORT/health" "FastAPI" || {
+    [[ -f logs/api.log ]] && tail -n 80 logs/api.log >&2 || true
+    die "FastAPI se nespustila."
+  }
 fi
+
 if ask_yes_no "Spustit nyní místní worker se všemi schopnostmi?"; then
   if pgrep -f '[s]cripts/run_worker.py' >/dev/null; then
     note "Spouštěč workeru již běží; nebyl spuštěn podruhé."
   else
-    nohup "$PYTHON" scripts/run_worker.py >logs/worker.log 2>&1 &
-    note "Worker spuštěn (PID $!, log: logs/worker.log)."
+    WORKER_CMD="\"$PYTHON\" scripts/run_worker.py"
+    if launch_in_new_terminal "Football Analysis Engine Worker" "$WORKER_CMD"; then
+      note "Worker spuštěn v samostatném terminálovém okně."
+    else
+      note "Grafická relace nebo akceptovatelný emulátor terminálu nejsou k dispozici."
+      note "Spouštím worker na pozadí jako fallback: nohup $PYTHON scripts/run_worker.py > logs/worker.log 2>&1 &"
+      nohup "$PYTHON" scripts/run_worker.py >logs/worker.log 2>&1 &
+    fi
   fi
 fi
 

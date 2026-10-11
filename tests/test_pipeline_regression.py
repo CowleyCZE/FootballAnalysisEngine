@@ -50,15 +50,16 @@ def test_reg_2_stale_run_db_id_resolves_canonical_run_id(reg_db):
     run_id = master.start_pipeline(1, data_cutoff_at=datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc))
 
     with sqlite3.connect(reg_db) as conn:
-        task_row = conn.execute("SELECT id, task_uuid, domain FROM research_tasks WHERE run_id = ? AND domain='FORM_HOME'", (run_id,)).fetchone()
+        task_row = conn.execute("SELECT id, task_uuid, domain FROM research_tasks WHERE run_id = ? ORDER BY id LIMIT 1", (run_id,)).fetchone()
         task_id = task_row[0]
+        domain_name = task_row[2]
 
     payload = {
         "task_id": task_id,
         "run_id": run_id,
         "run_db_id": 99999,  # Stale / wrong integer
         "match_id": 1,
-        "domain": "FORM_HOME",
+        "domain": domain_name,
         "home_team": "Sparta Praha",
         "away_team": "Slavia Praha",
         "competition": "Chance Liga",
@@ -104,14 +105,15 @@ def test_reg_3_research_error_closes_task_and_execution_as_failed(reg_db):
     run_id = master.start_pipeline(1, data_cutoff_at=datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc))
 
     with sqlite3.connect(reg_db) as conn:
-        task_row = conn.execute("SELECT id FROM research_tasks WHERE run_id = ? AND domain='FORM_HOME'", (run_id,)).fetchone()
+        task_row = conn.execute("SELECT id, domain FROM research_tasks WHERE run_id = ? ORDER BY id LIMIT 1", (run_id,)).fetchone()
         task_id = task_row[0]
+        domain_name = task_row[1]
 
     payload = {
         "task_id": task_id,
         "run_id": run_id,
         "match_id": 1,
-        "domain": "FORM_HOME",
+        "domain": domain_name,
         "home_team": "Sparta Praha",
         "away_team": "Slavia Praha",
         "competition": "Chance Liga",
