@@ -36,10 +36,17 @@ def get_analysis_status(run_id: str) -> Dict[str, Any]:
         ).fetchone()
         if not run:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
+        main_run = conn.execute(
+            "SELECT * FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
         jobs = conn.execute(
             "SELECT * FROM jobs WHERE run_id = ? ORDER BY id", (run_id,)
         ).fetchall()
-    return {"run": dict(run), "jobs": [dict(job) for job in jobs]}
+    return {
+        "run": dict(run),
+        "main_run": dict(main_run) if main_run else None,
+        "jobs": [dict(job) for job in jobs],
+    }
 
 
 @router.get("/{run_id}/readiness", response_model=ResearchReadiness)
@@ -91,12 +98,5 @@ def cancel_analysis(run_id: str) -> Dict[str, Any]:
             "UPDATE jobs SET status='CANCELLED', finished_at=CURRENT_TIMESTAMP WHERE run_id=? AND status IN ('PENDING','BLOCKED','RETRY')",
             (run_id,),
         )
-        conn.execute(
-            "UPDATE pipeline_runs SET state=?, updated_at=CURRENT_TIMESTAMP, finished_at=CURRENT_TIMESTAMP, error_text=? WHERE run_id=?",
-            (MatchState.FAILED, "Cancelled by API", run_id),
-        )
-        conn.execute(
-            "UPDATE runs SET status=?, finished_at=CURRENT_TIMESTAMP WHERE run_id=?",
-            (MatchState.FAILED, run_id),
-        )
+    orchestrator.state_machine.transition_to(run_id, MatchState.FAILED, "Cancelled by API")
     return {"run_id": run_id, "status": "CANCELLED", "message": "Běh pipeline byl zastaven."}

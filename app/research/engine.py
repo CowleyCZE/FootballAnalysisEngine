@@ -101,16 +101,29 @@ class ResearchEngine:
             search_results = []
             for q in queries[: self.source_policy.get_strategy(task.domain).get("max_queries", len(queries))]:
                 team_name = task.home_team if "HOME" in task.domain else task.away_team if "AWAY" in task.domain else ""
-                res = self.search_adapter.search(
-                    q["query"],
-                    team=team_name,
-                    domain=task.domain,
-                    priority=task.priority,
-                    reason=q.get("type", ""),
-                    data_cutoff_at=task.data_cutoff_at,
-                )
+                res = []
+                search_err = None
+                try:
+                    res = self.search_adapter.search(
+                        q["query"],
+                        team=team_name,
+                        domain=task.domain,
+                        priority=task.priority,
+                        reason=q.get("type", ""),
+                        data_cutoff_at=task.data_cutoff_at,
+                    )
+                except Exception as exc:
+                    search_err = exc
+
+                try:
+                    self.repository.save_query(session_id, q["query"], q["type"], q["hash"], len(res) if res else 0)
+                except Exception as q_err:
+                    pass
+
+                if search_err is not None:
+                    raise search_err
+
                 search_results.extend(res)
-                self.repository.save_query(session_id, q["query"], q["type"], q["hash"], len(res))
 
             metrics.search_results_count = len(search_results)
             if not search_results:

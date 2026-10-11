@@ -64,12 +64,12 @@ class JobQueue:
             job["payload"]["_job_id"] = job["job_id"]
         return job
 
-    def update_job_status(self, job_id: str, status: str, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None, worker_id: Optional[str] = None):
+    def update_job_status(self, job_id: str, status: str, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None, worker_id: Optional[str] = None, force_fail: bool = False):
         worker_id = worker_id or "system"
         if status == JobStatus.SUCCESS:
             self.store.finish(job_id, worker_id, True, result=result)
         elif status in (JobStatus.FAILED, JobStatus.RETRY):
-            self.store.finish(job_id, worker_id, False, result=result, error=error)
+            self.store.finish(job_id, worker_id, False, result=result, error=error, force_fail=force_fail)
         else:
             with self.store.connect() as conn: conn.execute("UPDATE jobs SET status=? WHERE job_id=?", (status, job_id))
 

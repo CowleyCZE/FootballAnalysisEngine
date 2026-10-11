@@ -49,7 +49,10 @@ class ResearchRepository:
             if not row:
                 raise KeyError(task_id)
             if row["status"] in self.TERMINAL_TASK_STATUSES:
-                raise RuntimeError(f"Research task {task_id} is already terminal: {row['status']}")
+                if row["status"] == "FAILED" and attempt_number > 1:
+                    pass
+                else:
+                    raise RuntimeError(f"Research task {task_id} is already terminal: {row['status']}")
             conn.execute("UPDATE research_tasks SET status='RUNNING', attempt_number=?, updated_at=? WHERE id=?", (int(attempt_number), self._now(), int(task_id)))
 
     def get_task(self, task_id: int) -> Optional[sqlite3.Row]:
@@ -65,7 +68,10 @@ class ResearchRepository:
                 raise KeyError(task_id)
             attempt = int(attempt_number or row["attempt_number"] or 1)
             if row["status"] in self.TERMINAL_TASK_STATUSES:
-                raise RuntimeError(f"Research task {task_id} is already terminal: {row['status']}")
+                if row["status"] == "FAILED" and attempt > 1:
+                    pass
+                else:
+                    raise RuntimeError(f"Research task {task_id} is already terminal: {row['status']}")
             conn.execute("UPDATE research_tasks SET status='RUNNING', attempt_number=?, updated_at=? WHERE id=?", (attempt, now, int(task_id)))
             cur = conn.execute("INSERT INTO research_executions(execution_uuid, task_id, attempt_number, status, started_at) VALUES(?,?,?,?,?)", (execution_uuid, int(task_id), attempt, "RUNNING", now))
             return int(cur.lastrowid)

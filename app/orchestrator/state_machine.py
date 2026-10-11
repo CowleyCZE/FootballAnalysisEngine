@@ -64,10 +64,33 @@ class MatchStateMachine:
                 return False
 
             finished_at = now_iso if new_state in (MatchState.COMPLETED, MatchState.UNRESOLVED, MatchState.FAILED) else None
-            conn.execute(
-                "UPDATE pipeline_runs SET state=?, updated_at=?, finished_at=CASE WHEN ? IS NOT NULL THEN ? ELSE finished_at END WHERE run_id=? AND state=?",
-                (new_state, now_iso, finished_at, finished_at, run_id, current_state),
-            )
+
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(pipeline_runs)").fetchall()}
+            if "error_text" in cols and new_state in (MatchState.UNRESOLVED, MatchState.FAILED):
+                conn.execute(
+                    "UPDATE pipeline_runs SET state=?, updated_at=?, finished_at=CASE WHEN ? IS NOT NULL THEN ? ELSE finished_at END, error_text=? WHERE run_id=? AND state=?",
+                    (new_state, now_iso, finished_at, finished_at, reason, run_id, current_state),
+                )
+            else:
+                conn.execute(
+                    "UPDATE pipeline_runs SET state=?, updated_at=?, finished_at=CASE WHEN ? IS NOT NULL THEN ? ELSE finished_at END WHERE run_id=? AND state=?",
+                    (new_state, now_iso, finished_at, finished_at, run_id, current_state),
+                )
+
+            tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            if "runs" in tables:
+                conn.execute(
+                    "UPDATE runs SET status=?, finished_at=CASE WHEN ? IS NOT NULL THEN ? ELSE finished_at END WHERE run_id=?",
+                    (new_state, finished_at, finished_at, run_id),
+                )
+
+            if new_state in (MatchState.COMPLETED, MatchState.UNRESOLVED, MatchState.FAILED):
+                job_tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+                if "jobs" in job_tables:
+                    conn.execute(
+                        "UPDATE jobs SET status='CANCELLED', finished_at=? WHERE run_id=? AND status IN ('PENDING','BLOCKED','RETRY')",
+                        (now_iso, run_id),
+                    )
             conn.execute(
                 "INSERT INTO pipeline_state_history(run_id, old_state, new_state, reason, created_at) VALUES(?,?,?,?,?)",
                 (run_id, current_state, new_state, reason, now_iso),

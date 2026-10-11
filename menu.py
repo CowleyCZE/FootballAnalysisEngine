@@ -353,7 +353,13 @@ def show_analysis_results() -> None:
         else:
             print("  Job zatím neobsahuje výsledek.")
     else:
-        print("  (Zatím žádná AI analýza v tomto běhu.)")
+        st = pipeline["state"] if pipeline else "N/A"
+        err = pipeline["error_text"] if pipeline and pipeline["error_text"] else ""
+        if st in ("UNRESOLVED", "FAILED", "CANCELLED"):
+            reason = f" ({err})" if err else ""
+            print(f"  AI analýza nebyla vytvořena — pipeline skončila ve stavu '{st}'{reason}.")
+        else:
+            print(f"  AI analýza nebyla vytvořena (aktuální stav pipeline: {st}).")
 
     # Audit
     audit = conn.execute(
@@ -379,7 +385,13 @@ def show_analysis_results() -> None:
         else:
             print("  Job zatím neobsahuje výsledek.")
     else:
-        print("  (V tomto běhu zatím nebyl spuštěn audit.)")
+        st = pipeline["state"] if pipeline else "N/A"
+        err = pipeline["error_text"] if pipeline and pipeline["error_text"] else ""
+        if st in ("UNRESOLVED", "FAILED", "CANCELLED"):
+            reason = f" ({err})" if err else ""
+            print(f"  Audit nebyl vytvořen — pipeline skončila ve stavu '{st}'{reason}.")
+        else:
+            print(f"  Audit nebyl vytvořen (aktuální stav pipeline: {st}).")
 
     # Claims
     run_db = conn.execute("SELECT id FROM runs WHERE run_id = ?", (run_id,)).fetchone() if run_id else None
