@@ -126,7 +126,7 @@ class JobStore:
             self._event(conn, "JOB_CLAIMED", selected["job_id"], worker_id, {"attempt_number": attempt, "capabilities": sorted(caps)})
             return dict(selected) | {"payload": payload, "attempt_number": attempt}
 
-    def finish(self, job_id: str, worker_id: str, success: bool, result: Optional[Any] = None, error: Optional[str] = None) -> None:
+    def finish(self, job_id: str, worker_id: str, success: bool, result: Optional[Any] = None, error: Optional[str] = None, force_fail: bool = False) -> None:
         now = self.now()
         with self.connect() as conn:
             row = conn.execute("SELECT status, attempts, max_attempts, result_json, worker_id FROM jobs WHERE job_id=?", (job_id,)).fetchone()
@@ -140,7 +140,7 @@ class JobStore:
 
             if success:
                 status, next_attempt = 'SUCCESS', None
-            elif row['attempts'] < row['max_attempts']:
+            elif not force_fail and row['attempts'] < row['max_attempts']:
                 status = 'RETRY'
                 delay = min(300, 30 * (2 ** max(0, row['attempts'] - 1)))
                 next_attempt = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() + delay, tz=timezone.utc).isoformat()

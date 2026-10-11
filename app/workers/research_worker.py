@@ -218,8 +218,10 @@ class ResearchWorker:
             result = self.engine.execute(task)
             status = result.status.value if isinstance(result.status, ResearchStatus) else str(result.status)
             claims: List[Dict[str, Any]] = [_serialize_claim(claim) for claim in result.claims]
+            err_text = "; ".join(result.warnings) if result.warnings else None
             return {
                 "status": status,
+                "error": err_text,
                 "task_id": task_id,
                 "execution_id": result.execution_id,
                 "claims": claims,

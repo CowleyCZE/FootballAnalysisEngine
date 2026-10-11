@@ -363,27 +363,66 @@ class MasterOrchestrator:
             row_final = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
         return row_final[0] if row_final else ""
 
-    def _is_statistics_data_sufficient(self, jobs: List[Any]) -> bool:
+    def _is_statistics_data_sufficient(self, jobs: List[Any], run_id: Optional[str] = None) -> bool:
         stat_jobs = [j for j in jobs if j["job_type"] == "STATISTICS" and j["status"] == JobStatus.SUCCESS]
         if not stat_jobs:
             return False
+
+        def _is_dict_ok(data: Any) -> bool:
+            if not isinstance(data, dict):
+                return True
+            st = str(data.get("status") or "").upper()
+            if st in ("INSUFFICIENT_DATA", "INVALID_DATA", "NO_DATA"):
+                return False
+            ss = data.get("sample_size")
+            if ss is not None:
+                try:
+                    if int(ss) == 0:
+                        return False
+                except (ValueError, TypeError):
+                    pass
+            cov = data.get("coverage")
+            if cov is not None:
+                try:
+                    if float(cov) == 0.0:
+                        return False
+                except (ValueError, TypeError):
+                    pass
+            for v in data.values():
+                if isinstance(v, dict):
+                    if not _is_dict_ok(v):
+                        return False
+                elif isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, dict) and not _is_dict_ok(item):
+                            return False
+            return True
+
         for sj in stat_jobs:
             raw = sj["result_json"] if "result_json" in sj.keys() else None
-            if not raw:
-                continue
+            if raw:
+                try:
+                    res = json.loads(raw) if isinstance(raw, str) else raw
+                    if isinstance(res, dict) and not _is_dict_ok(res):
+                        return False
+                except Exception:
+                    return False
+
+        if run_id:
             try:
-                res = json.loads(raw) if isinstance(raw, str) else raw
-                if isinstance(res, dict):
-                    if res.get("status") in ("INSUFFICIENT_DATA", "INVALID_DATA"):
-                        return False
-                    sample_size = res.get("sample_size")
-                    coverage = res.get("coverage")
-                    if sample_size is not None and sample_size == 0:
-                        return False
-                    if coverage is not None and coverage == 0.0:
-                        return False
+                with sqlite3.connect(self.db_path) as conn:
+                    run_row = conn.execute("SELECT id FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+                    if run_row:
+                        run_db_id = run_row[0]
+                        snaps = conn.execute(
+                            "SELECT sample_size FROM statistical_snapshots WHERE run_id = ?",
+                            (run_db_id,),
+                        ).fetchall()
+                        if snaps and all(s[0] is None or s[0] == 0 for s in snaps):
+                            return False
             except Exception:
                 pass
+
         return True
 
     def tick(self, run_id: str):
@@ -454,7 +493,7 @@ class MasterOrchestrator:
             statistics_jobs = [j for j in jobs if j["job_type"] == "STATISTICS"]
             if statistics_jobs and all(j["status"] in terminal for j in statistics_jobs):
                 stat_success = any(j["status"] == JobStatus.SUCCESS for j in statistics_jobs)
-                if stat_success and self._is_statistics_data_sufficient(jobs):
+                if stat_success and self._is_statistics_data_sufficient(jobs, run_id=run_id):
                     match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                     self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
                     existing_ai = next((j for j in jobs if j["job_type"] == "AI_ANALYSIS"), None)
