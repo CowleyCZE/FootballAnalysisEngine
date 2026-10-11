@@ -277,3 +277,44 @@ def test_note9_worker_sanitize_url_and_text(monkeypatch):
     clean = sanitize_text(text)
     assert "super-secret-token" not in clean
     assert "[REDACTED_TOKEN]" in clean
+
+
+def test_init_database_deduplicates_snapshots_before_unique_index(tmp_path):
+    from scripts.init_database import init_db
+
+    db_path = tmp_path / "database" / "football.db"
+    db_path.parent.mkdir()
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript("""
+            CREATE TABLE statistical_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                match_id INTEGER,
+                team_id INTEGER,
+                metric TEXT NOT NULL,
+                value REAL,
+                sample_size INTEGER,
+                coverage REAL,
+                data_cutoff_at TEXT NOT NULL,
+                calculation_version TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO statistical_snapshots
+                (run_id, team_id, metric, value, data_cutoff_at, calculation_version)
+            VALUES
+                (1, 7, 'form_points', 2, '2026-10-11T12:00:00Z', '1.0.0'),
+                (1, 7, 'form_points', 3, '2026-10-11T12:00:00Z', '1.0.0');
+        """)
+
+    # Exercise the production init script against this isolated DB path.
+    init_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT value FROM statistical_snapshots WHERE run_id=1 AND team_id=7 AND metric='form_points'"
+        ).fetchall()
+        indexes = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='uidx_statistical_snapshots_stable'"
+        ).fetchall()
+    assert rows == [(3.0,)]
+    assert indexes == [("uidx_statistical_snapshots_stable",)]

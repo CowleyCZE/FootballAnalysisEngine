@@ -37,7 +37,7 @@ def verify_api_auth(
     expected_token = os.getenv("WORKER_API_TOKEN") or os.getenv("API_SECRET_TOKEN")
     if not expected_token:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="API token authentication is not configured on the server. Access blocked for security.",
         )
 

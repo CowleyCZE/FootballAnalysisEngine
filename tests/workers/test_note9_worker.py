@@ -23,3 +23,20 @@ def test_note9_worker_missing_token_raises():
     config = dict(DEFAULT_CONFIG)
     with pytest.raises(RuntimeError, match="Chybí WORKER_API_TOKEN"):
         Note9Worker(config)
+
+
+def test_note9_worker_reports_server_detail_without_token_leak(monkeypatch, capsys):
+    monkeypatch.setenv("WORKER_API_TOKEN", "client-secret")
+    worker = Note9Worker(dict(DEFAULT_CONFIG) | {"max_retries": 1})
+    response = MagicMock()
+    response.raise_for_status.side_effect = __import__("requests").HTTPError(
+        "503 Server Error", response=MagicMock(status_code=503, json=lambda: {
+            "detail": "API token authentication is not configured on the server."
+        })
+    )
+    worker.session.request = MagicMock(return_value=response)
+
+    with pytest.raises(RuntimeError, match="not configured on the server"):
+        worker.request("POST", "/api/workers/register")
+
+    assert "client-secret" not in capsys.readouterr().out

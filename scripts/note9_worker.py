@@ -160,11 +160,29 @@ class Note9Worker:
                 return response
             except requests.RequestException as exc:
                 error = exc
-                err_clean = sanitize_text(str(exc))
+                response = getattr(exc, "response", None)
+                body = ""
+                if response is not None:
+                    try:
+                        payload = response.json()
+                        detail = payload.get("detail") if isinstance(payload, dict) else None
+                        body = str(detail or payload)
+                    except (ValueError, requests.RequestException):
+                        body = response.text[:500]
+                err_clean = sanitize_text(f"{exc}; odpověď serveru: {body}" if body else str(exc))
                 log(f"HTTP chyba {method} {safe_url} (pokus {attempt}/{self.max_retries}): {err_clean}")
                 if attempt < self.max_retries:
                     time.sleep(min(2 ** (attempt - 1), 8))
-        raise RuntimeError(f"HTTP požadavek selhal: {method} {safe_url}: {sanitize_text(str(error))}")
+        response = getattr(error, "response", None)
+        server_detail = ""
+        if response is not None:
+            try:
+                payload = response.json()
+                server_detail = str(payload.get("detail") or payload) if isinstance(payload, dict) else str(payload)
+            except (ValueError, requests.RequestException):
+                server_detail = response.text[:500]
+        message = f"{error}; odpověď serveru: {server_detail}" if server_detail else str(error)
+        raise RuntimeError(f"HTTP požadavek selhal: {method} {safe_url}: {sanitize_text(message)}")
 
     def register(self) -> None:
         response = self.request("POST", "/api/workers/register", json={

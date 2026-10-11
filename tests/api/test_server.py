@@ -52,6 +52,19 @@ def test_api_authentication_enforcement(api_test_db):
     assert bearer_resp.status_code == 200
 
 
+def test_api_returns_service_unavailable_when_server_token_is_unconfigured(monkeypatch):
+    from fastapi import HTTPException
+
+    monkeypatch.delenv("WORKER_API_TOKEN", raising=False)
+    monkeypatch.delenv("API_SECRET_TOKEN", raising=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        server_module.verify_api_auth("client-has-a-token", None)
+
+    assert exc_info.value.status_code == 503
+    assert "not configured on the server" in exc_info.value.detail
+
+
 def test_start_analysis_by_match_id(api_test_db):
     client = TestClient(server_module.app)
     resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)

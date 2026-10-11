@@ -7,6 +7,24 @@ ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_VERSION = 4
 
 
+def _deduplicate_statistical_snapshots(conn: sqlite3.Connection) -> None:
+    """Keep the newest snapshot for each stable key before adding its unique index."""
+    if not _table_exists(conn, "statistical_snapshots"):
+        return
+    conn.execute("""
+        DELETE FROM statistical_snapshots
+        WHERE id NOT IN (
+            SELECT MAX(id)
+            FROM statistical_snapshots
+            GROUP BY run_id, COALESCE(team_id, -1), metric, data_cutoff_at, calculation_version
+        )
+    """)
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uidx_statistical_snapshots_stable
+        ON statistical_snapshots(run_id, COALESCE(team_id, -1), metric, data_cutoff_at, calculation_version)
+    """)
+
+
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
 
@@ -47,7 +65,15 @@ def initialize_database(db_path: str) -> None:
     with sqlite3.connect(db_path, timeout=30) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
         _migrate_legacy_schema(conn)
-        conn.executescript(schema_path.read_text(encoding="utf-8"))
+        schema_sql = schema_path.read_text(encoding="utf-8")
+        # Old databases may contain duplicate snapshots. Remove duplicates
+        # before schema.sql attempts to create the unique index.
+        schema_sql = schema_sql.replace(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uidx_statistical_snapshots_stable "
+            "ON statistical_snapshots(run_id, COALESCE(team_id, -1), metric, data_cutoff_at, calculation_version);",
+            "-- stable snapshot index is created after legacy-row deduplication",
+        )
+        conn.executescript(schema_sql)
         _migrate_legacy_schema(conn)
         conn.executescript(research_schema_path.read_text(encoding="utf-8"))
         conn.executescript("""
@@ -59,19 +85,6 @@ def initialize_database(db_path: str) -> None:
             CREATE INDEX IF NOT EXISTS idx_system_events_run ON system_events(run_id);
             CREATE INDEX IF NOT EXISTS idx_system_events_job ON system_events(job_id);
         """)
-        # Bezpečná deduplikace a vytvoření unikátního indexu pro statistical_snapshots bez mazání historických dat
-        if _table_exists(conn, "statistical_snapshots"):
-            conn.execute("""
-                DELETE FROM statistical_snapshots
-                WHERE id NOT IN (
-                    SELECT MIN(id)
-                    FROM statistical_snapshots
-                    GROUP BY run_id, COALESCE(team_id, -1), metric, data_cutoff_at, calculation_version
-                )
-            """)
-            conn.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS uidx_statistical_snapshots_stable
-                ON statistical_snapshots(run_id, COALESCE(team_id, -1), metric, data_cutoff_at, calculation_version)
-            """)
+        _deduplicate_statistical_snapshots(conn)
         _migrate_legacy_schema(conn)
         conn.commit()

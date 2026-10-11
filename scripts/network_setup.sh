@@ -145,26 +145,43 @@ find_terminal_emulator() {
 }
 
 launch_in_new_terminal() {
-  local title=$1 cmd=$2 term
+  local title=$1 cmd=$2 pass_api_token=${3:-false} term env_file='' quoted_env_file='' launch_cmd
   term="$(find_terminal_emulator || true)"
   if [[ -z "$term" ]]; then
     return 1
   fi
 
+  if [[ "$pass_api_token" == true ]]; then
+    local api_token="${WORKER_API_TOKEN:-${API_SECRET_TOKEN:-}}"
+    [[ -n "$api_token" ]] || return 1
+    # Terminal emulators may delegate window creation to a long-lived process
+    # that does not inherit this script's environment. Pass credentials through
+    # a mode-600 temporary file instead of exposing them in argv or logs.
+    umask 077
+    env_file="$(mktemp "${TMPDIR:-/tmp}/fae-api-env.XXXXXX")" || return 1
+    printf 'export WORKER_API_TOKEN=%q\n' "$api_token" > "$env_file"
+    unset api_token
+    printf -v quoted_env_file '%q' "$env_file"
+    launch_cmd="source $quoted_env_file && rm -f $quoted_env_file && cd '$ROOT_DIR' && $cmd; exec bash"
+  else
+    launch_cmd="cd '$ROOT_DIR' && $cmd; exec bash"
+  fi
+
   case "$term" in
     gnome-terminal)
-      gnome-terminal --title="$title" -- bash -c "cd '$ROOT_DIR' && $cmd; exec bash" &
+      gnome-terminal --title="$title" -- bash -c "$launch_cmd" &
       ;;
     konsole)
-      konsole -p tabtitle="$title" -e bash -c "cd '$ROOT_DIR' && $cmd; exec bash" &
+      konsole -p tabtitle="$title" -e bash -c "$launch_cmd" &
       ;;
     xfce4-terminal)
-      xfce4-terminal --title="$title" --command="bash -c \"cd '$ROOT_DIR' && $cmd; exec bash\"" &
+      xfce4-terminal --title="$title" --command="bash -c \"$launch_cmd\"" &
       ;;
     x-terminal-emulator|xterm)
-      "$term" -title "$title" -e bash -c "cd '$ROOT_DIR' && $cmd; exec bash" &
+      "$term" -title "$title" -e bash -c "$launch_cmd" &
       ;;
     *)
+      [[ -z "$env_file" ]] || rm -f "$env_file"
       return 1
       ;;
   esac
@@ -181,9 +198,12 @@ fi
 
 if curl --fail --silent --max-time 2 "http://127.0.0.1:$API_PORT/health" >/dev/null; then
   note "FastAPI již odpovídá na portu $API_PORT; nebyla spuštěna podruhé."
+  if [[ "$API_BIND" == 0.0.0.0 ]]; then
+    note "Pozor: běžící API nepřevezme token z tohoto spuštění skriptu. Pokud bylo spuštěno bez tokenu, zastavte ho a spusťte setup znovu."
+  fi
 else
   API_CMD="\"$PYTHON\" -m uvicorn app.main:app --host \"$API_BIND\" --port \"$API_PORT\" --timeout-keep-alive 65"
-  if launch_in_new_terminal "Football Analysis Engine API" "$API_CMD"; then
+  if launch_in_new_terminal "Football Analysis Engine API" "$API_CMD" true; then
     note "FastAPI spuštěna v samostatném terminálovém okně."
   else
     note "Grafická relace nebo akceptovatelný emulátor terminálu nejsou k dispozici."
