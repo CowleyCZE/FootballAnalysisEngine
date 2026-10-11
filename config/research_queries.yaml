@@ -1,10 +1,3 @@
-MATCH_IDENTITY:
-  discovery:
-    - "{home_team} vs {away_team} {competition} {match_date}"
-    - "{home_team} {away_team} fixture date venue"
-  verification:
-    - "{home_team} vs {away_team} official match details"
-
 FORM_HOME:
   discovery:
     - "{home_team} recent results match history"

@@ -84,12 +84,29 @@ class ResearchRepository:
     def create_session(self, session_uuid: str, run_id: int, task_id: int, strategy: str) -> int:
         now = self._now()
         with self.get_connection() as conn:
-            run = conn.execute("SELECT run_id FROM runs WHERE id=?", (int(run_id),)).fetchone()
+            task = conn.execute(
+                "SELECT run_id FROM research_tasks WHERE id=?", (int(task_id),)
+            ).fetchone()
+            if not task:
+                raise KeyError(f"research task {task_id}")
+            # Resolve the DB-local integer via the task's stable public run ID.
+            # Workers may have stale run_db_id values from copied payloads or
+            # databases; research_sessions.run_id references runs.id.
+            run = conn.execute(
+                "SELECT id FROM runs WHERE run_id=?", (str(task["run_id"]),)
+            ).fetchone()
             if not run:
-                raise KeyError(f"run {run_id}")
-            # research_sessions.run_id is an INTEGER FK to runs.id.
-            # Store the internal numeric ID, not the public run_id string.
-            cur = conn.execute("INSERT INTO research_sessions(session_uuid, run_id, task_id, strategy, started_at, status) VALUES (?, ?, ?, ?, ?, 'RUNNING')", (session_uuid, int(run_id), int(task_id), strategy, now))
+                raise KeyError(f"run '{task['run_id']}' for research task {task_id}")
+            run_db_id = int(run["id"])
+            conn.execute(
+                "UPDATE research_tasks SET run_db_id=? WHERE id=? AND run_db_id IS NOT ?",
+                (run_db_id, int(task_id), run_db_id),
+            )
+            cur = conn.execute(
+                "INSERT INTO research_sessions(session_uuid, run_id, task_id, strategy, started_at, status) "
+                "VALUES (?, ?, ?, ?, ?, 'RUNNING')",
+                (session_uuid, run_db_id, int(task_id), strategy, now),
+            )
             return int(cur.lastrowid)
 
     def save_query(self, session_id: int, query: str, query_type: str, query_hash: str, result_count: int = 0) -> None:

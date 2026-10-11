@@ -10,12 +10,6 @@ ABSENCES_AWAY:
   min_independent_sources: 2
   max_queries: 6
 
-MATCH_IDENTITY:
-  strategy: VERIFICATION
-  min_sources: 1
-  min_independent_sources: 1
-  max_queries: 3
-
 WEATHER:
   strategy: BASIC
   min_sources: 1

@@ -91,9 +91,11 @@ class ResearchEngine:
 
         self.repository.mark_task_running(task.task_id, task.attempt_number)
         exec_id = self.repository.create_execution(exec_uuid, task.task_id, task.attempt_number)
-        session_id = self.repository.create_session(session_uuid, task.run_id, task.task_id, task.domain)
 
         try:
+            session_id = self.repository.create_session(
+                session_uuid, task.run_id, task.task_id, task.domain
+            )
             queries = self.query_builder.build_queries(task)
             metrics.queries_count = len(queries)
             search_results = []

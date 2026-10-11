@@ -137,6 +137,35 @@ class ResearchWorker:
         run_id_str = str(payload.get("run_id") or "")
         run_db_id = int(payload.get("run_db_id") or 0)
 
+        # run_db_id is local to a particular SQLite database. Resolve it from
+        # the persisted task in this worker's database rather than trusting a
+        # potentially stale integer copied into the job payload.
+        if task_id:
+            task_row = self.repository.get_task(int(task_id))
+            if not task_row:
+                raise ValueError(f"Research task {task_id} is missing from worker database")
+            task_run_id = str(task_row["run_id"] or "")
+            if run_id_str and task_run_id != run_id_str:
+                raise ValueError(
+                    f"Research task {task_id} belongs to run '{task_run_id}', "
+                    f"not payload run '{run_id_str}'"
+                )
+            run_id_str = task_run_id
+            with sqlite3.connect(self.db_path) as conn:
+                run_row = conn.execute(
+                    "SELECT id FROM runs WHERE run_id = ?", (run_id_str,)
+                ).fetchone()
+                if not run_row:
+                    raise ValueError(
+                        f"Run '{run_id_str}' for research task {task_id} "
+                        "is missing from worker database"
+                    )
+                run_db_id = int(run_row[0])
+                conn.execute(
+                    "UPDATE research_tasks SET run_db_id=? WHERE id=?",
+                    (run_db_id, int(task_id)),
+                )
+
         try:
             ctx = self._resolve_match_context(match_id, payload, match)
         except Exception as err:

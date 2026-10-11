@@ -187,9 +187,7 @@ def test_scenario_7_multiple_matching_records_are_ambiguous(test_db):
 
 
 def test_scenario_8_unverified_request_cannot_start_pipeline(test_db):
-    """
-    8. Neověřený požadavek nesmí vytvořit ani spustit analytický běh.
-    """
+    """Unverified IDs stay blocked unless the caller explicitly opts in."""
     master = MasterOrchestrator(db_path=test_db)
     orc = MatchOrchestrator(db_path=test_db)
 
@@ -210,6 +208,14 @@ def test_scenario_8_unverified_request_cannot_start_pipeline(test_db):
     with pytest.raises(ValueError) as exc_info:
         master.start_pipeline(unverified_id)
     assert "UNVERIFIED" in str(exc_info.value)
+
+    # The menu's explicit manual-entry path may start an unverified fixture.
+    run_id = master.start_pipeline(unverified_id, allow_unverified=True)
+    with sqlite3.connect(test_db) as conn:
+        run = conn.execute("SELECT match_id FROM pipeline_runs WHERE run_id=?", (run_id,)).fetchone()
+        status = conn.execute("SELECT status FROM matches WHERE id=?", (unverified_id,)).fetchone()[0]
+    assert run == (unverified_id,)
+    assert status == "UNVERIFIED"
 
 
 def test_scenario_9_verification_error_is_not_treated_as_success(test_db):

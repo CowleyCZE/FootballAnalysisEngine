@@ -7,7 +7,6 @@ class ResearchPolicy:
     MAX_RETRIES = 3
 
     REQUIRED_DOMAINS = [
-        "MATCH_IDENTITY",
         "FORM_HOME",
         "FORM_AWAY",
         "ABSENCES_HOME",
@@ -22,7 +21,6 @@ class ResearchPolicy:
     ]
 
     DOMAIN_PRIORITIES = {
-        "MATCH_IDENTITY": 100,
         "ABSENCES_HOME": 95,
         "ABSENCES_AWAY": 95,
         "FORM_HOME": 90,
