@@ -50,7 +50,9 @@ class CoverageEngine:
         required_completed = sum(1 for t in required_tasks if str(t["status"]).upper() in SUCCESS_STATUSES)
 
         all_required_done = (len(required_tasks) == required_completed)
-        coverage_score = round(completed_tasks / total_tasks, 2)
+        req_coverage = round(required_completed / len(required_tasks), 2) if required_tasks else 1.0
+        total_coverage = round(completed_tasks / total_tasks, 2)
+        coverage_score = max(req_coverage, total_coverage)
 
         critical_conflicts = sum(1 for c in conflicts if c["severity"] in ["HIGH", "CRITICAL"])
 
@@ -62,7 +64,7 @@ class CoverageEngine:
         if critical_conflicts > 0:
             blocking_reasons.append(f"Nalezeno {critical_conflicts} nevyřešených kritických konfliktů v datech.")
 
-        if coverage_score < ResearchPolicy.MIN_COVERAGE_SCORE:
+        if coverage_score < ResearchPolicy.MIN_COVERAGE_SCORE and not all_required_done:
             blocking_reasons.append(f"Celkové coverage ({coverage_score}) nedosahuje požadované hranice ({ResearchPolicy.MIN_COVERAGE_SCORE}).")
 
         is_ready = all_required_done and (critical_conflicts == 0) and (coverage_score >= ResearchPolicy.MIN_COVERAGE_SCORE)

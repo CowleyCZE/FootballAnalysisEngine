@@ -93,6 +93,12 @@ class StatisticsRepository:
                 INSERT INTO statistical_snapshots (
                     run_id, match_id, team_id, metric, value, sample_size, coverage, data_cutoff_at, calculation_version
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id, COALESCE(team_id, -1), metric, data_cutoff_at, calculation_version) DO UPDATE SET
+                    match_id=excluded.match_id,
+                    value=excluded.value,
+                    sample_size=excluded.sample_size,
+                    coverage=excluded.coverage,
+                    created_at=CURRENT_TIMESTAMP
             """, (int(run_row["id"]), match_id, team_id, metric, value, sample_size, coverage, data_cutoff_at, calculation_version))
             conn.commit()
             return cursor.lastrowid

@@ -197,3 +197,180 @@ def test_repeated_ticks_are_idempotent_no_duplicate_jobs(fix_db):
         ai_jobs_count = conn.execute("SELECT COUNT(*) FROM jobs WHERE run_id=? AND job_type='AI_ANALYSIS'", (run_id,)).fetchone()[0]
 
     assert ai_jobs_count == 1
+
+
+def test_daemon_handles_no_result_and_insufficient_data_as_fatal(fix_db):
+    from app.workers.daemon import WorkerDaemon
+    from app.jobs.models import JobStatus
+
+    daemon = WorkerDaemon(worker_id="test-daemon", capabilities=["RESEARCH"], db_path=fix_db)
+
+    job_id_1 = daemon.queue.create_job("RESEARCH", 10, {"test": 1}, run_id="RUN-D1")
+    job_id_2 = daemon.queue.create_job("RESEARCH", 10, {"test": 2}, run_id="RUN-D2")
+
+    # Mock HANDLERS to return NO_RESULT and INSUFFICIENT_DATA
+    daemon.HANDLERS = {
+        "RESEARCH": lambda payload: {"status": "NO_RESULT" if payload.get("test") == 1 else "INSUFFICIENT_DATA"}
+    }
+
+    daemon.run_once()
+    daemon.run_once()
+
+    with sqlite3.connect(fix_db) as conn:
+        j1 = conn.execute("SELECT status, next_attempt_at FROM jobs WHERE job_id=?", (job_id_1,)).fetchone()
+        j2 = conn.execute("SELECT status, next_attempt_at FROM jobs WHERE job_id=?", (job_id_2,)).fetchone()
+
+    assert j1[0] == JobStatus.FAILED
+    assert j1[1] is None  # force_fail = True, no next_attempt_at
+    assert j2[0] == JobStatus.FAILED
+    assert j2[1] is None
+
+
+def test_idempotent_statistical_snapshots(fix_db):
+    from app.statistics.repository import StatisticsRepository
+
+    repo = StatisticsRepository(db_path=fix_db)
+    with sqlite3.connect(fix_db) as conn:
+        conn.execute("INSERT INTO runs(id, run_id, status, started_at) VALUES (500, 'RUN-IDEMP-1', 'RUNNING', '2026-10-04T10:00:00Z')")
+
+    # Insert snapshot twice with identical key
+    id1 = repo.save_snapshot(500, 10, 1, "form_points", 12.0, 5, 1.0, "2026-10-04T12:00:00Z")
+    id2 = repo.save_snapshot(500, 10, 1, "form_points", 12.0, 5, 1.0, "2026-10-04T12:00:00Z")
+
+    with sqlite3.connect(fix_db) as conn:
+        rows = conn.execute("SELECT COUNT(*) FROM statistical_snapshots WHERE run_id=500 AND metric='form_points'").fetchone()[0]
+
+    assert rows == 1
+
+
+def test_menu_select_run_by_sequence_number_and_run_id(fix_db, monkeypatch):
+    import menu
+    monkeypatch.setattr(menu, "DB_PATH", fix_db)
+
+    with sqlite3.connect(fix_db) as conn:
+        conn.execute("INSERT INTO runs(id, run_id, status, started_at) VALUES (601, 'RUN-M-1', 'RUNNING', '2026-10-04T10:00:00Z')")
+        conn.execute("INSERT INTO pipeline_runs(run_id, match_id, state, cycle, max_cycles, started_at, updated_at) VALUES ('RUN-M-1', 10, 'DISCOVERY', 1, 3, '2026-10-04T10:00:00Z', '2026-10-04T10:00:00Z')")
+
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "1")
+    run_selected = menu.select_run()
+    assert run_selected is not None
+    assert run_selected["run_id"] == "RUN-M-1"
+
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "RUN-M-1")
+    run_selected_2 = menu.select_run()
+    assert run_selected_2 is not None
+    assert run_selected_2["run_id"] == "RUN-M-1"
+
+
+def test_note9_worker_sanitize_url_and_text(monkeypatch):
+    from scripts.note9_worker import sanitize_url, sanitize_text
+
+    monkeypatch.setenv("WORKER_API_TOKEN", "super-secret-token")
+
+    url = "http://admin:password123@192.168.1.1:8000/api/internal/search?query=test&key=val"
+    sanitized = sanitize_url(url)
+    assert "password123" not in sanitized
+    assert "admin:***@" in sanitized
+    assert "?[redacted]" in sanitized
+
+    text = "Failed to call http://example.com with token super-secret-token"
+    clean = sanitize_text(text)
+    assert "super-secret-token" not in clean
+    assert "[REDACTED_TOKEN]" in clean
+
+
+def test_note9_worker_remote_disconnected_reconnect_and_no_job(monkeypatch):
+    from scripts.note9_worker import Note9Worker, DEFAULT_CONFIG
+    import requests
+
+    monkeypatch.setenv("WORKER_API_TOKEN", "test-token")
+    worker = Note9Worker(dict(DEFAULT_CONFIG))
+
+    responses = [
+        requests.exceptions.ConnectionError("RemoteDisconnected: Remote end closed connection without response"),
+        requests.exceptions.ConnectionError("RemoteDisconnected: Remote end closed connection without response"),
+        requests.exceptions.ConnectionError("RemoteDisconnected: Remote end closed connection without response"),
+    ]
+
+    def mock_request(method, url, **kwargs):
+        if responses:
+            res = responses.pop(0)
+            if isinstance(res, Exception):
+                raise res
+            return res
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"status": "no_job"}
+        mock_resp.raise_for_status = MagicMock()
+        return mock_resp
+
+    from unittest.mock import MagicMock
+    monkeypatch.setattr(worker.session, "request", mock_request)
+
+    # Initial request fails due to RemoteDisconnected
+    with pytest.raises(requests.RequestException):
+        worker.claim()
+
+    assert not worker.is_online
+    assert worker.consecutive_failures == 1
+
+    # Next request succeeds with no_job
+    job = worker.claim()
+    assert job is None
+    assert worker.is_online
+    assert worker.consecutive_failures == 0
+
+
+def test_search_diagnostics_recorded_and_warning_generated():
+    from app.search.engine import SearchEngine
+    from app.search.models import QuerySpec
+    from app.research.engine import ResearchEngine
+    from app.research.models import ResearchTask
+    import asyncio
+    from datetime import datetime, timezone
+
+    class MockSearXNGClient:
+        async def search(self, query, language="all", time_range=None):
+            return {
+                "results": [
+                    {
+                        "title": "Arsenal vs Chelsea post-cutoff news",
+                        "url": "https://sports.example/post-cutoff",
+                        "content": "Arsenal vs Chelsea news",
+                        "published_at": "2026-10-05T10:00:00Z",
+                    }
+                ]
+            }
+
+    search_engine = SearchEngine(client=MockSearXNGClient())
+    results = asyncio.run(
+        search_engine.search(
+            QuerySpec(query="Arsenal Chelsea"),
+            team="Arsenal",
+            data_cutoff_at=datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert len(results) == 0
+    assert search_engine.last_diagnostics is not None
+    assert search_engine.last_diagnostics.raw_count == 1
+    assert search_engine.last_diagnostics.cutoff_filtered_count == 0
+    assert len(search_engine.last_diagnostics.drop_reasons) > 0
+
+
+def test_optional_domain_failure_does_not_block_pipeline(fix_db):
+    orc = MasterOrchestrator(db_path=fix_db)
+    run_id = orc.start_pipeline(10, data_cutoff_at=datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc))
+
+    with sqlite3.connect(fix_db) as conn:
+        # Mark required jobs as SUCCESS
+        conn.execute("UPDATE jobs SET status='SUCCESS', result_json='{\"status\": \"SUCCESS\"}' WHERE run_id=? AND job_type IN ('RESEARCH', 'STATISTICS')", (run_id,))
+        # Mark optional job as FAILED
+        conn.execute("INSERT INTO jobs(job_id, run_id, match_id, job_type, status, priority, payload_json) VALUES ('OPT-1', ?, 10, 'RESEARCH', 'FAILED', 30, '{\"required\": false, \"domain\": \"WEATHER\"}')", (run_id,))
+
+    orc.tick(run_id)
+
+    with sqlite3.connect(fix_db) as conn:
+        state = conn.execute("SELECT state FROM pipeline_runs WHERE run_id=?", (run_id,)).fetchone()[0]
+
+    assert state not in ("UNRESOLVED", "FAILED", "DISCOVERY")

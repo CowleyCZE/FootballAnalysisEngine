@@ -20,6 +20,10 @@ class SearchAdapter:
     def __init__(self, search_engine: SearchEngine | None = None):
         self.search_engine = search_engine or SearchEngine()
 
+    @property
+    def last_diagnostics(self):
+        return getattr(self.search_engine, "last_diagnostics", None)
+
     def search(
         self,
         query: str | QuerySpec,

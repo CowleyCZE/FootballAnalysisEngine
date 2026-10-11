@@ -167,11 +167,24 @@ def internal_search(req: SearchInternalRequest):
         }
         for r in results
     ]
+    diag_dict = None
+    if engine.last_diagnostics:
+        diag_dict = {
+            "raw_count": engine.last_diagnostics.raw_count,
+            "normalized_count": engine.last_diagnostics.normalized_count,
+            "dedup_count": engine.last_diagnostics.dedup_count,
+            "sport_filtered_count": engine.last_diagnostics.sport_filtered_count,
+            "cutoff_filtered_count": engine.last_diagnostics.cutoff_filtered_count,
+            "identity_filtered_count": engine.last_diagnostics.identity_filtered_count,
+            "final_count": engine.last_diagnostics.final_count,
+            "drop_reasons": engine.last_diagnostics.drop_reasons,
+        }
     return {
         "status": "COMPLETED",
         "query": req.query,
         "results": serialized,
         "result_count": len(serialized),
+        "diagnostics": diag_dict,
         "source": "notebook_proxy",
     }
 
@@ -343,6 +356,17 @@ def get_analysis_result(run_id: str, include_historical: bool = False):
                 ai_res["home_team_analysis"] = None
                 ai_res["away_team_analysis"] = None
 
+        research_jobs = conn.execute("SELECT job_type, status, result_json, error_text FROM jobs WHERE run_id = ? AND job_type = 'RESEARCH'", (run_id,)).fetchall()
+        research_diagnostics = []
+        for rj in research_jobs:
+            if rj["result_json"]:
+                try:
+                    res_dict = json.loads(rj["result_json"])
+                    if isinstance(res_dict, dict) and res_dict.get("warnings"):
+                        research_diagnostics.extend(res_dict.get("warnings"))
+                except Exception:
+                    pass
+
         return {
             "run_id": run_id,
             "match_id": match_id,
@@ -354,6 +378,7 @@ def get_analysis_result(run_id: str, include_historical: bool = False):
             "ai_analysis": ai_res,
             "audit": audit_res,
             "audit_issues": [dict(iss) for iss in audit_issues],
+            "research_diagnostics": research_diagnostics,
             "warnings": warnings,
             "finished_at": run["finished_at"],
         }

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from app.search.deduplicator import deduplicate
-from app.search.models import QuerySpec, SearchResult
+from app.search.models import QuerySpec, SearchResult, SearchDiagnostics
 from app.search.normalizer import normalize_searx_result
 from app.search.relevance import calculate_relevance, calculate_identity_confidence
 from app.search.searxng_client import SearXNGClient
@@ -33,6 +33,7 @@ class SearchEngine:
     ):
         self.client = client or SearXNGClient()
         self.source_registry = source_registry or SearchSourceRegistry()
+        self.last_diagnostics: Optional[SearchDiagnostics] = None
 
     async def search(
         self,
@@ -60,16 +61,18 @@ class SearchEngine:
 
         normalized = [normalize_searx_result(item) for item in raw_results]
         unique = deduplicate(normalized)
-        filtered = filter_sports_results(unique)
+        sports_filtered = filter_sports_results(unique)
+
+        cutoff_filtered = sports_filtered
         if data_cutoff_at is not None:
-            filtered = [
-                result for result in filtered
+            cutoff_filtered = [
+                result for result in sports_filtered
                 if self._is_at_or_before_cutoff(result, data_cutoff_at)
             ]
         terms = topic_terms or []
 
         validated_results = []
-        for result in filtered:
+        for result in cutoff_filtered:
             info = self.source_registry.get_info(result.url)
             result.source_type = info["source_type"]
 
@@ -105,6 +108,19 @@ class SearchEngine:
             ),
             reverse=True,
         )
+
+        diag = SearchDiagnostics(
+            query=query.query,
+            raw_count=len(raw_results),
+            normalized_count=len(normalized),
+            dedup_count=len(unique),
+            sport_filtered_count=len(sports_filtered),
+            cutoff_filtered_count=len(cutoff_filtered),
+            identity_filtered_count=len(validated_results),
+            relevance_filtered_count=len(validated_results),
+            final_count=len(validated_results),
+        )
+        self.last_diagnostics = diag
         return validated_results
 
     @staticmethod

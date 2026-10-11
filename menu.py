@@ -135,20 +135,25 @@ def print_matches(rows: List[sqlite3.Row]) -> None:
               f"{competition:<20} {scheduled_at:<20} {status:<10}")
 
 
-def matches_with_runs() -> List[sqlite3.Row]:
+def list_all_pipeline_runs() -> List[sqlite3.Row]:
     conn = get_connection()
     rows = conn.execute("""
-        SELECT DISTINCT m.id, th.name AS home_team, ta.name AS away_team,
-               m.competition, m.scheduled_at,
-               p.run_id, p.state, p.cycle, p.max_cycles
+        SELECT p.run_id, p.match_id, p.state, p.cycle, p.max_cycles,
+               p.started_at, p.updated_at, p.finished_at, p.error_text,
+               th.name AS home_team, ta.name AS away_team,
+               m.competition, m.scheduled_at
         FROM pipeline_runs p
         JOIN matches m ON p.match_id = m.id
         LEFT JOIN teams th ON m.home_team_id = th.id
         LEFT JOIN teams ta ON m.away_team_id = ta.id
-        ORDER BY m.id, p.started_at
+        ORDER BY p.started_at DESC, p.id DESC
     """).fetchall()
     conn.close()
     return rows
+
+
+def matches_with_runs() -> List[sqlite3.Row]:
+    return list_all_pipeline_runs()
 
 
 def select_match(prompt: str = "Zadejte ID zápasu: ") -> Optional[int]:
@@ -160,6 +165,49 @@ def select_match(prompt: str = "Zadejte ID zápasu: ") -> Optional[int]:
     except ValueError:
         print("  ! Neplatné ID (očekáváno celé číslo).")
         return None
+
+
+def select_run(prompt: str = "Vyberte běh (číslo, Run ID nebo ID zápasu): ") -> Optional[sqlite3.Row]:
+    runs = list_all_pipeline_runs()
+    if not runs:
+        print("  (Žádný zápas nemá spuštěnou analýzu.)")
+        return None
+
+    raw = input(prompt).strip()
+    if not raw:
+        return None
+
+    # 1. Přímá shoda podle run_id
+    for r in runs:
+        if r["run_id"] == raw:
+            return r
+
+    # 2. Přímá shoda podle pořadového čísla v seznamu (1..N)
+    if raw.isdigit():
+        val = int(raw)
+        if 1 <= val <= len(runs):
+            return runs[val - 1]
+
+    # 3. Pokud bylo zadáno ID zápasu
+    if raw.isdigit():
+        match_id = int(raw)
+        match_runs = [r for r in runs if r["match_id"] == match_id]
+        if match_runs:
+            if len(match_runs) == 1:
+                return match_runs[0]
+            print(f"\n  Pro zápas #{match_id} existuje {len(match_runs)} běhů:")
+            for idx, r in enumerate(match_runs, 1):
+                label = f"{r['home_team'] or '?'} vs {r['away_team'] or '?'}"
+                st = r['started_at'][:19] if r['started_at'] else '?'
+                print(f"    [{idx}] Run ID: {r['run_id']} | Stav: {r['state']} | Start: {st}")
+            sub = input(f"  Vyberte konkrétní běh [1-{len(match_runs)}, Enter=nejnovější]: ").strip()
+            if not sub:
+                return match_runs[0]
+            if sub.isdigit() and 1 <= int(sub) <= len(match_runs):
+                return match_runs[int(sub) - 1]
+
+    print("  ! Neplatná volba běhu.")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -261,15 +309,15 @@ def run_analysis() -> None:
 
 def show_matches_with_analysis() -> None:
     print("\n=== Zápasy s analýzou ===")
-    rows = matches_with_runs()
-    if not rows:
+    runs = list_all_pipeline_runs()
+    if not runs:
         print("  (Žádný zápas nemá spuštěnou analýzu.)")
         return
-    print(f"\n  {'ID':<5} {'Zápas':<45} {'Run ID':<30} {'Stav pipeline':<14} {'Cyklus':<10}")
-    print("  " + "-" * 110)
-    for r in rows:
-        label = f"{r['home_team']} vs {r['away_team']}"
-        print(f"  {r['id']:<5} {label:<45} {r['run_id']:<30} {r['state']:<14} {r['cycle']}/{r['max_cycles']:<8}")
+    print(f"\n  {'#':<4} {'Match ID':<9} {'Zápas':<42} {'Run ID':<30} {'Stav pipeline':<14} {'Cyklus':<8}")
+    print("  " + "-" * 115)
+    for idx, r in enumerate(runs, 1):
+        label = f"{r['home_team'] or '?'} vs {r['away_team'] or '?'}"
+        print(f"  {idx:<4} #{r['match_id']:<8} {label:<42} {r['run_id']:<30} {r['state']:<14} {r['cycle']}/{r['max_cycles']:<6}")
 
 
 # ---------------------------------------------------------------------------
@@ -278,45 +326,30 @@ def show_matches_with_analysis() -> None:
 
 def show_analysis_results() -> None:
     print("\n=== Výsledky analýzy ===")
-    rows = matches_with_runs()
-    if not rows:
+    runs = list_all_pipeline_runs()
+    if not runs:
         print("  (Žádný zápas nemá spuštěnou analýzu.)")
         return
-    print(f"\n  {'ID':<5} {'Zápas':<45} {'Poslední Run ID':<30}")
-    print("  " + "-" * 85)
-    for r in rows:
-        label = f"{r['home_team']} vs {r['away_team']}"
-        print(f"  {r['id']:<5} {label:<45} {r['run_id']:<30}")
+    print(f"\n  {'#':<4} {'Match ID':<9} {'Zápas':<42} {'Run ID':<30} {'Stav':<13}")
+    print("  " + "-" * 105)
+    for idx, r in enumerate(runs, 1):
+        label = f"{r['home_team'] or '?'} vs {r['away_team'] or '?'}"
+        print(f"  {idx:<4} #{r['match_id']:<8} {label:<42} {r['run_id']:<30} {r['state']:<13}")
 
-    match_id = select_match("Vyberte zápas podle ID: ")
-    if match_id is None:
+    pipeline = select_run("Vyberte běh (číslo #, Run ID nebo Match ID): ")
+    if not pipeline:
         return
 
     conn = get_connection()
-
-    match = conn.execute("""
-        SELECT m.id, m.scheduled_at, m.competition,
-               th.name AS home_team, ta.name AS away_team
-        FROM matches m
-        LEFT JOIN teams th ON m.home_team_id = th.id
-        LEFT JOIN teams ta ON m.away_team_id = ta.id
-        WHERE m.id = ?
-    """, (match_id,)).fetchone()
-    if not match:
-        print("  ! Zápas nenalezen.")
-        conn.close()
-        return
-
-    pipeline = conn.execute(
-        "SELECT * FROM pipeline_runs WHERE match_id = ? ORDER BY started_at DESC LIMIT 1", (match_id,)
-    ).fetchone()
+    run_id = pipeline["run_id"]
+    match_id = pipeline["match_id"]
 
     print("\n  --- Základní info ---")
-    print(f"  Zápas:      {match['home_team']} vs {match['away_team']}")
-    print(f"  Soutěž:     {match['competition'] or '?'}")
-    print(f"  Datum:      {match['scheduled_at'] or '?'}")
-
-    run_id = pipeline["run_id"] if pipeline else None
+    print(f"  Zápas:      {pipeline['home_team']} vs {pipeline['away_team']}")
+    print(f"  Soutěž:     {pipeline['competition'] or '?'}")
+    print(f"  Datum:      {pipeline['scheduled_at'] or '?'}")
+    print(f"  Run ID:     {run_id}")
+    print(f"  Stav runu:  {pipeline['state']}")
 
     # Produkční AIWorker ukládá výsledek do jobs.result_json, ne do ai_runs.
     ai = conn.execute(
@@ -392,6 +425,42 @@ def show_analysis_results() -> None:
             print(f"  Audit nebyl vytvořen — pipeline skončila ve stavu '{st}'{reason}.")
         else:
             print(f"  Audit nebyl vytvořen (aktuální stav pipeline: {st}).")
+
+    # Diagnostika vyhledávání / Research
+    research_jobs = conn.execute(
+        "SELECT job_id, payload_json, result_json, error_text FROM jobs "
+        "WHERE run_id = ? AND job_type = 'RESEARCH' ORDER BY id",
+        (run_id,),
+    ).fetchall() if run_id else []
+    print("\n  --- Diagnostika vyhledávání (Research) ---")
+    if research_jobs:
+        for rj in research_jobs:
+            domain_str = "?"
+            if rj["payload_json"]:
+                try:
+                    p = json.loads(rj["payload_json"])
+                    domain_str = p.get("domain", "?")
+                except Exception:
+                    pass
+            print(f"  Doména {domain_str}:")
+            if rj["result_json"]:
+                try:
+                    res_dict = json.loads(rj["result_json"])
+                    warns = res_dict.get("warnings", []) if isinstance(res_dict, dict) else []
+                    if warns:
+                        for w in warns:
+                            print(f"    ! {w}")
+                    else:
+                        st = res_dict.get("status", "SUCCESS")
+                        print(f"    ✔ Výzkum dokončen se stavem '{st}' (důkazů: {res_dict.get('evidence_count', 0)}, zdrojů: {res_dict.get('sources_count', 0)}).")
+                except Exception:
+                    print(f"    ! {str(rj['result_json'])[:200]}")
+            elif rj["error_text"]:
+                print(f"    ! Chyba: {rj['error_text']}")
+            else:
+                print("    (Čeká na zpracování nebo probíhá.)")
+    else:
+        print("  (Žádné výzkumné joby.)")
 
     # Claims
     run_db = conn.execute("SELECT id FROM runs WHERE run_id = ?", (run_id,)).fetchone() if run_id else None
@@ -484,54 +553,85 @@ def show_analysis_results() -> None:
 
 def check_analysis_status() -> None:
     print("\n=== Stav analýzy ===")
-    rows = matches_with_runs()
-    if not rows:
+    runs = list_all_pipeline_runs()
+    if not runs:
         print("  (Žádný zápas nemá spuštěnou analýzu.)")
         return
-    for r in rows:
-        label = f"{r['home_team']} vs {r['away_team']}"
-        print(f"  [{r['id']}] {label}  ->  Run ID: {r['run_id']}  ({r['state']})")
+    print(f"\n  {'#':<4} {'Match ID':<9} {'Zápas':<42} {'Run ID':<30} {'Stav':<13}")
+    print("  " + "-" * 105)
+    for idx, r in enumerate(runs, 1):
+        label = f"{r['home_team'] or '?'} vs {r['away_team'] or '?'}"
+        print(f"  {idx:<4} #{r['match_id']:<8} {label:<42} {r['run_id']:<30} {r['state']:<13}")
 
-    match_id = select_match("Vyberte zápas podle ID: ")
-    if match_id is None:
+    pipeline = select_run("Vyberte běh (číslo #, Run ID nebo Match ID): ")
+    if not pipeline:
         return
 
     conn = get_connection()
-    pipeline = conn.execute(
-        "SELECT * FROM pipeline_runs WHERE match_id = ? ORDER BY started_at DESC LIMIT 1", (match_id,)
-    ).fetchone()
-    if not pipeline:
-        print("  ! Pro tento zápas neexistuje pipeline run.")
-        conn.close()
-        return
+    run_id = pipeline["run_id"]
 
-    print(f"\n  Run ID: {pipeline['run_id']}")
+    print(f"\n  Run ID: {run_id}")
+    print(f"  Zápas:  {pipeline['home_team']} vs {pipeline['away_team']} (#{pipeline['match_id']})")
     print(f"  Stav:   {pipeline['state']}  |  Cyklus: {pipeline['cycle']}/{pipeline['max_cycles']}")
     print(f"  Start:  {pipeline['started_at']}  |  Poslední aktualizace: {pipeline['updated_at']}")
+    if pipeline["finished_at"]:
+        print(f"  Konec:  {pipeline['finished_at']}")
     if pipeline["error_text"]:
-        print(f"  Chyba:  {pipeline['error_text']}")
+        print(f"  Důvod/Chyba: {pipeline['error_text']}")
 
-    jobs = conn.execute(
-        "SELECT job_type, status, COUNT(*) AS cnt FROM jobs WHERE run_id = ? GROUP BY job_type, status ORDER BY job_type",
-        (pipeline["run_id"],)
+    # Souhrn stavů jobů
+    jobs_summary = conn.execute(
+        "SELECT status, COUNT(*) AS cnt FROM jobs WHERE run_id = ? GROUP BY status",
+        (run_id,)
     ).fetchall()
-    print("\n  Joby pipeline:")
-    if jobs:
-        print(f"    {'Typ':<14} {'Stav':<10} {'Počet':<6}")
-        print("    " + "-" * 35)
-        for j in jobs:
-            print(f"    {j['job_type']:<14} {j['status']:<10} {j['cnt']:<6}")
+    print("\n  Souhrn jobů pipeline:")
+    if jobs_summary:
+        summary_dict = {j["status"]: j["cnt"] for j in jobs_summary}
+        print(f"    PENDING: {summary_dict.get('PENDING', 0)}  |  "
+              f"CLAIMED: {summary_dict.get('CLAIMED', 0)}  |  "
+              f"RETRY: {summary_dict.get('RETRY', 0)}  |  "
+              f"SUCCESS: {summary_dict.get('SUCCESS', 0)}  |  "
+              f"FAILED: {summary_dict.get('FAILED', 0)}  |  "
+              f"CANCELLED: {summary_dict.get('CANCELLED', 0)}")
     else:
         print("    (Žádné joby.)")
 
+    # Právě pracující worker(y)
+    active = conn.execute(
+        "SELECT job_id, job_type, worker_id, started_at FROM jobs WHERE run_id = ? AND status = 'CLAIMED'",
+        (run_id,)
+    ).fetchall()
+    if active:
+        print("\n  Aktivní worker(y):")
+        for a in active:
+            print(f"    Worker '{a['worker_id']}' zpracovává job {a['job_type']} ({(a['job_id'] or '')[:13]}… od {a['started_at'][:19]})")
+
+    # Poslední chyba a plánovaný retry
+    retry_job = conn.execute(
+        "SELECT job_id, job_type, attempts, max_attempts, next_attempt_at, error_text FROM jobs "
+        "WHERE run_id = ? AND status = 'RETRY' ORDER BY next_attempt_at ASC LIMIT 1",
+        (run_id,)
+    ).fetchone()
+    if retry_job:
+        print("\n  Plánované opakování (RETRY):")
+        print(f"    Job: {retry_job['job_type']} ({(retry_job['job_id'] or '')[:13]}…), Pokus: {retry_job['attempts']}/{retry_job['max_attempts']}")
+        if retry_job['next_attempt_at']:
+            print(f"    Další pokus naplánován na: {retry_job['next_attempt_at']}")
+        if retry_job['error_text']:
+            print(f"    Poslední chyba: {retry_job['error_text']}")
+
+    # Detailní přehled jobů
     detail = conn.execute(
-        "SELECT job_id, job_type, status, attempts, error_text FROM jobs WHERE run_id = ? ORDER BY id", (pipeline["run_id"],)
+        "SELECT job_id, job_type, status, worker_id, attempts, max_attempts, next_attempt_at, error_text "
+        "FROM jobs WHERE run_id = ? ORDER BY id", (run_id,)
     ).fetchall()
     if detail:
         print("\n  Detail jobů:")
         for j in detail[:50]:
-            extra = f"  ! {j['error_text'][:80]}" if j["error_text"] else ""
-            print(f"    [{j['status']:<8}] {j['job_type']:<14} ({(j['job_id'] or '')[:13]}…, pokusy: {j['attempts']}){extra}")
+            w_info = f" worker: {j['worker_id']}" if j["worker_id"] else ""
+            retry_info = f" next_retry: {j['next_attempt_at'][:19]}" if j["next_attempt_at"] else ""
+            err_info = f"  ! Chyba: {j['error_text'][:80]}" if j["error_text"] else ""
+            print(f"    [{j['status']:<8}] {j['job_type']:<12} (pokusy: {j['attempts']}/{j['max_attempts']}{w_info}{retry_info}){err_info}")
 
     conn.close()
 
