@@ -5,7 +5,6 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.orchestrator.models import AnalysisRequest, ResearchReadiness
 from app.orchestrator.orchestrator import MasterOrchestrator
-from app.orchestrator.match_resolver import MatchNotFoundException, AmbiguousMatchException
 from app.orchestrator.state_machine import MatchState
 
 router = APIRouter(prefix="/api/analysis", tags=["Analysis Orchestrator"])
@@ -14,16 +13,12 @@ orchestrator = MasterOrchestrator()
 
 @router.post("/start", status_code=status.HTTP_201_CREATED)
 def start_analysis(request: AnalysisRequest) -> Dict[str, Any]:
-    """Zahájí autonomní pipeline pro ověřený zápas přes MasterOrchestrator a MatchResolver."""
+    """Zahájí autonomní pipeline pro zápas přes MasterOrchestrator."""
     try:
         run_id = orchestrator.start_pipeline_from_request(request)
         return {"run_id": run_id, "status": MatchState.DISCOVERY}
-    except MatchNotFoundException as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except AmbiguousMatchException as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -62,6 +62,7 @@ class ResearchWorker:
         run_id_val = payload.get("run_id")
         if not non_null_cutoffs and run_id_val:
             with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
                 conn.row_factory = sqlite3.Row
                 r_row = conn.execute("SELECT data_cutoff_at FROM pipeline_runs WHERE run_id = ?", (str(run_id_val),)).fetchone()
                 if r_row and r_row["data_cutoff_at"]:
@@ -69,6 +70,7 @@ class ResearchWorker:
 
         if not home_team or not away_team or not competition or str(home_team).isdigit() or str(away_team).isdigit() or not scheduled_raw or not non_null_cutoffs:
             with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
                 conn.row_factory = sqlite3.Row
                 row = conn.execute("""
                     SELECT m.id as match_id, m.scheduled_at, m.venue,
@@ -129,47 +131,108 @@ class ResearchWorker:
         }
 
     def run_execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        match = payload.get("match") or {}
-        match_id = int(payload.get("match_id") or match.get("id") or 0)
-
         task_id = payload.get("task_id")
-        domain = str(payload.get("domain") or "GENERAL")
-        run_id_str = str(payload.get("run_id") or "")
-        run_db_id = int(payload.get("run_db_id") or 0)
+        if task_id is not None:
+            task_id = int(task_id)
 
-        # run_db_id is local to a particular SQLite database. Resolve it from
-        # the persisted task in this worker's database rather than trusting a
-        # potentially stale integer copied into the job payload.
-        if task_id:
-            task_row = self.repository.get_task(int(task_id))
-            if not task_row:
-                raise ValueError(f"Research task {task_id} is missing from worker database")
-            task_run_id = str(task_row["run_id"] or "")
-            if run_id_str and task_run_id != run_id_str:
-                raise ValueError(
-                    f"Research task {task_id} belongs to run '{task_run_id}', "
-                    f"not payload run '{run_id_str}'"
-                )
-            run_id_str = task_run_id
+        try:
+            match = payload.get("match") or {}
+            match_id = int(payload.get("match_id") or match.get("id") or 0)
+            domain = str(payload.get("domain") or "GENERAL")
+            run_id_str = str(payload.get("run_id") or "")
+
+            if task_id:
+                task_row = self.repository.get_task(task_id)
+                if not task_row:
+                    raise ValueError(f"Research task {task_id} is missing from worker database")
+                task_run_id = str(task_row["run_id"] or "")
+                if run_id_str and task_run_id != run_id_str:
+                    raise ValueError(
+                        f"Research task {task_id} belongs to run '{task_run_id}', "
+                        f"not payload run '{run_id_str}'"
+                    )
+                run_id_str = task_run_id
+
+            if not run_id_str:
+                run_id_str = f"RUN-{match_id or 'DEFAULT'}"
+
             with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
                 run_row = conn.execute(
                     "SELECT id FROM runs WHERE run_id = ?", (run_id_str,)
                 ).fetchone()
                 if not run_row:
-                    raise ValueError(
-                        f"Run '{run_id_str}' for research task {task_id} "
-                        "is missing from worker database"
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        "INSERT INTO runs(run_id, status, started_at) VALUES(?, 'RUNNING', ?)",
+                        (run_id_str, now_iso),
                     )
+                    run_row = conn.execute(
+                        "SELECT id FROM runs WHERE run_id = ?", (run_id_str,)
+                    ).fetchone()
                 run_db_id = int(run_row[0])
-                conn.execute(
-                    "UPDATE research_tasks SET run_db_id=? WHERE id=?",
-                    (run_db_id, int(task_id)),
-                )
+                if task_id:
+                    conn.execute(
+                        "UPDATE research_tasks SET run_db_id=? WHERE id=?",
+                        (run_db_id, task_id),
+                    )
 
-        try:
             ctx = self._resolve_match_context(match_id, payload, match)
+
+            if not task_id:
+                task_uuid = str(payload.get("task_uuid") or f"TASK-{match_id}-{domain}")
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.execute("PRAGMA foreign_keys = ON")
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT id FROM research_tasks WHERE run_id=? AND task_uuid=?", (run_id_str, task_uuid)).fetchone()
+                    if row:
+                        task_id = int(row["id"])
+                    else:
+                        cur = conn.execute("""
+                            INSERT INTO research_tasks(run_id, run_db_id, match_id, task_uuid, domain, task_type, description, required, priority, capabilities_json, data_cutoff_at, home_team, away_team, competition, scheduled_at, venue, status)
+                            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, 'RUNNING')
+                        """, (run_id_str, run_db_id, match_id, task_uuid, domain, str(payload.get("task_type") or "FACT_COLLECTION"), str(payload.get("description") or f"Research for {domain}"), 0, int(payload.get("priority", 50)), ctx["data_cutoff_at"].isoformat(), ctx["home_team"], ctx["away_team"], ctx["competition"], ctx["scheduled_at"].isoformat(), ctx["venue"]))
+                        conn.commit()
+                        task_id = int(cur.lastrowid)
+
+            attempt_number = int(payload.get("_job_attempt_number") or payload.get("attempt_number") or self._task_attempt(task_id))
+
+            task = ResearchTask(
+                task_id=task_id,
+                run_id=run_db_id,
+                match_id=match_id,
+                domain=domain,
+                task_type=str(payload.get("task_type") or "FACT_COLLECTION"),
+                description=str(payload.get("description") or f"Research for {domain}"),
+                required=bool(payload.get("required", False)),
+                priority=int(payload.get("priority", 50)),
+                data_cutoff_at=ctx["data_cutoff_at"],
+                home_team=ctx["home_team"],
+                away_team=ctx["away_team"],
+                competition=ctx["competition"],
+                scheduled_at=ctx["scheduled_at"],
+                venue=ctx["venue"],
+                attempt_number=attempt_number,
+            )
+
+            result = self.engine.execute(task)
+            status = result.status.value if isinstance(result.status, ResearchStatus) else str(result.status)
+            claims: List[Dict[str, Any]] = [_serialize_claim(claim) for claim in result.claims]
+            return {
+                "status": status,
+                "task_id": task_id,
+                "execution_id": result.execution_id,
+                "claims": claims,
+                "evidence_count": result.evidence_count,
+                "sources_count": result.sources_count,
+                "documents_count": result.documents_count,
+                "conflicts_count": result.conflicts_count,
+                "warnings": result.warnings,
+                "metrics": result.metrics.__dict__,
+            }
+
         except Exception as err:
-            err_msg = f"Match context resolution failed: {err}"
+            err_msg = str(err)
             if task_id:
                 try:
                     self.repository.mark_task_failed(int(task_id), err_msg)
@@ -188,48 +251,6 @@ class ResearchWorker:
                 "warnings": [err_msg],
                 "metrics": {},
             }
-
-        if not task_id:
-            task_uuid = str(payload.get("task_uuid") or f"TASK-{match_id}-{domain}")
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                row = conn.execute("SELECT id FROM research_tasks WHERE run_id=? AND task_uuid=?", (run_id_str, task_uuid)).fetchone()
-                if row:
-                    task_id = int(row["id"])
-                else:
-                    cur = conn.execute("""
-                        INSERT INTO research_tasks(run_id, run_db_id, match_id, task_uuid, domain, task_type, description, required, priority, capabilities_json, data_cutoff_at, home_team, away_team, competition, scheduled_at, venue, status)
-                        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, 'RUNNING')
-                    """, (run_id_str, run_db_id if run_db_id else None, match_id, task_uuid, domain, str(payload.get("task_type") or "FACT_COLLECTION"), str(payload.get("description") or f"Research for {domain}"), 0, int(payload.get("priority", 50)), ctx["data_cutoff_at"].isoformat(), ctx["home_team"], ctx["away_team"], ctx["competition"], ctx["scheduled_at"].isoformat(), ctx["venue"]))
-                    conn.commit()
-                    task_id = int(cur.lastrowid)
-        else:
-            task_id = int(task_id)
-
-        attempt_number = int(payload.get("_job_attempt_number") or payload.get("attempt_number") or self._task_attempt(task_id))
-
-        task = ResearchTask(
-            task_id=task_id,
-            run_id=run_db_id,
-            match_id=match_id,
-            domain=domain,
-            task_type=str(payload.get("task_type") or "FACT_COLLECTION"),
-            description=str(payload.get("description") or f"Research for {domain}"),
-            required=bool(payload.get("required", False)),
-            priority=int(payload.get("priority", 50)),
-            data_cutoff_at=ctx["data_cutoff_at"],
-            home_team=ctx["home_team"],
-            away_team=ctx["away_team"],
-            competition=ctx["competition"],
-            scheduled_at=ctx["scheduled_at"],
-            venue=ctx["venue"],
-            attempt_number=attempt_number,
-        )
-
-        result = self.engine.execute(task)
-        status = result.status.value if isinstance(result.status, ResearchStatus) else str(result.status)
-        claims: List[Dict[str, Any]] = [_serialize_claim(claim) for claim in result.claims]
-        return {"status": status, "task_id": task_id, "execution_id": result.execution_id, "claims": claims, "evidence_count": result.evidence_count, "sources_count": result.sources_count, "documents_count": result.documents_count, "conflicts_count": result.conflicts_count, "warnings": result.warnings, "metrics": result.metrics.__dict__}
 
     def _task_attempt(self, task_id: int) -> int:
         row = self.repository.get_task(task_id)

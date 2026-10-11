@@ -395,22 +395,60 @@ def show_analysis_results() -> None:
     else:
         print("  (Žádná tvrzení.)")
 
-    # Statistiky
-    stats = conn.execute(
-        "SELECT * FROM match_statistics WHERE match_id = ?", (match_id,)
-    ).fetchone()
+    # Statistiky a snapshoty
     print("\n  --- Statistiky ---")
-    if stats:
-        keys = ["home_goals", "away_goals", "home_shots", "away_shots",
-                "home_shots_on_target", "away_shots_on_target",
-                "home_possession", "away_possession", "home_corners", "away_corners",
-                "home_yellow_cards", "away_yellow_cards", "home_red_cards", "away_red_cards",
-                "home_xg", "away_xg"]
-        for k in keys:
-            if stats[k] is not None:
-                print(f"    {k}: {stats[k]}")
+    run_db = conn.execute("SELECT id FROM runs WHERE run_id = ?", (run_id,)).fetchone() if run_id else None
+    snapshots = conn.execute(
+        "SELECT s.*, t.name as team_name "
+        "FROM statistical_snapshots s "
+        "LEFT JOIN teams t ON s.team_id = t.id "
+        "WHERE s.run_id = ? "
+        "ORDER BY s.id",
+        (run_db["id"],),
+    ).fetchall() if run_db else []
+
+    if snapshots:
+        print(f"  {'Tým':<20} {'Metrika':<15} {'Hodnota':<10} {'Sample':<8} {'Coverage':<10} {'Cutoff':<20}")
+        print("  " + "-" * 85)
+        for snap in snapshots:
+            tname = snap["team_name"] or "Zápas/Celkem"
+            val = f"{snap['value']:.2f}" if snap["value"] is not None else "N/A"
+            cov = f"{snap['coverage'] * 100:.0f}%" if snap["coverage"] is not None else "?"
+            cutoff_val = snap["data_cutoff_at"][:19] if snap["data_cutoff_at"] else "?"
+            print(f"  {tname:<20} {snap['metric']:<15} {val:<10} {snap['sample_size']:<8} {cov:<10} {cutoff_val:<20}")
     else:
-        print("  (Žádné statistiky.)")
+        stats = conn.execute(
+            "SELECT * FROM match_statistics WHERE match_id = ?", (match_id,)
+        ).fetchone()
+        if stats:
+            keys = ["home_goals", "away_goals", "home_shots", "away_shots",
+                    "home_shots_on_target", "away_shots_on_target",
+                    "home_possession", "away_possession", "home_corners", "away_corners",
+                    "home_yellow_cards", "away_yellow_cards", "home_red_cards", "away_red_cards",
+                    "home_xg", "away_xg"]
+            for k in keys:
+                if stats[k] is not None:
+                    print(f"    {k}: {stats[k]}")
+        else:
+            print("  (Žádné statistické snapshoty pro tento run.)")
+
+    stats_job = conn.execute(
+        "SELECT result_json, error_text FROM jobs WHERE run_id = ? AND job_type = 'STATISTICS' ORDER BY id DESC LIMIT 1",
+        (run_id,),
+    ).fetchone() if run_id else None
+    if stats_job:
+        if stats_job["result_json"]:
+            try:
+                res_dict = json.loads(stats_job["result_json"])
+                warns = res_dict.get("warnings", []) if isinstance(res_dict, dict) else []
+                if warns:
+                    print("\n  Varování statistik:")
+                    for w in warns:
+                        print(f"    ! {w}")
+            except Exception:
+                pass
+        elif stats_job["error_text"]:
+            print(f"\n  Chyba výpočtu statistik: {stats_job['error_text']}")
 
     # Stav pipeline
     print("\n  --- Stav pipeline ---")

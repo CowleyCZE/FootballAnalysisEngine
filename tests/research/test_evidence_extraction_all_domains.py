@@ -10,7 +10,6 @@ def test_evidence_extractor_and_claim_builder_all_domains():
 
     domains = [
         ("ABSENCES_HOME", "John Doe is injured and ruled out for the match."),
-        ("MATCH_IDENTITY", "Sparta vs Slavia kickoff at Letna stadium."),
         ("FORM_HOME", "Sparta won 4 of their last 5 matches in strong form."),
         ("STATISTICS", "Sparta average 2.1 xG and 60% possession per match."),
         ("HEAD_TO_HEAD", "In recent H2H meetings, Slavia won 3 and Sparta won 2."),

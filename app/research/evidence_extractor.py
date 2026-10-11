@@ -6,7 +6,6 @@ from app.research.models import Evidence
 _DOMAIN_KEYWORDS = {
     "ABSENCES_HOME": ["injured", "injury", "miss", "unavailable", "ruled out", "doubt", "suspended", "sidelined", "fitness", "knock", "hamstring", "acl"],
     "ABSENCES_AWAY": ["injured", "injury", "miss", "unavailable", "ruled out", "doubt", "suspended", "sidelined", "fitness", "knock", "hamstring", "acl"],
-    "MATCH_IDENTITY": ["vs", "versus", "kick-off", "kickoff", "stadium", "venue", "scheduled", "round", "matchday", "referee", "fixture", "derby"],
     "FORM_HOME": ["win", "won", "loss", "lost", "draw", "drew", "streak", "form", "unbeaten", "scored", "conceded", "points", "recent"],
     "FORM_AWAY": ["win", "won", "loss", "lost", "draw", "drew", "streak", "form", "unbeaten", "scored", "conceded", "points", "recent"],
     "STATISTICS": ["xg", "possession", "shots", "corners", "goals", "clean sheet", "pass accuracy", "tackles", "cards", "stats", "average"],

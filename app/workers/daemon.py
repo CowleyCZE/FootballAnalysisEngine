@@ -106,6 +106,22 @@ class WorkerDaemon:
             self.queue.update_job_status(job_id, JobStatus.RETRY, error=str(exc), worker_id=self.worker_id)
         finally:
             hb_thread.stop()
+
+        # Autonomní posun pipeline po terminálním jobu
+        run_id = None
+        with self.queue.store.connect() as conn:
+            row = conn.execute("SELECT run_id FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+            if row and row["run_id"]:
+                run_id = row["run_id"]
+
+        if run_id:
+            try:
+                from app.orchestrator.orchestrator import MasterOrchestrator
+                master = MasterOrchestrator(db_path=self.queue.store.db_path)
+                master.advance_run(run_id)
+            except Exception as e:
+                logger.warning("Failed to advance pipeline for run %s: %s", run_id, e)
+
         return True
 
     def run_forever(self) -> None:

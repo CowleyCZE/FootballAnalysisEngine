@@ -25,7 +25,7 @@ def add_match_fixture(conn, status="RESOLVED"):
     )
 
 
-def test_add_match_never_marks_user_input_as_verified(tmp_path, monkeypatch):
+def test_add_match_saves_user_input_as_resolved(tmp_path, monkeypatch):
     db_path = setup_db(tmp_path, monkeypatch)
     answers = iter(("Sparta Praha", "Slavia Praha", "Chance Liga", "10.11.2026 19:00", ""))
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
@@ -35,8 +35,8 @@ def test_add_match_never_marks_user_input_as_verified(tmp_path, monkeypatch):
         def __init__(self, db_path):
             pass
 
-        def start_pipeline(self, match_id, data_cutoff_at=None, allow_unverified=False):
-            captured.update(match_id=match_id, cutoff=data_cutoff_at, allow_unverified=allow_unverified)
+        def start_pipeline(self, match_id, data_cutoff_at=None):
+            captured.update(match_id=match_id, cutoff=data_cutoff_at)
             return "RUN-MANUAL-1"
 
     monkeypatch.setattr(menu, "MasterOrchestrator", FakeOrchestrator)
@@ -45,9 +45,8 @@ def test_add_match_never_marks_user_input_as_verified(tmp_path, monkeypatch):
 
     with sqlite3.connect(db_path) as conn:
         row = conn.execute("SELECT status FROM matches").fetchone()
-    assert row == ("UNVERIFIED",)
+    assert row == ("RESOLVED",)
     assert captured["match_id"] == 1
-    assert captured["allow_unverified"] is True
     assert isinstance(captured["cutoff"], datetime)
 
 
@@ -62,35 +61,6 @@ def test_get_or_create_competition_matches_unicode_case_insensitively(tmp_path, 
 
     assert same_id == existing_id
     assert count == 1
-
-
-def test_verify_match_uses_resolver_and_reports_unverified(tmp_path, monkeypatch, capsys):
-    setup_db(tmp_path, monkeypatch)
-    with sqlite3.connect(menu.DB_PATH) as conn:
-        add_match_fixture(conn, status="UNVERIFIED")
-    answers = iter(("Sparta Praha", "Slavia Praha", "Chance Liga", "10.11.2026 19:00", ""))
-    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
-
-    menu.verify_match()
-
-    output = capsys.readouterr().out
-    assert "Zápas se nepodařilo ověřit" in output
-    assert "UNVERIFIED" in output
-    with sqlite3.connect(menu.DB_PATH) as conn:
-        assert conn.execute("SELECT status FROM matches WHERE id=1").fetchone() == ("UNVERIFIED",)
-
-
-def test_verify_match_accepts_exact_resolved_fixture(tmp_path, monkeypatch, capsys):
-    setup_db(tmp_path, monkeypatch)
-    with sqlite3.connect(menu.DB_PATH) as conn:
-        add_match_fixture(conn, status="RESOLVED")
-    answers = iter(("Sparta Praha", "Slavia Praha", "Chance Liga", "10.11.2026 19:00", ""))
-    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
-
-    menu.verify_match()
-
-    output = capsys.readouterr().out
-    assert "Ověřený zápas #1" in output
 
 
 def test_run_analysis_passes_cutoff_to_orchestrator(tmp_path, monkeypatch):

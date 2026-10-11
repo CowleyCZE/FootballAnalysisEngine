@@ -50,6 +50,14 @@ MasterOrchestrator (Single canonical orchestrator)
 - `POST /api/jobs/claim`: Atomically claim queued job.
 - `POST /api/jobs/{job_id}/result`: Submit job completion or failure result.
 
+## Running Workers
+
+To start a worker processing all background job capabilities (RESEARCH, SEARCH, CRAWL, STATISTICS, AI_ANALYSIS, AUDIT), run from the repository root:
+
+```bash
+python3 run_worker.py --worker-id worker-1
+```
+
 ## Running Tests
 
 Execute unit, integration, recovery, and E2E tests:

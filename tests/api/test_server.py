@@ -16,7 +16,7 @@ def api_test_db(tmp_path, monkeypatch):
     conn = sqlite3.connect(db_file)
     conn.execute("INSERT INTO teams(id, name, normalized_name) VALUES (1, 'Real Madrid', 'real_madrid'), (2, 'Barcelona', 'barcelona'), (3, 'Arsenal', 'arsenal'), (4, 'Chelsea', 'chelsea')")
     conn.execute("INSERT INTO competitions(id, name, country) VALUES (1, 'La Liga', 'Spain'), (2, 'Premier League', 'England')")
-    conn.execute("INSERT INTO matches(id, competition, competition_id, home_team_id, away_team_id, scheduled_at, status) VALUES (101, 'La Liga', 1, 1, 2, '2026-10-15 20:00:00', 'RESOLVED')")
+    conn.execute("INSERT INTO matches(id, competition, competition_id, home_team_id, away_team_id, scheduled_at, status) VALUES (101, 'La Liga', 1, 1, 2, '2026-10-15T18:00:00+00:00', 'RESOLVED')")
     conn.commit()
     conn.close()
 
@@ -83,8 +83,7 @@ def test_start_analysis_by_request(api_test_db):
     assert data["match_id"] == 101
 
 
-def test_start_analysis_creates_match_for_verified_teams(api_test_db):
-    # If Arsenal and Chelsea exist but match is not in schedule, start analysis must fail as unverified
+def test_start_analysis_creates_match_for_valid_request(api_test_db):
     client = TestClient(server_module.app)
     resp = client.post("/api/analysis/start", json={
         "home_team": "Arsenal",
@@ -92,20 +91,22 @@ def test_start_analysis_creates_match_for_verified_teams(api_test_db):
         "competition": "Premier League",
         "scheduled_at": "2026-11-20T18:00:00"
     }, headers=AUTH_HEADERS)
-    assert resp.status_code == 404
-    assert "neexistuje v autoritativním rozpisu" in resp.json()["detail"]
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "DISCOVERY"
+    assert data["match_id"] is not None
 
 
-def test_start_analysis_rejects_unverified_teams(api_test_db):
+def test_start_analysis_rejects_invalid_technical_input(api_test_db):
     client = TestClient(server_module.app)
     resp = client.post("/api/analysis/start", json={
         "home_team": "FC Fake Team",
         "away_team": "Chelsea",
-        "competition": "Premier League",
+        "competition": "   ",
         "scheduled_at": "2026-11-20T18:00:00"
     }, headers=AUTH_HEADERS)
-    assert resp.status_code == 404
-    assert "Zápas nelze ověřit" in resp.json()["detail"]
+    assert resp.status_code == 400
+    assert "non-empty" in resp.json()["detail"]
 
 
 def test_worker_registration_and_job_claim(api_test_db):

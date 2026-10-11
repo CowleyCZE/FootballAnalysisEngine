@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run one pull-based Football Analysis Engine worker on this machine."""
+"""Run one pull-based Football Analysis Engine worker on this machine.
+
+Recommended command to run a worker from the repository root:
+    python3 run_worker.py --worker-id worker-1
+"""
 
 import argparse
 import logging
@@ -7,14 +11,20 @@ import socket
 import sys
 from pathlib import Path
 
-# When invoked as ``python scripts/run_worker.py``, Python puts scripts/ rather
-# than the project root on sys.path.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
 from app.workers.daemon import WorkerDaemon
 
 
 DEFAULT_CAPABILITIES = ["RESEARCH", "SEARCH", "CRAWL", "STATISTICS", "AI_ANALYSIS", "AUDIT"]
+
+
+def resolve_db_path(db_path_str: str) -> str:
+    path = Path(db_path_str)
+    if not path.is_absolute():
+        path = (REPO_ROOT / path).resolve()
+    return str(path)
 
 
 def main() -> None:
@@ -30,10 +40,13 @@ def main() -> None:
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    db_abs = resolve_db_path(args.db_path)
+
     WorkerDaemon(
         worker_id=args.worker_id,
         capabilities=args.capability or DEFAULT_CAPABILITIES,
-        db_path=args.db_path,
+        db_path=db_abs,
         poll_interval=args.poll_interval,
     ).run_forever()
 

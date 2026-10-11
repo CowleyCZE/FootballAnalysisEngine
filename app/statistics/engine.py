@@ -52,13 +52,25 @@ class StatisticalEngine:
         # 4. Výpočet agregace a coverage xG
         home_xg_list = [m.get("home_xg") if m["home_team_id"] == home_team_id else m.get("away_xg") for m in home_matches]
         home_xg_agg = AggregateEngine.calculate_metric_aggregate(home_xg_list)
+        away_xg_list = [m.get("away_xg") if m["away_team_id"] == away_team_id else m.get("home_xg") for m in away_matches]
+        away_xg_agg = AggregateEngine.calculate_metric_aggregate(away_xg_list)
 
-        if home_xg_agg["coverage"] < 1.0:
-            warnings.append(f"xG coverage pro domácí je {home_xg_agg['coverage']*100:.0f}%.")
+        home_cov = home_xg_agg.get("coverage", 0.0)
+        away_cov = away_xg_agg.get("coverage", 0.0)
 
-        # 5. Uložení výsledného snapshotu. Provenance is mandatory;
-        # if the canonical run row is unavailable, return a safe partial
-        # result instead of turning a provider/data problem into a worker crash.
+        if home_cov < 1.0:
+            warnings.append(f"xG coverage pro domácí je {home_cov*100:.0f}%.")
+        if away_cov < 1.0:
+            warnings.append(f"xG coverage pro hosty je {away_cov*100:.0f}%.")
+
+        total_sample = home_form["sample_size"] + away_form["sample_size"]
+        if total_sample == 0 or (home_cov == 0.0 and away_cov == 0.0):
+            status = "INSUFFICIENT_DATA"
+            warnings.append("Nedostatečná historická data pro výpočet statistik (INSUFFICIENT_DATA).")
+        else:
+            status = "COMPLETED"
+
+        # 5. Uložení výsledných snapshotů pro domácí i hosty
         try:
             self.repo.save_snapshot(
                 run_id=run_id,
@@ -67,28 +79,32 @@ class StatisticalEngine:
                 metric="form_points",
                 value=float(home_form["points"]),
                 sample_size=home_form["sample_size"],
-                coverage=1.0,
+                coverage=home_cov,
+                data_cutoff_at=cutoff_datetime,
+                calculation_version=self.CALCULATION_VERSION
+            )
+            self.repo.save_snapshot(
+                run_id=run_id,
+                match_id=match_id,
+                team_id=away_team_id,
+                metric="form_points",
+                value=float(away_form["points"]),
+                sample_size=away_form["sample_size"],
+                coverage=away_cov,
                 data_cutoff_at=cutoff_datetime,
                 calculation_version=self.CALCULATION_VERSION
             )
         except (ValueError, sqlite3.IntegrityError) as exc:
             warnings.append(f"STATISTICS snapshot nebyl uložen: {exc}")
-            return {
-                "match_id": match_id,
-                "run_id": run_id,
-                "status": "PARTIAL",
-                "home_team": {"id": home_team_id, "form": home_form, "xg_aggregate": home_xg_agg},
-                "away_team": {"id": away_team_id, "form": away_form},
-                "warnings": warnings,
-                "errors": errors,
-            }
 
         return {
             "match_id": match_id,
             "run_id": run_id,
-            "status": "COMPLETED",
+            "status": status,
+            "sample_size": total_sample,
+            "coverage": min(home_cov, away_cov),
             "home_team": {"id": home_team_id, "form": home_form, "xg_aggregate": home_xg_agg},
-            "away_team": {"id": away_team_id, "form": away_form},
+            "away_team": {"id": away_team_id, "form": away_form, "xg_aggregate": away_xg_agg},
             "warnings": warnings,
             "errors": errors
         }

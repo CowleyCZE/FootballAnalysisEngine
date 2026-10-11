@@ -29,27 +29,25 @@ def test_db(tmp_path):
     return db_file
 
 
-def test_scenario_1_teams_comp_exist_but_match_not_in_schedule(test_db):
+def test_scenario_1_user_request_creates_resolved_match_and_starts_pipeline(test_db):
     """
-    1. V databázi existují oba týmy a soutěž, ale konkrétní zápas není v rozpisu.
-    Výsledek musí být odmítnut jako neověřený nebo nenalezený.
+    Ručně zadaný zápas se uloží jako RESOLVED a ihned spustí pipeline.
     """
-    resolver = MatchResolver(db_path=test_db)
+    orc = MatchOrchestrator(db_path=test_db)
     req = AnalysisRequest(
         home_team="AC Sparta Praha",
         away_team="SK Slavia Praha",
         competition="Chance Liga",
         scheduled_at=datetime(2025, 5, 10, 18, 0, tzinfo=timezone.utc),
     )
-    with pytest.raises(UnverifiedMatchException) as exc_info:
-        resolver.resolve_or_create(req)
-    assert "neexistuje v autoritativním rozpisu" in str(exc_info.value)
+    res = orc.start_analysis_run(req)
+    assert res["status"] == "DISCOVERY"
+    assert res["run_id"] is not None
 
-    # Verify match created in DB is UNVERIFIED
     with sqlite3.connect(test_db) as conn:
-        row = conn.execute("SELECT status FROM matches WHERE home_team_id=10 AND away_team_id=20").fetchone()
+        row = conn.execute("SELECT status FROM matches WHERE id=?", (res["match_id"],)).fetchone()
         assert row is not None
-        assert row[0] == "UNVERIFIED"
+        assert row[0] == "RESOLVED"
 
 
 def test_scenario_2_same_teams_play_on_different_date(test_db):
@@ -186,8 +184,8 @@ def test_scenario_7_multiple_matching_records_are_ambiguous(test_db):
         resolver.resolve(req)
 
 
-def test_scenario_8_unverified_request_cannot_start_pipeline(test_db):
-    """Unverified IDs stay blocked unless the caller explicitly opts in."""
+def test_scenario_8_manual_entry_starts_pipeline_and_resolves_match(test_db):
+    """Ručně zadaný zápas vytvoří run a označí zápas jako RESOLVED."""
     master = MasterOrchestrator(db_path=test_db)
     orc = MatchOrchestrator(db_path=test_db)
 
@@ -198,24 +196,15 @@ def test_scenario_8_unverified_request_cannot_start_pipeline(test_db):
         scheduled_at=datetime(2025, 5, 10, 18, 0, tzinfo=timezone.utc),
     )
 
-    with pytest.raises((MatchNotFoundException, UnverifiedMatchException)):
-        orc.start_analysis_run(req)
+    res = orc.start_analysis_run(req)
+    match_id = res["match_id"]
 
-    # Check unverified match ID in DB directly
-    with sqlite3.connect(test_db) as conn:
-        unverified_id = conn.execute("SELECT id FROM matches WHERE status='UNVERIFIED'").fetchone()[0]
-
-    with pytest.raises(ValueError) as exc_info:
-        master.start_pipeline(unverified_id)
-    assert "UNVERIFIED" in str(exc_info.value)
-
-    # The menu's explicit manual-entry path may start an unverified fixture.
-    run_id = master.start_pipeline(unverified_id, allow_unverified=True)
+    run_id = master.start_pipeline(match_id)
     with sqlite3.connect(test_db) as conn:
         run = conn.execute("SELECT match_id FROM pipeline_runs WHERE run_id=?", (run_id,)).fetchone()
-        status = conn.execute("SELECT status FROM matches WHERE id=?", (unverified_id,)).fetchone()[0]
-    assert run == (unverified_id,)
-    assert status == "UNVERIFIED"
+        status = conn.execute("SELECT status FROM matches WHERE id=?", (match_id,)).fetchone()[0]
+    assert run == (match_id,)
+    assert status == "RESOLVED"
 
 
 def test_scenario_9_verification_error_is_not_treated_as_success(test_db):
@@ -279,9 +268,12 @@ def test_fail_closed_status_checks(test_db):
             resolver.resolve(req)
         assert "pouze explicitní stav RESOLVED je povolen" in str(exc_info.value)
 
-        with pytest.raises(ValueError) as exc_info_master:
-            master.start_pipeline(idx)
-        assert "only explicit status RESOLVED is allowed" in str(exc_info_master.value)
+        # master.start_pipeline updates status to RESOLVED and succeeds
+        run_id = master.start_pipeline(idx)
+        assert run_id is not None
+        with sqlite3.connect(test_db) as conn:
+            updated_status = conn.execute("SELECT status FROM matches WHERE id=?", (idx,)).fetchone()[0]
+            assert updated_status == "RESOLVED"
 
 
 def test_strict_competition_matching(test_db):

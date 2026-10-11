@@ -9,13 +9,10 @@ from app.orchestrator.config import PipelineConfig
 from app.orchestrator.state_machine import MatchStateMachine, MatchState
 from app.orchestrator.recovery import PipelineRecovery
 from app.orchestrator.scheduler import DependencyScheduler
-from app.orchestrator.match_resolver import MatchResolver, MatchNotFoundException, AmbiguousMatchException, parse_to_utc
+from app.orchestrator.match_resolver import parse_to_utc
 from app.orchestrator.research_planner import ResearchPlanner
 from app.orchestrator.coverage import CoverageEngine
 from app.orchestrator.models import AnalysisRequest, MatchIdentity, TaskRequirement
-from app.jobs.queue import JobQueue
-from app.jobs.models import JobStatus, JobPriority
-from app.database.connection import init_database_schema
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +21,117 @@ _TASK_TYPE_TO_JOB_TYPE = {
     "STAT_COLLECTION": "STATISTICS",
     "NEWS_COLLECTION": "RESEARCH",
 }
+
+
+def get_or_create_match(
+    db_path: str,
+    home_team: str,
+    away_team: str,
+    competition: str,
+    scheduled_at: datetime,
+    venue: Optional[str] = None,
+) -> int:
+    """Technická validace a přímé vytvoření/načtení zápasu se stavem RESOLVED."""
+    if not home_team or not str(home_team).strip():
+        raise ValueError("Domácí tým (home_team) nesmí být prázdný.")
+    if not away_team or not str(away_team).strip():
+        raise ValueError("Hostující tým (away_team) nesmí být prázdný.")
+    if not competition or not str(competition).strip():
+        raise ValueError("Soutěž (competition) nesmí být prázdná.")
+    if not isinstance(scheduled_at, datetime):
+        raise ValueError("Čas zápasu (scheduled_at) musí být platný datetime.")
+
+    home_clean = str(home_team).strip()
+    away_clean = str(away_team).strip()
+    comp_clean = str(competition).strip()
+
+    home_norm = " ".join(home_clean.lower().split())
+    away_norm = " ".join(away_clean.lower().split())
+    comp_norm = " ".join(comp_clean.lower().split())
+
+    with sqlite3.connect(db_path, timeout=30) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        cursor = conn.cursor()
+
+        # Get or create home team
+        row = cursor.execute(
+            "SELECT id FROM teams WHERE lower(normalized_name) = ? OR lower(name) = ?",
+            (home_norm, home_norm),
+        ).fetchone()
+        if row:
+            home_id = int(row["id"])
+        else:
+            cursor.execute(
+                "INSERT INTO teams (name, normalized_name) VALUES (?, ?)",
+                (home_clean, home_norm),
+            )
+            home_id = int(cursor.lastrowid)
+
+        # Get or create away team
+        row = cursor.execute(
+            "SELECT id FROM teams WHERE lower(normalized_name) = ? OR lower(name) = ?",
+            (away_norm, away_norm),
+        ).fetchone()
+        if row:
+            away_id = int(row["id"])
+        else:
+            cursor.execute(
+                "INSERT INTO teams (name, normalized_name) VALUES (?, ?)",
+                (away_clean, away_norm),
+            )
+            away_id = int(cursor.lastrowid)
+
+        # Get or create competition
+        row = cursor.execute(
+            "SELECT id FROM competitions WHERE lower(name) = ?", (comp_norm,)
+        ).fetchone()
+        if row:
+            comp_id = int(row["id"])
+        else:
+            cursor.execute(
+                "INSERT OR IGNORE INTO competitions (name) VALUES (?)",
+                (comp_clean,),
+            )
+            row = cursor.execute(
+                "SELECT id FROM competitions WHERE lower(name) = ?", (comp_norm,)
+            ).fetchone()
+            comp_id = int(row["id"]) if row else int(cursor.lastrowid)
+
+        scheduled_iso = scheduled_at.isoformat()
+
+        # Check existing match
+        match_row = cursor.execute(
+            """
+            SELECT id FROM matches
+            WHERE home_team_id = ? AND away_team_id = ? AND scheduled_at = ?
+        """,
+            (home_id, away_id, scheduled_iso),
+        ).fetchone()
+
+        if match_row:
+            match_id = int(match_row["id"])
+            cursor.execute(
+                "UPDATE matches SET status = 'RESOLVED', competition = ?, competition_id = ? WHERE id = ?",
+                (comp_clean, comp_id, match_id),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO matches (home_team_id, away_team_id, competition_id, competition, scheduled_at, status, venue)
+                VALUES (?, ?, ?, ?, ?, 'RESOLVED', ?)
+            """,
+                (home_id, away_id, comp_id, comp_clean, scheduled_iso, venue),
+            )
+            match_id = int(cursor.lastrowid)
+
+        conn.commit()
+        return match_id
+
+
+from app.jobs.queue import JobQueue
+from app.jobs.models import JobStatus, JobPriority
+from app.database.connection import init_database_schema
 
 
 class MasterOrchestrator:
@@ -65,7 +173,9 @@ class MasterOrchestrator:
 
             match_status = row["status"] if ("status" in row.keys() and row["status"]) else None
             if match_status != "RESOLVED":
-                return None
+                cursor.execute("UPDATE matches SET status='RESOLVED' WHERE id=?", (match_id,))
+                conn.commit()
+                match_status = "RESOLVED"
 
             scheduled_str = row["scheduled_at"]
             if not scheduled_str:
@@ -219,9 +329,62 @@ class MasterOrchestrator:
 
     def start_pipeline_from_request(self, request: AnalysisRequest) -> str:
         """Vyhledá nebo založí zápas v DB a spustí pro něj kanonickou pipeline."""
-        resolver = MatchResolver(db_path=self.db_path)
-        match_identity = resolver.resolve_or_create(request)
-        return self.start_pipeline(match_identity.match_id, data_cutoff_at=match_identity.data_cutoff_at)
+        scheduled_utc = parse_to_utc(request.scheduled_at, getattr(request, "timezone", "Europe/Prague"))
+        match_id = get_or_create_match(
+            db_path=self.db_path,
+            home_team=request.home_team,
+            away_team=request.away_team,
+            competition=request.competition,
+            scheduled_at=scheduled_utc,
+            venue=getattr(request, "venue", None),
+        )
+        cutoff_dt = parse_to_utc(request.data_cutoff_at, getattr(request, "timezone", "Europe/Prague")) if request.data_cutoff_at else None
+        return self.start_pipeline(match_id, data_cutoff_at=cutoff_dt)
+
+    def advance_run(self, run_id: str, max_ticks: int = 10) -> str:
+        """Opakovaně volá tick(run_id), dokud se stav neposune nebo není dosažen limit max_ticks."""
+        if not run_id:
+            return ""
+        for _ in range(max_ticks):
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
+            if not row:
+                break
+            state_before = row[0]
+            self.tick(run_id)
+            with sqlite3.connect(self.db_path) as conn:
+                row_after = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
+            if not row_after:
+                break
+            state_after = row_after[0]
+            if state_before == state_after:
+                break
+        with sqlite3.connect(self.db_path) as conn:
+            row_final = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
+        return row_final[0] if row_final else ""
+
+    def _is_statistics_data_sufficient(self, jobs: List[Any]) -> bool:
+        stat_jobs = [j for j in jobs if j["job_type"] == "STATISTICS" and j["status"] == JobStatus.SUCCESS]
+        if not stat_jobs:
+            return False
+        for sj in stat_jobs:
+            raw = sj["result_json"] if "result_json" in sj.keys() else None
+            if not raw:
+                continue
+            try:
+                res = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(res, dict):
+                    if res.get("status") in ("INSUFFICIENT_DATA", "INVALID_DATA"):
+                        return False
+                    sample_size = res.get("sample_size")
+                    coverage = res.get("coverage")
+                    if sample_size is not None and sample_size == 0:
+                        return False
+                    if coverage is not None and coverage == 0.0:
+                        return False
+            except Exception:
+                pass
+        return True
 
     def tick(self, run_id: str):
         """Provede jeden deterministický krok pipeline a řídí joby pouze daného runu."""
@@ -261,7 +424,7 @@ class MasterOrchestrator:
         if state == MatchState.DISCOVERY:
             research_jobs = [j for j in jobs if j["job_type"] in ("RESEARCH", "STATISTICS")]
             if research_jobs and all(j["status"] in terminal for j in research_jobs):
-                if any(j["status"] == JobStatus.SUCCESS for j in research_jobs):
+                if self._are_all_required_jobs_successful(run_id) and any(j["status"] == JobStatus.SUCCESS for j in research_jobs):
                     self.state_machine.transition_to(
                         run_id, MatchState.COLLECTING, "Research tasks complete"
                     )
@@ -273,57 +436,60 @@ class MasterOrchestrator:
                     )
                 else:
                     self.state_machine.transition_to(
-                        run_id, MatchState.UNRESOLVED, "Research produced no usable result"
+                        run_id, MatchState.UNRESOLVED, "Research produced no usable result or required job failed"
                     )
             return
 
         if state == MatchState.COLLECTING:
             research_jobs = [j for j in jobs if j["job_type"] in ("RESEARCH", "STATISTICS")]
             if research_jobs and all(j["status"] in terminal for j in research_jobs):
-                if any(j["status"] == JobStatus.SUCCESS for j in research_jobs):
+                if self._are_all_required_jobs_successful(run_id) and any(j["status"] == JobStatus.SUCCESS for j in research_jobs):
                     self.state_machine.transition_to(run_id, MatchState.NORMALIZING, "Research evidence collected")
                     self.state_machine.transition_to(run_id, MatchState.CALCULATING, "Data normalized")
                 else:
-                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Research produced no usable result")
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Research produced no usable result or required job failed")
             return
 
         if state == MatchState.CALCULATING:
             statistics_jobs = [j for j in jobs if j["job_type"] == "STATISTICS"]
             if statistics_jobs and all(j["status"] in terminal for j in statistics_jobs):
-                if any(j["status"] == JobStatus.SUCCESS for j in statistics_jobs):
+                stat_success = any(j["status"] == JobStatus.SUCCESS for j in statistics_jobs)
+                if stat_success and self._is_statistics_data_sufficient(jobs):
                     match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                     self.state_machine.transition_to(run_id, MatchState.ANALYZING, "Statistics ready")
-                    cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
-                    self.queue.create_job(
-                        "AI_ANALYSIS",
-                        match_id,
-                        {
-                            "phase": "analysis",
-                            "run_id": run_id,
-                            "match_id": match_id,
-                            "run_db_id": self._get_run_db_id(run_id),
-                            "cycle": cycle,
-                            "db_path": self.db_path,
-                            "data_cutoff_at": cutoff_str,
-                            "cutoff_datetime": cutoff_str,
-                            "cutoff": cutoff_str,
-                            "match": {
+                    existing_ai = next((j for j in jobs if j["job_type"] == "AI_ANALYSIS"), None)
+                    if not existing_ai:
+                        cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
+                        self.queue.create_job(
+                            "AI_ANALYSIS",
+                            match_id,
+                            {
+                                "phase": "analysis",
+                                "run_id": run_id,
                                 "match_id": match_id,
-                                "home_team": match_ident.home_team if match_ident else "",
-                                "away_team": match_ident.away_team if match_ident else "",
-                                "competition": match_ident.competition if match_ident else "",
-                                "scheduled_at": match_ident.scheduled_at.isoformat() if match_ident else "",
+                                "run_db_id": self._get_run_db_id(run_id),
+                                "cycle": cycle,
+                                "db_path": self.db_path,
                                 "data_cutoff_at": cutoff_str,
                                 "cutoff_datetime": cutoff_str,
                                 "cutoff": cutoff_str,
-                                "venue": match_ident.venue if match_ident else None,
-                            } if match_ident else None,
-                        },
-                        priority=JobPriority.HIGH,
-                        run_id=run_id,
-                    )
+                                "match": {
+                                    "match_id": match_id,
+                                    "home_team": match_ident.home_team if match_ident else "",
+                                    "away_team": match_ident.away_team if match_ident else "",
+                                    "competition": match_ident.competition if match_ident else "",
+                                    "scheduled_at": match_ident.scheduled_at.isoformat() if match_ident else "",
+                                    "data_cutoff_at": cutoff_str,
+                                    "cutoff_datetime": cutoff_str,
+                                    "cutoff": cutoff_str,
+                                    "venue": match_ident.venue if match_ident else None,
+                                } if match_ident else None,
+                            },
+                            priority=JobPriority.HIGH,
+                            run_id=run_id,
+                        )
                 else:
-                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Statistics failed")
+                    self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Statistics failed or produced insufficient data")
             return
 
         if state == MatchState.ANALYZING:
@@ -331,29 +497,37 @@ class MasterOrchestrator:
                 (j for j in jobs if j["job_type"] == "AI_ANALYSIS" and j["status"] == JobStatus.SUCCESS),
                 None,
             )
+            failed_ai = next(
+                (j for j in jobs if j["job_type"] == "AI_ANALYSIS" and j["status"] in (JobStatus.FAILED, JobStatus.CANCELLED)),
+                None,
+            )
             if ai_job:
                 ai_res = json.loads(ai_job["result_json"]) if ai_job["result_json"] else {}
                 match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                 run_db_id = self._get_run_db_id(run_id)
                 self.state_machine.transition_to(run_id, MatchState.AUDITING, "AI Analysis complete")
-                cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
-                self.queue.create_job(
-                    "AUDIT",
-                    match_id,
-                    {
-                        "match_id": match_id,
-                        "ai_analysis": ai_res,
-                        "run_id": run_id,
-                        "run_db_id": run_db_id,
-                        "data_cutoff_at": cutoff_str,
-                        "cutoff_datetime": cutoff_str,
-                        "cutoff": cutoff_str,
-                        "cycle": cycle,
-                        "db_path": self.db_path,
-                    },
-                    priority=JobPriority.CRITICAL,
-                    run_id=run_id,
-                )
+                existing_audit = next((j for j in jobs if j["job_type"] == "AUDIT"), None)
+                if not existing_audit:
+                    cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
+                    self.queue.create_job(
+                        "AUDIT",
+                        match_id,
+                        {
+                            "match_id": match_id,
+                            "ai_analysis": ai_res,
+                            "run_id": run_id,
+                            "run_db_id": run_db_id,
+                            "data_cutoff_at": cutoff_str,
+                            "cutoff_datetime": cutoff_str,
+                            "cutoff": cutoff_str,
+                            "cycle": cycle,
+                            "db_path": self.db_path,
+                        },
+                        priority=JobPriority.CRITICAL,
+                        run_id=run_id,
+                    )
+            elif failed_ai:
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "AI Analysis job failed")
             return
 
         if state == MatchState.AUDITING:
@@ -575,29 +749,28 @@ class MasterOrchestrator:
 class MatchOrchestrator:
     """
     Fasáda delegující na MasterOrchestrator.
-    Přijme AnalysisRequest, vyřeší identitu zápasu přes MatchResolver,
+    Přijme AnalysisRequest, založí zápas jako RESOLVED v DB,
     a spustí kanonickou pipeline přes MasterOrchestrator.
     """
 
     def __init__(self, db_path: str = "database/football.db", config_path: str = "config/pipeline.yaml"):
         self.db_path = db_path
-        self.resolver = MatchResolver(db_path=db_path)
         self.master = MasterOrchestrator(db_path=db_path, config_path=config_path)
 
     def start_analysis_run(self, request: AnalysisRequest) -> Dict[str, Any]:
         """
         Spustí nový analytický běh delegací na MasterOrchestrator.
         """
-        match_identity = self.resolver.resolve_or_create(request)
-        run_id = self.master.start_pipeline(match_identity.match_id, data_cutoff_at=match_identity.data_cutoff_at)
+        run_id = self.master.start_pipeline_from_request(request)
 
         with sqlite3.connect(self.db_path) as conn:
+            match_id = conn.execute("SELECT match_id FROM pipeline_runs WHERE run_id=?", (run_id,)).fetchone()[0]
             tasks_count = conn.execute("SELECT COUNT(*) FROM research_tasks WHERE run_id=?", (run_id,)).fetchone()[0]
             jobs_count = conn.execute("SELECT COUNT(*) FROM jobs WHERE run_id=?", (run_id,)).fetchone()[0]
 
         return {
             "run_id": run_id,
-            "match_id": match_identity.match_id,
+            "match_id": match_id,
             "status": "DISCOVERY",
             "tasks_count": tasks_count,
             "jobs_created": jobs_count,

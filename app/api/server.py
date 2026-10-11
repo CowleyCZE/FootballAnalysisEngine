@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.orchestrator.orchestrator import MasterOrchestrator, MatchOrchestrator
 from app.orchestrator.models import AnalysisRequest
-from app.orchestrator.match_resolver import MatchNotFoundException, AmbiguousMatchException, UnverifiedMatchException
+from app.orchestrator.match_resolver import parse_to_utc
 from app.search.engine import SearchEngine
 from app.search.models import QuerySpec
 from app.search.searxng_client import SearXNGClient
@@ -181,7 +181,6 @@ def start_analysis(req: AnalysisStartRequest):
     cutoff_dt = None
     if req.data_cutoff_at:
         try:
-            from app.orchestrator.match_resolver import parse_to_utc
             cutoff_dt = parse_to_utc(req.data_cutoff_at, req.timezone)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid data_cutoff_at ISO timestamp")
@@ -199,15 +198,17 @@ def start_analysis(req: AnalysisStartRequest):
             raise HTTPException(status_code=404, detail=str(e))
 
     if req.home_team and req.away_team and req.scheduled_at:
+        if not req.home_team.strip() or not req.away_team.strip() or not (req.competition and req.competition.strip()):
+            raise HTTPException(status_code=400, detail="home_team, away_team, and competition must be non-empty strings.")
         try:
-            scheduled_dt = datetime.fromisoformat(req.scheduled_at)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid scheduled_at ISO timestamp")
+            scheduled_dt = parse_to_utc(req.scheduled_at, req.timezone)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid scheduled_at timestamp: {e}")
 
         analysis_req = AnalysisRequest(
-            home_team=req.home_team,
-            away_team=req.away_team,
-            competition=req.competition or "",
+            home_team=req.home_team.strip(),
+            away_team=req.away_team.strip(),
+            competition=req.competition.strip(),
             scheduled_at=scheduled_dt,
             timezone=req.timezone,
             priority=req.priority,
@@ -217,14 +218,10 @@ def start_analysis(req: AnalysisStartRequest):
         try:
             result = orchestrator.start_analysis_run(analysis_req)
             return result
-        except MatchNotFoundException as e:
-            raise HTTPException(status_code=404, detail=str(e))
-        except UnverifiedMatchException as e:
-            raise HTTPException(status_code=404, detail=str(e))
-        except AmbiguousMatchException as e:
+        except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-    raise HTTPException(status_code=400, detail="Must provide either match_id or (home_team, away_team, scheduled_at)")
+    raise HTTPException(status_code=400, detail="Must provide either match_id or (home_team, away_team, competition, scheduled_at)")
 
 
 @app.get("/api/analysis/{run_id}", dependencies=[Depends(verify_api_auth)])
@@ -430,12 +427,6 @@ def job_result(job_id: str, data: JobResult):
 
     if run_id:
         master = MasterOrchestrator(db_path=DB_PATH)
-        with sqlite3.connect(DB_PATH) as conn:
-            for _ in range(5):
-                state_before = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
-                master.tick(run_id)
-                state_after = conn.execute("SELECT state FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
-                if state_before and state_after and state_before[0] == state_after[0]:
-                    break
+        master.advance_run(run_id)
 
     return {"status": "ok", "job_id": job_id}

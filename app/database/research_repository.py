@@ -40,6 +40,7 @@ class ResearchRepository:
         with self.get_connection() as conn:
             now = self._now()
             conn.execute("UPDATE research_tasks SET status='FAILED', updated_at=? WHERE id=?", (now, int(task_id)))
+            conn.execute("UPDATE research_executions SET status='FAILED', completed_at=?, error_message=? WHERE task_id=? AND status='RUNNING'", (now, error_message, int(task_id)))
             conn.execute("UPDATE research_sessions SET status='FAILED', completed_at=? WHERE task_id=? AND status='RUNNING'", (now, int(task_id)))
 
     def mark_task_running(self, task_id: int, attempt_number: int) -> None:
@@ -76,12 +77,14 @@ class ResearchRepository:
         with self.get_connection() as conn:
             execution = conn.execute("SELECT status FROM research_executions WHERE id=? AND task_id=?", (int(execution_id), int(task_id))).fetchone()
             if not execution:
-                raise KeyError(f"execution {execution_id} for task {task_id}")
+                conn.execute("UPDATE research_tasks SET status=?, updated_at=? WHERE id=?", (status, now, int(task_id)))
+                conn.execute("UPDATE research_sessions SET status=?, completed_at=? WHERE task_id=? AND status='RUNNING'", (status, now, int(task_id)))
+                return
             conn.execute("UPDATE research_executions SET status=?, completed_at=?, error_message=? WHERE id=?", (status, now, error_message, int(execution_id)))
             conn.execute("UPDATE research_tasks SET status=?, updated_at=? WHERE id=?", (status, now, int(task_id)))
             conn.execute("UPDATE research_sessions SET status=?, completed_at=? WHERE task_id=? AND status='RUNNING'", (status, now, int(task_id)))
 
-    def create_session(self, session_uuid: str, run_id: int, task_id: int, strategy: str) -> int:
+    def create_session(self, session_uuid: str, run_id: Any, task_id: int, strategy: str) -> int:
         now = self._now()
         with self.get_connection() as conn:
             task = conn.execute(
@@ -90,16 +93,22 @@ class ResearchRepository:
             if not task:
                 raise KeyError(f"research task {task_id}")
             # Resolve the DB-local integer via the task's stable public run ID.
-            # Workers may have stale run_db_id values from copied payloads or
-            # databases; research_sessions.run_id references runs.id.
             run = conn.execute(
                 "SELECT id FROM runs WHERE run_id=?", (str(task["run_id"]),)
             ).fetchone()
+            if not run and isinstance(run_id, int) and run_id > 0:
+                run = conn.execute(
+                    "SELECT id FROM runs WHERE id=?", (int(run_id),)
+                ).fetchone()
+            if not run and isinstance(run_id, str):
+                run = conn.execute(
+                    "SELECT id FROM runs WHERE run_id=?", (run_id,)
+                ).fetchone()
             if not run:
-                raise KeyError(f"run '{task['run_id']}' for research task {task_id}")
+                raise KeyError(f"run for research task {task_id}")
             run_db_id = int(run["id"])
             conn.execute(
-                "UPDATE research_tasks SET run_db_id=? WHERE id=? AND run_db_id IS NOT ?",
+                "UPDATE research_tasks SET run_db_id=? WHERE id=? AND (run_db_id IS NULL OR run_db_id != ?)",
                 (run_db_id, int(task_id), run_db_id),
             )
             cur = conn.execute(
@@ -154,10 +163,24 @@ class ResearchRepository:
         cur = conn.execute("INSERT INTO documents(source_id, url, canonical_url, content_hash, title, published_at, retrieved_at, content_type, content_length) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (source_id, url, canonical_url, content_hash, None, published_at, self._now(), "text/html", len(text)))
         return int(cur.lastrowid)
 
-    def save_claims_and_evidence(self, run_id: int, task_id: int, claims: List[Dict[str, Any]]) -> None:
+    def save_claims_and_evidence(self, run_id: Any, task_id: int, claims: List[Dict[str, Any]]) -> None:
         with self.get_connection() as conn:
-            task_row = conn.execute("SELECT match_id FROM research_tasks WHERE id=?", (int(task_id),)).fetchone()
+            task_row = conn.execute("SELECT match_id, run_id FROM research_tasks WHERE id=?", (int(task_id),)).fetchone()
             default_match_id = int(task_row["match_id"]) if task_row else None
+
+            run_row = None
+            if task_row and task_row["run_id"]:
+                run_row = conn.execute("SELECT id FROM runs WHERE run_id=?", (str(task_row["run_id"]),)).fetchone()
+            if not run_row and isinstance(run_id, int):
+                run_row = conn.execute("SELECT id FROM runs WHERE id=?", (run_id,)).fetchone()
+            if not run_row and isinstance(run_id, str):
+                run_row = conn.execute("SELECT id FROM runs WHERE run_id=?", (run_id,)).fetchone()
+
+            if not run_row:
+                raise ValueError(f"Run for task {task_id} not found in runs table")
+
+            run_db_id = int(run_row["id"])
+
             for claim in claims:
                 object_value = str(claim.get("object", ""))
                 subject = str(claim.get("subject", ""))
@@ -165,7 +188,7 @@ class ResearchRepository:
                 normalized = str(claim.get("normalized_value", object_value))
                 status = str(claim.get("status", "UNVERIFIED"))
                 claim_text = f"{subject} {predicate} {object_value}".strip()
-                cur = conn.execute("INSERT INTO claims(run_id, match_id, claim_text, claim_type, normalized_claim, status, confidence, valid_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (int(run_id), claim.get("match_id", default_match_id), claim_text, predicate or None, normalized, status, float(claim.get("confidence", 1.0)), claim.get("source_date")))
+                cur = conn.execute("INSERT INTO claims(run_id, match_id, claim_text, claim_type, normalized_claim, status, confidence, valid_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (run_db_id, claim.get("match_id", default_match_id), claim_text, predicate or None, normalized, status, float(claim.get("confidence", 1.0)), claim.get("source_date")))
                 claim_id = int(cur.lastrowid)
                 for ev in claim.get("evidence_list", []):
                     url = str(ev.get("source_url", ""))

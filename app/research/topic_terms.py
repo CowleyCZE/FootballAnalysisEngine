@@ -4,15 +4,6 @@ from typing import Dict, List
 
 
 DOMAIN_TOPIC_TERMS: Dict[str, List[str]] = {
-    "MATCH_IDENTITY": [
-        "fixture",
-        "match",
-        "official",
-        "stadium",
-        "venue",
-        "kickoff",
-        "date",
-    ],
     "RECENT_FORM": [
         "result",
         "results",

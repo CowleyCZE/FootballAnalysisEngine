@@ -44,17 +44,6 @@ class ClaimBuilder:
                         status=ClaimStatus.CANDIDATE
                     ))
 
-            elif domain == "MATCH_IDENTITY":
-                claims.append(Claim(
-                    subject=f"{team_name}_match",
-                    predicate="match_identity",
-                    object_value=text,
-                    normalized_value=f"match_identity:{text[:40]}",
-                    evidence_list=[ev],
-                    source_date=ev.published_at,
-                    status=ClaimStatus.CANDIDATE
-                ))
-
             elif "FORM" in domain:
                 claims.append(Claim(
                     subject=team_name,
