@@ -260,6 +260,7 @@ class MasterOrchestrator:
                     "cutoff": cutoff_iso,
                     "capabilities_required": task.capabilities_required,
                     "worker_capability": job_type,
+                    "db_path": self.db_path,
                 }
                 job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "football-analysis:%s:%s" % (run_id, task.task_uuid)))
                 fingerprint = self.queue.generate_fingerprint(job_type, match_id, payload, run_id)

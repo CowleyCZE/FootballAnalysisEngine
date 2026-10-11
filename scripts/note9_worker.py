@@ -38,8 +38,42 @@ DEFAULT_CONFIG = {
 }
 
 
+def sanitize_url(url: str) -> str:
+    """Masks query parameters and credentials in URLs for logging."""
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url)
+        netloc = parsed.netloc
+        if "@" in netloc:
+            userinfo, host = netloc.split("@", 1)
+            if ":" in userinfo:
+                user = userinfo.split(":", 1)[0]
+                netloc = f"{user}:***@{host}"
+            else:
+                netloc = f"***@{host}"
+        path = parsed.path or "/"
+        query_str = "?[redacted]" if parsed.query else ""
+        return f"{parsed.scheme}://{netloc}{path}{query_str}"
+    except Exception:
+        return "[sanitized-url]"
+
+
+def sanitize_text(text: str, token: str | None = None) -> str:
+    """Removes secret tokens and credentials from output/error messages."""
+    if not text:
+        return ""
+    if token and token in text:
+        text = text.replace(token, "[REDACTED_TOKEN]")
+    env_token = os.environ.get("WORKER_API_TOKEN", "").strip()
+    if env_token and env_token in text:
+        text = text.replace(env_token, "[REDACTED_TOKEN]")
+    return text
+
+
 def log(message: str) -> None:
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+    clean_msg = sanitize_text(message)
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {clean_msg}", flush=True)
 
 
 def load_config() -> dict[str, Any]:
@@ -117,6 +151,7 @@ class Note9Worker:
 
     def request(self, method: str, path: str, **kwargs: Any) -> requests.Response:
         url = f"{self.server_url}{path}"
+        safe_url = sanitize_url(url)
         error: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             try:
@@ -125,10 +160,11 @@ class Note9Worker:
                 return response
             except requests.RequestException as exc:
                 error = exc
-                log(f"HTTP chyba {method} {url} (pokus {attempt}/{self.max_retries}): {exc}")
+                err_clean = sanitize_text(str(exc))
+                log(f"HTTP chyba {method} {safe_url} (pokus {attempt}/{self.max_retries}): {err_clean}")
                 if attempt < self.max_retries:
                     time.sleep(min(2 ** (attempt - 1), 8))
-        raise RuntimeError(f"HTTP požadavek selhal: {method} {url}: {error}")
+        raise RuntimeError(f"HTTP požadavek selhal: {method} {safe_url}: {sanitize_text(str(error))}")
 
     def register(self) -> None:
         response = self.request("POST", "/api/workers/register", json={
@@ -137,13 +173,14 @@ class Note9Worker:
             "worker_version": self.worker_version,
             "capabilities": self.capabilities,
         })
-        log(f"Registrace: {response.json().get('status', 'neznámý stav')}")
+        log(f"Registrace u serveru {sanitize_url(self.server_url)}: {response.json().get('status', 'ok')}")
 
     def heartbeat(self, force: bool = False) -> None:
         if not force and time.monotonic() - self.last_heartbeat < self.heartbeat_interval:
             return
         self.request("POST", "/api/workers/heartbeat", json={"worker_id": self.worker_id, "status": "online"})
         self.last_heartbeat = time.monotonic()
+        log(f"Heartbeat odeslán pro {self.worker_id} (status: online)")
 
     def claim(self) -> dict[str, Any] | None:
         data = self.request("POST", "/api/jobs/claim", json={
@@ -162,8 +199,9 @@ class Note9Worker:
         if result is not None:
             body["result"] = result
         if error:
-            body["error"] = error
-        self.request("POST", f"/api/jobs/{job_id}/result", json=body)
+            body["error"] = sanitize_text(error)
+        response = self.request("POST", f"/api/jobs/{job_id}/result", json=body)
+        log(f"Odeslání výsledku jobu {job_id} ({status}): HTTP {response.status_code}")
 
     @staticmethod
     def run_test(payload: dict[str, Any]) -> dict[str, Any]:
@@ -178,6 +216,7 @@ class Note9Worker:
         query = str(payload.get("query") or "").strip()
         if not query:
             raise ValueError("SEARCH úloha nemá query; nelze vrátit falešný úspěch.")
+        log(f"SEARCH start: query='{query}', tým='{payload.get('team') or ''}', doména='{payload.get('domain') or ''}'")
         proxy_payload = {
             "query": query,
             "language": str(payload.get("language") or "en"),
@@ -191,6 +230,8 @@ class Note9Worker:
         result = self.request("POST", "/api/internal/search", json=proxy_payload).json()
         if result.get("status") != "COMPLETED":
             raise RuntimeError(f"Vyhledávací proxy nevrátila COMPLETED: {result}")
+        results_cnt = len(result.get("results") or [])
+        log(f"SEARCH dokončen: nalezeno {results_cnt} výsledků pro query='{query}'")
         return result
 
     def run_crawl(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -198,6 +239,8 @@ class Note9Worker:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("CRAWL úloha neobsahuje platnou http(s) URL.")
+        safe_c_url = sanitize_url(url)
+        log(f"CRAWL start: cíl={safe_c_url}")
         response = requests.get(url, timeout=self.timeout, headers={"User-Agent": self.session.headers["User-Agent"]})
         response.raise_for_status()
         # Omezíme přenášený obsah; telefon netvrdí, že provedl plný Playwright crawl.
@@ -208,6 +251,8 @@ class Note9Worker:
             parser.feed(text)
         except Exception:
             pass
+        title_str = parser.title or None
+        log(f"CRAWL dokončen: host/path={parsed.netloc}{parsed.path}, HTTP {response.status_code}, délka={len(response.content)} B, titul='{title_str[:60] if title_str else 'N/A'}'")
         return {
             "status": "COMPLETED",
             "url": url,
@@ -215,17 +260,24 @@ class Note9Worker:
             "status_code": response.status_code,
             "content_length": len(response.content),
             "content_hash": hashlib.sha256(content).hexdigest(),
-            "title": parser.title or None,
+            "title": title_str,
             "used_playwright": False,
             "truncated": len(response.content) > len(content),
         }
 
     def process(self, job: dict[str, Any]) -> None:
-        job_id = str(job.get("id") or "")
+        job_id = str(job.get("id") or job.get("job_id") or "")
         job_type = str(job.get("job_type") or "").upper()
         payload = job.get("payload") or {}
+        domain = str(payload.get("domain") or "")
+        attempt = job.get("attempt_number") or payload.get("_job_attempt_number") or 1
+        domain_info = f", doména={domain}" if domain else ""
+
         if not job_id or not isinstance(payload, dict):
             raise RuntimeError(f"Neplatná úloha ze serveru: {job}")
+
+        log(f"Převzat job ID={job_id}, typ={job_type}{domain_info}, pokus={attempt}")
+
         handlers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
             "TEST": self.run_test,
             "SEARCH": self.run_search,
@@ -238,15 +290,16 @@ class Note9Worker:
         try:
             result = handler(payload)
             self.submit(job_id, "SUCCESS", result=result)
-            log(f"Úloha {job_id} ({job_type}) dokončena.")
+            log(f"Úloha {job_id} ({job_type}) úspěšně dokončena.")
         except Exception as exc:
-            self.submit(job_id, "FAILED", error=f"{type(exc).__name__}: {exc}")
-            log(f"Úloha {job_id} ({job_type}) selhala: {exc}")
+            err_msg = f"{type(exc).__name__}: {exc}"
+            self.submit(job_id, "FAILED", error=err_msg)
+            log(f"Úloha {job_id} ({job_type}) selhala: {sanitize_text(err_msg)}")
 
     def run(self) -> None:
+        log(f"Start Note9Worker ID={self.worker_id}, Name='{self.worker_name}', Ver={self.worker_version}, Server={sanitize_url(self.server_url)}, Schopnosti={', '.join(self.capabilities)}")
         self.register()
         self.heartbeat(force=True)
-        log(f"Worker {self.worker_id}; server {self.server_url}; schopnosti {', '.join(self.capabilities)}")
         while self.running:
             try:
                 self.heartbeat()
@@ -258,8 +311,9 @@ class Note9Worker:
             except KeyboardInterrupt:
                 break
             except Exception as exc:
-                log(f"Server nebo worker není dostupný: {exc}. Další pokus za 10 sekund.")
+                log(f"Server nebo worker není dostupný: {sanitize_text(str(exc))}. Další pokus za 10 sekund.")
                 time.sleep(10)
+        log(f"Ukončování Note9Worker ID={self.worker_id}...")
 
 
 def main() -> None:

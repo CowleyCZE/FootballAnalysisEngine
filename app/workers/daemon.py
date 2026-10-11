@@ -91,13 +91,13 @@ class WorkerDaemon:
                 self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=result, worker_id=self.worker_id)
             elif res_status in ("PARTIAL", "NO_RESULT", "INSUFFICIENT_DATA"):
                 error_msg = result.get("error") or f"Job produced non-successful outcome status: {res_status}"
-                self.queue.update_job_status(job_id, JobStatus.FAILED, result=result, error=error_msg, worker_id=self.worker_id)
+                self.queue.update_job_status(job_id, JobStatus.FAILED, result=result, error=error_msg, worker_id=self.worker_id, force_fail=True)
             elif res_status == "RETRY":
                 err_msg = result.get("error") or "Job handler requested retry"
                 self.queue.update_job_status(job_id, JobStatus.RETRY, result=result, error=str(err_msg), worker_id=self.worker_id)
             elif res_status in ("FAILED", "ERROR"):
                 err_msg = result.get("error") or f"Job handler returned status {res_status}"
-                force_fail = result.get("fatal") is True or result.get("retriable") is False
+                force_fail = result.get("fatal") is True or result.get("retriable") is False or result.get("force_fail") is True
                 self.queue.update_job_status(job_id, JobStatus.FAILED, result=result, error=str(err_msg), worker_id=self.worker_id, force_fail=force_fail)
             else:
                 err_msg = f"Job produced unknown or invalid status: {res_status}"

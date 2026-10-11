@@ -59,5 +59,19 @@ def initialize_database(db_path: str) -> None:
             CREATE INDEX IF NOT EXISTS idx_system_events_run ON system_events(run_id);
             CREATE INDEX IF NOT EXISTS idx_system_events_job ON system_events(job_id);
         """)
+        # Bezpečná deduplikace a vytvoření unikátního indexu pro statistical_snapshots bez mazání historických dat
+        if _table_exists(conn, "statistical_snapshots"):
+            conn.execute("""
+                DELETE FROM statistical_snapshots
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM statistical_snapshots
+                    GROUP BY run_id, COALESCE(team_id, -1), metric, data_cutoff_at, calculation_version
+                )
+            """)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uidx_statistical_snapshots_stable
+                ON statistical_snapshots(run_id, COALESCE(team_id, -1), metric, data_cutoff_at, calculation_version)
+            """)
         _migrate_legacy_schema(conn)
         conn.commit()

@@ -197,3 +197,83 @@ def test_repeated_ticks_are_idempotent_no_duplicate_jobs(fix_db):
         ai_jobs_count = conn.execute("SELECT COUNT(*) FROM jobs WHERE run_id=? AND job_type='AI_ANALYSIS'", (run_id,)).fetchone()[0]
 
     assert ai_jobs_count == 1
+
+
+def test_daemon_handles_no_result_and_insufficient_data_as_fatal(fix_db):
+    from app.workers.daemon import WorkerDaemon
+    from app.jobs.models import JobStatus
+
+    daemon = WorkerDaemon(worker_id="test-daemon", capabilities=["RESEARCH"], db_path=fix_db)
+
+    job_id_1 = daemon.queue.create_job("RESEARCH", 10, {"test": 1}, run_id="RUN-D1")
+    job_id_2 = daemon.queue.create_job("RESEARCH", 10, {"test": 2}, run_id="RUN-D2")
+
+    # Mock HANDLERS to return NO_RESULT and INSUFFICIENT_DATA
+    daemon.HANDLERS = {
+        "RESEARCH": lambda payload: {"status": "NO_RESULT" if payload.get("test") == 1 else "INSUFFICIENT_DATA"}
+    }
+
+    daemon.run_once()
+    daemon.run_once()
+
+    with sqlite3.connect(fix_db) as conn:
+        j1 = conn.execute("SELECT status, next_attempt_at FROM jobs WHERE job_id=?", (job_id_1,)).fetchone()
+        j2 = conn.execute("SELECT status, next_attempt_at FROM jobs WHERE job_id=?", (job_id_2,)).fetchone()
+
+    assert j1[0] == JobStatus.FAILED
+    assert j1[1] is None  # force_fail = True, no next_attempt_at
+    assert j2[0] == JobStatus.FAILED
+    assert j2[1] is None
+
+
+def test_idempotent_statistical_snapshots(fix_db):
+    from app.statistics.repository import StatisticsRepository
+
+    repo = StatisticsRepository(db_path=fix_db)
+    with sqlite3.connect(fix_db) as conn:
+        conn.execute("INSERT INTO runs(id, run_id, status, started_at) VALUES (500, 'RUN-IDEMP-1', 'RUNNING', '2026-10-04T10:00:00Z')")
+
+    # Insert snapshot twice with identical key
+    id1 = repo.save_snapshot(500, 10, 1, "form_points", 12.0, 5, 1.0, "2026-10-04T12:00:00Z")
+    id2 = repo.save_snapshot(500, 10, 1, "form_points", 12.0, 5, 1.0, "2026-10-04T12:00:00Z")
+
+    with sqlite3.connect(fix_db) as conn:
+        rows = conn.execute("SELECT COUNT(*) FROM statistical_snapshots WHERE run_id=500 AND metric='form_points'").fetchone()[0]
+
+    assert rows == 1
+
+
+def test_menu_select_run_by_sequence_number_and_run_id(fix_db, monkeypatch):
+    import menu
+    monkeypatch.setattr(menu, "DB_PATH", fix_db)
+
+    with sqlite3.connect(fix_db) as conn:
+        conn.execute("INSERT INTO runs(id, run_id, status, started_at) VALUES (601, 'RUN-M-1', 'RUNNING', '2026-10-04T10:00:00Z')")
+        conn.execute("INSERT INTO pipeline_runs(run_id, match_id, state, cycle, max_cycles, started_at, updated_at) VALUES ('RUN-M-1', 10, 'DISCOVERY', 1, 3, '2026-10-04T10:00:00Z', '2026-10-04T10:00:00Z')")
+
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "1")
+    run_selected = menu.select_run()
+    assert run_selected is not None
+    assert run_selected["run_id"] == "RUN-M-1"
+
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "RUN-M-1")
+    run_selected_2 = menu.select_run()
+    assert run_selected_2 is not None
+    assert run_selected_2["run_id"] == "RUN-M-1"
+
+
+def test_note9_worker_sanitize_url_and_text(monkeypatch):
+    from scripts.note9_worker import sanitize_url, sanitize_text
+
+    monkeypatch.setenv("WORKER_API_TOKEN", "super-secret-token")
+
+    url = "http://admin:password123@192.168.1.1:8000/api/internal/search?query=test&key=val"
+    sanitized = sanitize_url(url)
+    assert "password123" not in sanitized
+    assert "admin:***@" in sanitized
+    assert "?[redacted]" in sanitized
+
+    text = "Failed to call http://example.com with token super-secret-token"
+    clean = sanitize_text(text)
+    assert "super-secret-token" not in clean
+    assert "[REDACTED_TOKEN]" in clean
