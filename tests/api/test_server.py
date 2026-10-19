@@ -1,0 +1,208 @@
+import sqlite3
+import pytest
+from fastapi.testclient import TestClient
+
+import app.api.server as server_module
+from app.database.schema import initialize_database
+
+
+@pytest.fixture
+def api_test_db(tmp_path, monkeypatch):
+    db_file = str(tmp_path / "test_api.db")
+    monkeypatch.setattr(server_module, "DB_PATH", db_file)
+    monkeypatch.setenv("WORKER_API_TOKEN", "test-secret-token")
+    initialize_database(db_file)
+
+    conn = sqlite3.connect(db_file)
+    conn.execute("INSERT INTO teams(id, name, normalized_name) VALUES (1, 'Real Madrid', 'real_madrid'), (2, 'Barcelona', 'barcelona'), (3, 'Arsenal', 'arsenal'), (4, 'Chelsea', 'chelsea')")
+    conn.execute("INSERT INTO competitions(id, name, country) VALUES (1, 'La Liga', 'Spain'), (2, 'Premier League', 'England')")
+    conn.execute("INSERT INTO matches(id, competition, competition_id, home_team_id, away_team_id, scheduled_at, status) VALUES (101, 'La Liga', 1, 1, 2, '2026-10-15T18:00:00+00:00', 'RESOLVED')")
+    conn.commit()
+    conn.close()
+
+    return db_file
+
+
+AUTH_HEADERS = {"X-Worker-Token": "test-secret-token"}
+
+
+def test_health_and_root(api_test_db):
+    client = TestClient(server_module.app)
+    assert client.get("/").status_code == 200
+    assert client.get("/api/health").status_code == 200
+
+
+def test_api_authentication_enforcement(api_test_db):
+    client = TestClient(server_module.app)
+
+    # 1. Unauthenticated request returns 401
+    unauth_resp = client.post("/api/analysis/start", json={"match_id": 101})
+    assert unauth_resp.status_code == 401
+
+    # 2. Invalid token returns 401
+    bad_token_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers={"X-Worker-Token": "wrong-token"})
+    assert bad_token_resp.status_code == 401
+
+    # 3. Valid X-Worker-Token header succeeds
+    auth_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)
+    assert auth_resp.status_code == 200
+
+    # 4. Valid Authorization: Bearer header succeeds
+    bearer_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers={"Authorization": "Bearer test-secret-token"})
+    assert bearer_resp.status_code == 200
+
+
+def test_api_returns_service_unavailable_when_server_token_is_unconfigured(monkeypatch):
+    from fastapi import HTTPException
+
+    monkeypatch.delenv("WORKER_API_TOKEN", raising=False)
+    monkeypatch.delenv("API_SECRET_TOKEN", raising=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        server_module.verify_api_auth("client-has-a-token", None)
+
+    assert exc_info.value.status_code == 503
+    assert "not configured on the server" in exc_info.value.detail
+
+
+def test_start_analysis_by_match_id(api_test_db):
+    client = TestClient(server_module.app)
+    resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "started"
+    assert data["match_id"] == 101
+    run_id = data["run_id"]
+
+    status_resp = client.get(f"/api/analysis/{run_id}", headers=AUTH_HEADERS)
+    assert status_resp.status_code == 200
+    status_data = status_resp.json()
+    assert status_data["match_id"] == 101
+    assert status_data["state"] == "DISCOVERY"
+    assert status_data["jobs_count"] >= 2
+
+
+def test_start_analysis_by_request(api_test_db):
+    client = TestClient(server_module.app)
+    resp = client.post("/api/analysis/start", json={
+        "home_team": "Real Madrid",
+        "away_team": "Barcelona",
+        "competition": "La Liga",
+        "scheduled_at": "2026-10-15T20:00:00"
+    }, headers=AUTH_HEADERS)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "DISCOVERY"
+    assert data["match_id"] == 101
+
+
+def test_start_analysis_creates_match_for_valid_request(api_test_db):
+    client = TestClient(server_module.app)
+    resp = client.post("/api/analysis/start", json={
+        "home_team": "Arsenal",
+        "away_team": "Chelsea",
+        "competition": "Premier League",
+        "scheduled_at": "2026-11-20T18:00:00"
+    }, headers=AUTH_HEADERS)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "DISCOVERY"
+    assert data["match_id"] is not None
+
+
+def test_start_analysis_rejects_invalid_technical_input(api_test_db):
+    client = TestClient(server_module.app)
+    resp = client.post("/api/analysis/start", json={
+        "home_team": "FC Fake Team",
+        "away_team": "Chelsea",
+        "competition": "   ",
+        "scheduled_at": "2026-11-20T18:00:00"
+    }, headers=AUTH_HEADERS)
+    assert resp.status_code == 400
+    assert "non-empty" in resp.json()["detail"]
+
+
+def test_worker_registration_and_job_claim(api_test_db):
+    client = TestClient(server_module.app)
+    start_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)
+    assert start_resp.status_code == 200
+
+    # Unauthenticated should fail with 401
+    unauth_resp = client.post("/api/workers/register", json={
+        "worker_id": "test-worker-1",
+        "worker_name": "notebook",
+        "worker_version": "1.0",
+        "capabilities": ["RESEARCH", "STATISTICS"]
+    })
+    assert unauth_resp.status_code == 401
+
+    reg_resp = client.post("/api/workers/register", json={
+        "worker_id": "test-worker-1",
+        "worker_name": "notebook",
+        "worker_version": "1.0",
+        "capabilities": ["RESEARCH", "STATISTICS"]
+    }, headers=AUTH_HEADERS)
+    assert reg_resp.status_code == 200
+
+    claim_resp = client.post("/api/jobs/claim", json={
+        "worker_id": "test-worker-1",
+        "capabilities": ["RESEARCH", "STATISTICS"]
+    }, headers=AUTH_HEADERS)
+    assert claim_resp.status_code == 200
+    claim_data = claim_resp.json()
+    assert claim_data["status"] == "job_assigned"
+    job_id = claim_data["job"]["id"]
+
+    result_resp = client.post(f"/api/jobs/{job_id}/result", json={
+        "worker_id": "test-worker-1",
+        "status": "SUCCESS",
+        "result": {"status": "ok"}
+    }, headers=AUTH_HEADERS)
+    assert result_resp.status_code == 200
+
+
+def test_job_result_triggers_autonomous_tick(api_test_db):
+    client = TestClient(server_module.app)
+    start_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)
+    run_id = start_resp.json()["run_id"]
+
+    # Claim and finish all discovery jobs
+    while True:
+        claim_resp = client.post("/api/jobs/claim", json={
+            "worker_id": "w1",
+            "capabilities": ["generic", "RESEARCH", "STATISTICS"]
+        }, headers=AUTH_HEADERS)
+        if claim_resp.json()["status"] == "no_job":
+            break
+        job_id = claim_resp.json()["job"]["id"]
+        client.post(f"/api/jobs/{job_id}/result", json={
+            "worker_id": "w1",
+            "status": "SUCCESS",
+            "result": {"evidence": ["sample"]}
+        }, headers=AUTH_HEADERS)
+
+    # Pipeline should have advanced past DISCOVERY automatically
+    status_resp = client.get(f"/api/analysis/{run_id}", headers=AUTH_HEADERS)
+    assert status_resp.json()["state"] != "DISCOVERY"
+
+
+def test_api_result_unresolved_returns_insufficient_data(api_test_db):
+    client = TestClient(server_module.app)
+    start_resp = client.post("/api/analysis/start", json={"match_id": 101}, headers=AUTH_HEADERS)
+    run_id = start_resp.json()["run_id"]
+
+    # Force run into UNRESOLVED state
+    with sqlite3.connect(api_test_db) as conn:
+        conn.execute("UPDATE pipeline_runs SET state = 'UNRESOLVED', error_text = 'Cutoff missing' WHERE run_id = ?", (run_id,))
+        # Insert mock successful AI analysis job
+        conn.execute(
+            "INSERT INTO jobs (job_id, job_type, match_id, run_id, status, result_json, priority) VALUES ('J-AI-1', 'AI_ANALYSIS', 101, ?, 'SUCCESS', ?, 100)",
+            (run_id, '{"status": "complete", "conclusion": "Fake success"}')
+        )
+
+    res_resp = client.get(f"/api/analysis/{run_id}/result", headers=AUTH_HEADERS)
+    assert res_resp.status_code == 200
+    res_data = res_resp.json()
+    assert res_data["state"] == "UNRESOLVED"
+    assert res_data["ai_analysis"]["status"] == "insufficient_data"
+    assert "nelze prezentovat jako úspěšnou" in res_data["ai_analysis"]["conclusion"]

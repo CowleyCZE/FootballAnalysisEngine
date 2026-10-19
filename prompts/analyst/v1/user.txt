@@ -1,0 +1,6 @@
+ANALYTICKÝ KONTEXT:
+{{CONTEXT}}
+
+PROVEĎ ANALÝZU.
+Dodrž všechna pravidla systémového promptu.
+Výstup vrať pouze jako JSON.

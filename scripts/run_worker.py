@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Run one pull-based Football Analysis Engine worker on this machine.
+
+Recommended command to run a worker from the repository root:
+    python3 run_worker.py --worker-id worker-1
+"""
+
+import argparse
+import logging
+import socket
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from app.workers.daemon import WorkerDaemon
+
+
+DEFAULT_CAPABILITIES = ["RESEARCH", "SEARCH", "CRAWL", "STATISTICS", "AI_ANALYSIS", "AUDIT"]
+
+
+def resolve_db_path(db_path_str: str) -> str:
+    path = Path(db_path_str)
+    if not path.is_absolute():
+        path = (REPO_ROOT / path).resolve()
+    return str(path)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--worker-id", default=f"notebook-{socket.gethostname()}")
+    parser.add_argument("--db-path", default="database/football.db")
+    parser.add_argument("--poll-interval", type=float, default=2.0)
+    parser.add_argument(
+        "--capability",
+        action="append",
+        choices=DEFAULT_CAPABILITIES,
+        help="Capability to serve; repeat it. Defaults to all capabilities.",
+    )
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    db_abs = resolve_db_path(args.db_path)
+
+    WorkerDaemon(
+        worker_id=args.worker_id,
+        capabilities=args.capability or DEFAULT_CAPABILITIES,
+        db_path=db_abs,
+        poll_interval=args.poll_interval,
+    ).run_forever()
+
+
+if __name__ == "__main__":
+    main()

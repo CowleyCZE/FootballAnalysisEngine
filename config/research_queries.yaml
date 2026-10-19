@@ -1,0 +1,120 @@
+FORM_HOME:
+  discovery:
+    - "{home_team} recent results match history"
+    - "{home_team} last 5 matches results"
+  verification:
+    - "{home_team} recent form statistics"
+
+FORM_AWAY:
+  discovery:
+    - "{away_team} recent results match history"
+    - "{away_team} last 5 matches results"
+  verification:
+    - "{away_team} recent form statistics"
+
+STATISTICS:
+  discovery:
+    - "{home_team} {away_team} statistics {competition}"
+    - "{home_team} {away_team} xG xGA shots possession corners cards"
+    - "{home_team} {away_team} pressing set pieces defensive metrics"
+  verification:
+    - "{home_team} {away_team} match statistics xG"
+
+HEAD_TO_HEAD:
+  discovery:
+    - "{home_team} {away_team} head to head"
+    - "{home_team} vs {away_team} previous meetings"
+    - "{home_team} {away_team} derby rivalry goals cards"
+
+ABSENCES_HOME:
+  discovery:
+    - "{home_team} injuries"
+    - "{home_team} injury news"
+    - "{home_team} unavailable players"
+  verification:
+    - "{home_team} team news {away_team}"
+    - "{home_team} injury update {match_date}"
+  primary:
+    - "{home_team} official injury update"
+
+ABSENCES_AWAY:
+  discovery:
+    - "{away_team} injuries"
+    - "{away_team} injury news"
+    - "{away_team} unavailable players"
+  verification:
+    - "{away_team} team news {home_team}"
+    - "{away_team} injury update {match_date}"
+  primary:
+    - "{away_team} official injury update"
+
+EXPECTED_LINEUPS:
+  discovery:
+    - "{home_team} {away_team} predicted lineups"
+    - "{home_team} {away_team} expected lineup formation"
+
+WEATHER:
+  discovery:
+    - "weather forecast {venue} {match_date} football"
+    - "weather {home_team} stadium {match_date} wind rain temperature pitch"
+
+REFEREE:
+  discovery:
+    - "{home_team} {away_team} referee appointment {match_date}"
+    - "{home_team} {away_team} referee cards fouls penalties average"
+
+RIVALRY:
+  discovery:
+    - "{home_team} {away_team} rivalry derby history"
+    - "{home_team} {away_team} rivalry cards goals intensity"
+
+STYLE_MATCHUP:
+  discovery:
+    - "{home_team} {away_team} tactical preview pressing possession transition"
+    - "{home_team} {away_team} style matchup set pieces counter attack"
+
+MOTIVATION_HOME:
+  discovery:
+    - "{home_team} league position objectives qualification relegation motivation"
+    - "{home_team} next fixtures rotation priorities cup league"
+
+MOTIVATION_AWAY:
+  discovery:
+    - "{away_team} league position objectives qualification relegation motivation"
+    - "{away_team} next fixtures rotation priorities cup league"
+
+TRAVEL_FATIGUE_HOME:
+  discovery:
+    - "{home_team} fixture congestion rest days travel rotation"
+    - "{home_team} schedule matches in last 14 days fatigue"
+
+TRAVEL_FATIGUE_AWAY:
+  discovery:
+    - "{away_team} fixture congestion rest days travel rotation"
+    - "{away_team} schedule matches in last 14 days fatigue"
+
+TEAM_PROFILE_HOME:
+  discovery:
+    - "{home_team} current season league table position points goal difference"
+    - "{home_team} recent form last 5 matches player goals assists minutes xG xGA"
+    - "{home_team} injury suspension team news {match_date}"
+    - "{home_team} manager tactics strengths weaknesses home away record results"
+    - "{home_team} fixture congestion rest days travel news"
+    - "{home_team} previous seasons league results history"
+    - "{home_team} pressing possession set pieces defensive record"
+  verification:
+    - "{home_team} official team news injuries suspension"
+    - "{home_team} official league table statistics"
+
+TEAM_PROFILE_AWAY:
+  discovery:
+    - "{away_team} current season league table position points goal difference"
+    - "{away_team} recent form last 5 matches player goals assists minutes xG xGA"
+    - "{away_team} injury suspension team news {match_date}"
+    - "{away_team} manager tactics strengths weaknesses home away record results"
+    - "{away_team} fixture congestion rest days travel news"
+    - "{away_team} previous seasons league results history"
+    - "{away_team} pressing possession set pieces defensive record"
+  verification:
+    - "{away_team} official team news injuries suspension"
+    - "{away_team} official league table statistics"

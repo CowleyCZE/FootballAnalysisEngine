@@ -1,0 +1,287 @@
+from __future__ import annotations
+
+import asyncio
+import sqlite3
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from app.crawler.crawler import EngineCrawler
+from app.database.research_repository import ResearchRepository
+from app.research.engine import ResearchEngine
+from app.research.models import ResearchStatus, ResearchTask
+from app.orchestrator.match_resolver import parse_to_utc
+
+
+class _CrawlerAdapter:
+    def __init__(self):
+        self.crawler = EngineCrawler()
+
+    def crawl(self, url: str) -> Dict[str, Any]:
+        result, document = asyncio.run(self.crawler.crawl_and_parse(url))
+        if not result.success or document is None:
+            return {"status": "error", "url": url, "error": result.error or "crawl failed"}
+        return {"status": "success", "url": document.url, "title": document.title or "", "text": document.text or "", "published_at": document.published_at, "retrieved_at": document.retrieved_at, "language": document.language, "word_count": document.word_count, "quality_score": document.quality_score, "content_hash": document.content_hash}
+
+
+def _serialize_claim(claim: Any) -> Dict[str, Any]:
+    return {"claim_id": claim.claim_id, "subject": claim.subject, "predicate": claim.predicate, "object": claim.object_value, "normalized_value": claim.normalized_value, "confidence": claim.confidence, "status": claim.status.value if hasattr(claim.status, "value") else str(claim.status), "source_date": claim.source_date.isoformat() if claim.source_date else None, "evidence": [{"document_id": ev.document_id, "source_url": ev.source_url, "text_fragment": ev.text_fragment, "published_at": ev.published_at.isoformat() if ev.published_at else None} for ev in claim.evidence_list]}
+
+
+class ResearchWorker:
+    """Worker boundary between the job queue and one ResearchEngine task."""
+
+    def __init__(self, db_path: str = "database/football.db", engine: Optional[ResearchEngine] = None):
+        self.db_path = db_path
+        self.repository = ResearchRepository(db_path=db_path)
+        self.engine = engine or ResearchEngine(repository=self.repository, crawler=_CrawlerAdapter())
+
+    @classmethod
+    def execute(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
+        db_path = payload.get("db_path") or "database/football.db"
+        worker = cls(db_path=db_path)
+        return worker.run_execute(payload)
+
+    def _resolve_match_context(self, match_id: int, payload: Dict[str, Any], match: Dict[str, Any]) -> Dict[str, Any]:
+        home_team = payload.get("home_team") or match.get("home_team")
+        away_team = payload.get("away_team") or match.get("away_team")
+        competition = payload.get("competition") or match.get("competition")
+        venue = payload.get("venue") or match.get("venue")
+
+        scheduled_raw = payload.get("scheduled_at") or match.get("scheduled_at")
+
+        cutoff_candidates = [
+            payload.get("data_cutoff_at"),
+            payload.get("cutoff_datetime"),
+            payload.get("cutoff"),
+            match.get("data_cutoff_at"),
+            match.get("cutoff_datetime"),
+            match.get("cutoff"),
+        ]
+        non_null_cutoffs = [c for c in cutoff_candidates if c is not None and str(c).strip() != ""]
+
+        run_id_val = payload.get("run_id")
+        if not non_null_cutoffs and run_id_val:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
+                conn.row_factory = sqlite3.Row
+                r_row = conn.execute("SELECT data_cutoff_at FROM pipeline_runs WHERE run_id = ?", (str(run_id_val),)).fetchone()
+                if r_row and r_row["data_cutoff_at"]:
+                    non_null_cutoffs.append(r_row["data_cutoff_at"])
+
+        if not home_team or not away_team or not competition or str(home_team).isdigit() or str(away_team).isdigit() or not scheduled_raw or not non_null_cutoffs:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("""
+                    SELECT m.id as match_id, m.scheduled_at, m.venue,
+                           th.name as home_team, ta.name as away_team, COALESCE(c.name, m.competition, '') as competition
+                    FROM matches m
+                    LEFT JOIN teams th ON m.home_team_id = th.id
+                    LEFT JOIN teams ta ON m.away_team_id = ta.id
+                    LEFT JOIN competitions c ON m.competition_id = c.id
+                    WHERE m.id = ?
+                """, (match_id,)).fetchone()
+                if row:
+                    if not home_team or str(home_team).isdigit():
+                        home_team = row["home_team"]
+                    if not away_team or str(away_team).isdigit():
+                        away_team = row["away_team"]
+                    if not competition or str(competition).isdigit():
+                        competition = row["competition"]
+                    if not venue:
+                        venue = row["venue"]
+                    if not scheduled_raw:
+                        scheduled_raw = row["scheduled_at"]
+
+        if not scheduled_raw:
+            raise ValueError("Match kickoff time (scheduled_at) is missing.")
+
+        tz_override = payload.get("timezone") or match.get("timezone") or "Europe/Prague"
+
+        parsed_cutoffs = []
+        has_invalid = False
+        invalid_err = ""
+        for c in non_null_cutoffs:
+            try:
+                parsed_cutoffs.append(self._parse_datetime(c, default_tz_name=tz_override))
+            except Exception as e:
+                has_invalid = True
+                invalid_err = str(e)
+
+        has_conflict = False
+        if len(parsed_cutoffs) > 1:
+            first_c = parsed_cutoffs[0]
+            if any(c != first_c for c in parsed_cutoffs[1:]):
+                has_conflict = True
+
+        if not non_null_cutoffs or has_invalid or has_conflict:
+            err_detail = invalid_err if has_invalid and invalid_err else "Data cutoff time (data_cutoff_at) is missing or invalid."
+            raise ValueError(f"Match context resolution failed: Invalid timestamp or cutoff: {err_detail}")
+
+        scheduled_at = self._parse_datetime(scheduled_raw, default_tz_name=tz_override)
+        cutoff = parsed_cutoffs[0]
+
+        return {
+            "home_team": str(home_team or f"Team_{match_id}"),
+            "away_team": str(away_team or f"Opponent_{match_id}"),
+            "competition": str(competition or "Football League"),
+            "venue": venue,
+            "scheduled_at": scheduled_at,
+            "data_cutoff_at": cutoff,
+        }
+
+    def run_execute(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        task_id = payload.get("task_id")
+        if task_id is not None:
+            task_id = int(task_id)
+
+        try:
+            match = payload.get("match") or {}
+            match_id = int(payload.get("match_id") or match.get("id") or 0)
+            domain = str(payload.get("domain") or "GENERAL")
+            run_id_str = str(payload.get("run_id") or "")
+
+            if task_id:
+                task_row = self.repository.get_task(task_id)
+                if not task_row:
+                    raise ValueError(f"Research task {task_id} is missing from worker database")
+                task_run_id = str(task_row["run_id"] or "")
+                if run_id_str and task_run_id != run_id_str:
+                    raise ValueError(
+                        f"Research task {task_id} belongs to run '{task_run_id}', "
+                        f"not payload run '{run_id_str}'"
+                    )
+                run_id_str = task_run_id
+
+            if not run_id_str:
+                run_id_str = f"RUN-{match_id or 'DEFAULT'}"
+
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
+                run_row = conn.execute(
+                    "SELECT id FROM runs WHERE run_id = ?", (run_id_str,)
+                ).fetchone()
+                if not run_row:
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        "INSERT INTO runs(run_id, status, started_at) VALUES(?, 'RUNNING', ?)",
+                        (run_id_str, now_iso),
+                    )
+                    run_row = conn.execute(
+                        "SELECT id FROM runs WHERE run_id = ?", (run_id_str,)
+                    ).fetchone()
+                run_db_id = int(run_row[0])
+                if task_id:
+                    conn.execute(
+                        "UPDATE research_tasks SET run_db_id=? WHERE id=?",
+                        (run_db_id, task_id),
+                    )
+
+            ctx = self._resolve_match_context(match_id, payload, match)
+
+            if not task_id:
+                task_uuid = str(payload.get("task_uuid") or f"TASK-{match_id}-{domain}")
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.execute("PRAGMA foreign_keys = ON")
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT id FROM research_tasks WHERE run_id=? AND task_uuid=?", (run_id_str, task_uuid)).fetchone()
+                    if row:
+                        task_id = int(row["id"])
+                    else:
+                        cur = conn.execute("""
+                            INSERT INTO research_tasks(run_id, run_db_id, match_id, task_uuid, domain, task_type, description, required, priority, capabilities_json, data_cutoff_at, home_team, away_team, competition, scheduled_at, venue, status)
+                            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, 'RUNNING')
+                        """, (run_id_str, run_db_id, match_id, task_uuid, domain, str(payload.get("task_type") or "FACT_COLLECTION"), str(payload.get("description") or f"Research for {domain}"), 0, int(payload.get("priority", 50)), ctx["data_cutoff_at"].isoformat(), ctx["home_team"], ctx["away_team"], ctx["competition"], ctx["scheduled_at"].isoformat(), ctx["venue"]))
+                        conn.commit()
+                        task_id = int(cur.lastrowid)
+
+            attempt_number = int(payload.get("_job_attempt_number") or payload.get("attempt_number") or self._task_attempt(task_id))
+
+            task = ResearchTask(
+                task_id=task_id,
+                run_id=run_db_id,
+                match_id=match_id,
+                domain=domain,
+                task_type=str(payload.get("task_type") or "FACT_COLLECTION"),
+                description=str(payload.get("description") or f"Research for {domain}"),
+                required=bool(payload.get("required", False)),
+                priority=int(payload.get("priority", 50)),
+                data_cutoff_at=ctx["data_cutoff_at"],
+                home_team=ctx["home_team"],
+                away_team=ctx["away_team"],
+                competition=ctx["competition"],
+                scheduled_at=ctx["scheduled_at"],
+                venue=ctx["venue"],
+                attempt_number=attempt_number,
+                subject_team_id=int(payload["subject_team_id"]) if payload.get("subject_team_id") is not None else None,
+            )
+
+            result = self.engine.execute(task)
+            status = result.status.value if isinstance(result.status, ResearchStatus) else str(result.status)
+            claims: List[Dict[str, Any]] = [_serialize_claim(claim) for claim in result.claims]
+            team_context_domain = (
+                domain in {"TEAM_PROFILE_HOME", "TEAM_PROFILE_AWAY", "ABSENCES_HOME", "ABSENCES_AWAY",
+                           "MOTIVATION_HOME", "MOTIVATION_AWAY", "TRAVEL_FATIGUE_HOME", "TRAVEL_FATIGUE_AWAY"}
+            )
+            if team_context_domain and task.subject_team_id is not None and claims:
+                self.repository.save_team_profile(
+                    team_id=task.subject_team_id,
+                    cutoff_at=ctx["data_cutoff_at"].isoformat(),
+                    run_id=run_id_str,
+                    claims=claims,
+                )
+            elif domain in {"HEAD_TO_HEAD", "EXPECTED_LINEUPS", "WEATHER", "REFEREE", "RIVALRY", "STYLE_MATCHUP"} and claims:
+                self.repository.save_match_context(
+                    match_id=match_id, run_id=run_id_str,
+                    cutoff_at=ctx["data_cutoff_at"].isoformat(), claims=claims, domain=domain,
+                )
+            err_text = "; ".join(result.warnings) if result.warnings else None
+            return {
+                "status": status,
+                "error": err_text,
+                "task_id": task_id,
+                "execution_id": result.execution_id,
+                "claims": claims,
+                "evidence_count": result.evidence_count,
+                "sources_count": result.sources_count,
+                "documents_count": result.documents_count,
+                "conflicts_count": result.conflicts_count,
+                "warnings": result.warnings,
+                "metrics": result.metrics.__dict__,
+            }
+
+        except Exception as err:
+            err_msg = str(err)
+            if task_id:
+                try:
+                    self.repository.mark_task_failed(int(task_id), err_msg)
+                except Exception:
+                    pass
+            return {
+                "status": "FAILED",
+                "error": err_msg,
+                "task_id": task_id,
+                "execution_id": None,
+                "claims": [],
+                "evidence_count": 0,
+                "sources_count": 0,
+                "documents_count": 0,
+                "conflicts_count": 0,
+                "warnings": [err_msg],
+                "metrics": {},
+            }
+
+    def _task_attempt(self, task_id: int) -> int:
+        row = self.repository.get_task(task_id)
+        if not row:
+            raise KeyError(task_id)
+        return int(row["attempt_number"] or 1)
+
+    @staticmethod
+    def _parse_datetime(value: Any, default_tz_name: str = "Europe/Prague") -> datetime:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValueError("RESEARCH job requires a data cutoff and scheduled_at")
+        try:
+            return parse_to_utc(value, default_tz_name=default_tz_name)
+        except Exception as err:
+            raise ValueError(f"Invalid timestamp or timezone '{value}': {err}")

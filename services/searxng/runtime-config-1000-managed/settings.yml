@@ -1,0 +1,28 @@
+use_default_settings:
+  engines:
+    keep_only:
+    - bing
+    - seznam
+    - yep
+    - yahoo
+general:
+  instance_name: Football Analysis Engine Search
+search:
+  safe_search: 0
+  formats:
+  - html
+  - json
+  - rss
+server:
+  limiter: false
+  image_proxy: false
+  secret_key: managed-by-SEARXNG_SECRET-environment
+engines:
+- name: bing
+  disabled: false
+- name: seznam
+  disabled: false
+- name: yep
+  disabled: false
+- name: yahoo
+  disabled: false

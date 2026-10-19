@@ -1,0 +1,17 @@
+crawler:
+  timeout_seconds: 20
+  connect_timeout_seconds: 10
+  max_retries: 3
+  max_content_size_mb: 10
+  follow_redirects: true
+  max_redirects: 5
+  user_agent: "FootballAnalysisEngine/1.0"
+  rate_limit:
+    requests_per_domain: 1
+    interval_seconds: 2
+  javascript:
+    enabled: true
+    timeout_seconds: 30
+  cache:
+    enabled: true
+    ttl_hours: 12
