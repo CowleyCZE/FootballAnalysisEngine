@@ -110,7 +110,13 @@ class AIWorker:
             "Analyze the football match using ONLY the supplied context. "
             "Do not invent facts, statistics, players, injuries, sources or evidence. "
             "Every key factor must reference evidence_ids that exist in the context. "
-            "If data is insufficient, explicitly return status='insufficient_data'.\n\n"
+            "If data is insufficient, explicitly return status='insufficient_data'.\n"
+            # Tip skóre počítá deterministický statistický model; AI ho jen vysvětluje.
+            "If the context contains statistics.prediction, it is the authoritative output of the "
+            "deterministic statistical model (predicted score, expected goals, 1-X-2 probabilities). "
+            "You MUST NOT change, replace, recompute or contradict this tip. Only explain which evidence "
+            "in the context supports or weakens it and state the uncertainty. If a claim seems to "
+            "conflict with the tip, report it in uncertainties or conflicts_noted instead of altering the tip.\n\n"
             + json.dumps(context, ensure_ascii=False, indent=2)
         )
         client = OllamaClient(

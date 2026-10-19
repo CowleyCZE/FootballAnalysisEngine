@@ -52,10 +52,11 @@ class StatisticalEngine:
                     "warnings": warnings
                 }
 
-        # 2. Načtení historie zápasů (před cutoff date)
-        home_matches = self.repo.get_team_recent_matches(home_team_id, cutoff_datetime=cutoff_datetime, limit=20)
-        away_matches = self.repo.get_team_recent_matches(away_team_id, cutoff_datetime=cutoff_datetime, limit=20)
-        h2h_matches = self.repo.get_head_to_head(home_team_id, away_team_id, cutoff_datetime=cutoff_datetime, limit=8)
+        # 2. Načtení historie zápasů (před cutoff date a před výkopem cílového zápasu – žádný únik dat)
+        kickoff = self.repo.get_match_kickoff(match_id)
+        home_matches = self.repo.get_team_recent_matches(home_team_id, cutoff_datetime=cutoff_datetime, limit=20, before_kickoff=kickoff)
+        away_matches = self.repo.get_team_recent_matches(away_team_id, cutoff_datetime=cutoff_datetime, limit=20, before_kickoff=kickoff)
+        h2h_matches = self.repo.get_head_to_head(home_team_id, away_team_id, cutoff_datetime=cutoff_datetime, limit=8, before_kickoff=kickoff)
 
         # A clean installation can discover and cache a public structured
         # history source before declaring the statistics phase incomplete.
@@ -79,9 +80,9 @@ class StatisticalEngine:
                         f"Historie automaticky doplněna: {auto_result['imported']} zápasů ze zdroje {', '.join(auto_result.get('source') or [])}."
                     )
                 warnings.extend(auto_result.get("warnings") or [])
-                home_matches = self.repo.get_team_recent_matches(home_team_id, cutoff_datetime=cutoff_datetime, limit=20)
-                away_matches = self.repo.get_team_recent_matches(away_team_id, cutoff_datetime=cutoff_datetime, limit=20)
-                h2h_matches = self.repo.get_head_to_head(home_team_id, away_team_id, cutoff_datetime=cutoff_datetime, limit=8)
+                home_matches = self.repo.get_team_recent_matches(home_team_id, cutoff_datetime=cutoff_datetime, limit=20, before_kickoff=kickoff)
+                away_matches = self.repo.get_team_recent_matches(away_team_id, cutoff_datetime=cutoff_datetime, limit=20, before_kickoff=kickoff)
+                h2h_matches = self.repo.get_head_to_head(home_team_id, away_team_id, cutoff_datetime=cutoff_datetime, limit=8, before_kickoff=kickoff)
             except Exception as exc:
                 warnings.append(f"Automatické doplnění historie selhalo: {exc}")
 
@@ -126,6 +127,7 @@ class StatisticalEngine:
             home_context=merged_home_context,
             away_context=merged_away_context,
             match_context=merged_match_context,
+            league_stats=self.repo.get_league_goal_stats(match_id, cutoff_datetime),
         )
         if prediction and prediction.get("factors", {}).get("prior_only") and total_sample > 0:
             status = "INSUFFICIENT_DATA"
@@ -169,19 +171,21 @@ class StatisticalEngine:
                             INSERT INTO match_predictions(
                                 match_id,run_id,data_cutoff_at,model_version,expected_home_goals,expected_away_goals,
                                 predicted_home_goals,predicted_away_goals,home_win_probability,draw_probability,
-                                away_win_probability,score_probabilities_json,sample_size
-                            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                away_win_probability,score_probabilities_json,sample_size,factors_json
+                            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                             ON CONFLICT(run_id) DO UPDATE SET
                                 data_cutoff_at=excluded.data_cutoff_at, model_version=excluded.model_version,
                                 expected_home_goals=excluded.expected_home_goals, expected_away_goals=excluded.expected_away_goals,
                                 predicted_home_goals=excluded.predicted_home_goals, predicted_away_goals=excluded.predicted_away_goals,
                                 home_win_probability=excluded.home_win_probability, draw_probability=excluded.draw_probability,
                                 away_win_probability=excluded.away_win_probability,
-                                score_probabilities_json=excluded.score_probabilities_json, sample_size=excluded.sample_size
+                                score_probabilities_json=excluded.score_probabilities_json, sample_size=excluded.sample_size,
+                                factors_json=excluded.factors_json
                         """, (match_id, run_row[0], cutoff_datetime, prediction["model_version"], prediction["expected_home_goals"],
                               prediction["expected_away_goals"], prediction["predicted_home_goals"], prediction["predicted_away_goals"],
                               prediction["home_win_probability"], prediction["draw_probability"], prediction["away_win_probability"],
-                              json.dumps(prediction["score_probabilities"]), prediction["sample_size"]))
+                              json.dumps(prediction["score_probabilities"]), prediction["sample_size"],
+                              json.dumps(prediction.get("factors") or {})))
             except sqlite3.Error as exc:
                 warnings.append(f"Predikce přesného skóre nebyla uložena: {exc}")
 

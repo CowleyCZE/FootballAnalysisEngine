@@ -4,7 +4,7 @@ import uuid
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 
 from app.audit.db import init_audit_tables
 from app.audit.freshness import FreshnessChecker
@@ -35,8 +35,9 @@ class AdversarialAuditor:
         max_cycles: int = 3,
         current_cycle: int = 1,
         data_cutoff_at: Any = None,
+        pipeline_run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        run_id = str(uuid.uuid4())
+        run_id = str(uuid.uuid4())  # identifikátor tohoto auditu (audit_id)
         issues = []
 
         if ai_analysis.get("status") == "insufficient_data":
@@ -218,10 +219,11 @@ class AdversarialAuditor:
             status = "AUDIT_COMPLETE"
 
         # Zápis do DB
-        self._save_to_db(run_id, match_id, ai_run_id, score, status, issues)
+        self._save_to_db(run_id, match_id, ai_run_id, score, status, issues, pipeline_run_id=pipeline_run_id)
 
         result = {
             "run_id": run_id,
+            "pipeline_run_id": pipeline_run_id,
             "match_id": match_id,
             "ai_run_id": ai_run_id,
             "audit_score": score,
@@ -242,13 +244,15 @@ class AdversarialAuditor:
 
         return result
 
-    def _save_to_db(self, run_id: str, match_id: int, ai_run_id: str, score: float, status: str, issues: List[Dict[str, Any]]):
+    def _save_to_db(self, run_id: str, match_id: int, ai_run_id: str, score: float, status: str,
+                    issues: List[Dict[str, Any]], pipeline_run_id: Optional[str] = None):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
+        # audit_runs.run_id = run pipeline (podle něj API hledá nálezy); audit_id = id tohoto auditu.
         cursor.execute(
-            "INSERT INTO audit_runs (run_id, match_id, ai_run_id, audit_score, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (run_id, match_id, ai_run_id, score, status, datetime.now(timezone.utc).isoformat())
+            "INSERT INTO audit_runs (audit_id, run_id, match_id, ai_run_id, audit_score, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (run_id, pipeline_run_id or run_id, match_id, ai_run_id, score, status, datetime.now(timezone.utc).isoformat())
         )
         audit_run_pk = cursor.lastrowid
 

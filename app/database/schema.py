@@ -55,6 +55,7 @@ def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
         _ensure_column(conn, "research_tasks", column, definition)
     for column, definition in (("worker_name", "TEXT"), ("worker_version", "TEXT"), ("worker_type", "TEXT"), ("status", "TEXT"), ("capabilities_json", "TEXT"), ("last_heartbeat", "TEXT"), ("last_seen", "TEXT"), ("updated_at", "TEXT"), ("current_job_id", "TEXT"), ("metadata_json", "TEXT"), ("registered_at", "TEXT")):
         _ensure_column(conn, "workers", column, definition)
+    _ensure_column(conn, "match_predictions", "factors_json", "TEXT")
     if _table_exists(conn, "system_info"):
         conn.execute("INSERT INTO system_info(key, value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
 

@@ -166,6 +166,153 @@ class ContextBuilder:
         return {}
 
     @staticmethod
+    def _resolve_run_ref(conn: sqlite3.Connection, match_info: Dict[str, Any],
+                         run_db_id: Optional[int]) -> tuple:
+        """Vrátí (runs.id, runs.run_id) pro daný běh, nebo (None, None).
+
+        match_predictions.run_id je textové runs.run_id, statistical_snapshots.run_id
+        je číselné runs.id, proto je potřeba znát obě hodnoty.
+        """
+        if run_db_id is None:
+            run_db_id = match_info.get("run_db_id")
+        row = None
+        if run_db_id is not None:
+            row = conn.execute("SELECT id, run_id FROM runs WHERE id = ?", (int(run_db_id),)).fetchone()
+        elif match_info.get("run_id"):
+            row = conn.execute("SELECT id, run_id FROM runs WHERE run_id = ?", (str(match_info["run_id"]),)).fetchone()
+        return (int(row[0]), str(row[1])) if row else (None, None)
+
+    def load_prediction_from_db(self, match_id: int, match_info: Optional[Dict[str, Any]] = None,
+                                run_db_id: Optional[int] = None, same_run_only: bool = False) -> Dict[str, Any]:
+        """Načte uloženou predikci skóre ze statistického modelu (match_predictions).
+
+        Přednost má predikce stejného běhu; jinak nejnovější predikce zápasu
+        s data_cutoff_at nepozdějším než cutoff kontextu. Nic se nedopočítává.
+        """
+        match_info = match_info or {}
+        if not match_id or not self.db_path:
+            return {}
+        cutoff = match_info.get("data_cutoff_at")
+        cutoff_sql = " AND julianday(data_cutoff_at) <= julianday(?)" if cutoff else ""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                _, run_text = self._resolve_run_ref(conn, match_info, run_db_id)
+                row = None
+                if run_text:
+                    params: List[Any] = [match_id, run_text] + ([cutoff] if cutoff else [])
+                    row = conn.execute(
+                        "SELECT * FROM match_predictions WHERE match_id = ? AND run_id = ?" + cutoff_sql,
+                        params,
+                    ).fetchone()
+                if row is None and not same_run_only:
+                    params = [match_id] + ([cutoff] if cutoff else [])
+                    row = conn.execute(
+                        "SELECT * FROM match_predictions WHERE match_id = ?" + cutoff_sql +
+                        " ORDER BY julianday(data_cutoff_at) DESC, id DESC LIMIT 1",
+                        params,
+                    ).fetchone()
+                if row is None:
+                    return {}
+
+                factors = None
+                if "factors_json" in row.keys() and row["factors_json"]:
+                    try:
+                        factors = json.loads(row["factors_json"])
+                    except (ValueError, TypeError):
+                        factors = None
+
+                try:
+                    scores = json.loads(row["score_probabilities_json"] or "{}")
+                except (ValueError, TypeError):
+                    scores = {}
+                if not isinstance(scores, dict):
+                    scores = {}
+                top_scores = dict(sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:3])
+                return {
+                    "model_version": row["model_version"],
+                    "run_id": row["run_id"],
+                    "data_cutoff_at": row["data_cutoff_at"],
+                    "sample_size": row["sample_size"],
+                    "predicted_score": f"{row['predicted_home_goals']}-{row['predicted_away_goals']}",
+                    "expected_goals": {
+                        "home": row["expected_home_goals"],
+                        "away": row["expected_away_goals"],
+                    },
+                    "probabilities_1x2": {
+                        "home_win": row["home_win_probability"],
+                        "draw": row["draw_probability"],
+                        "away_win": row["away_win_probability"],
+                    },
+                    "top_scores": top_scores,
+                    "prior_only": factors.get("prior_only") if isinstance(factors, dict) else None,
+                }
+        except Exception as err:
+            logger.warning(f"Failed to load prediction from DB: {err}")
+            return {}
+
+    def load_snapshots_from_db(self, match_id: int, match_info: Optional[Dict[str, Any]] = None,
+                               run_db_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Načte statistické snapshoty (např. forma) zápasu ≤ cutoff, nejnovější na (tým, metriku)."""
+        match_info = match_info or {}
+        if not match_id or not self.db_path:
+            return []
+        cutoff = match_info.get("data_cutoff_at")
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                run_int, _ = self._resolve_run_ref(conn, match_info, run_db_id)
+                match = conn.execute(
+                    "SELECT home_team_id, away_team_id FROM matches WHERE id = ?", (match_id,)
+                ).fetchone()
+                if not match:
+                    return []
+                sql = ("SELECT team_id, metric, value, sample_size, coverage, data_cutoff_at, calculation_version "
+                       "FROM statistical_snapshots WHERE match_id = ?")
+                params: List[Any] = [match_id]
+                if run_int is not None:
+                    sql += " AND run_id = ?"
+                    params.append(run_int)
+                if cutoff:
+                    sql += " AND julianday(data_cutoff_at) <= julianday(?)"
+                    params.append(cutoff)
+                sql += " ORDER BY id DESC"
+
+                sides = {match["home_team_id"]: "home", match["away_team_id"]: "away"}
+                seen = set()
+                snapshots: List[Dict[str, Any]] = []
+                for r in conn.execute(sql, params).fetchall():
+                    key = (r["team_id"], r["metric"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    snapshots.append({
+                        "team": sides.get(r["team_id"]),
+                        "metric": r["metric"],
+                        "value": r["value"],
+                        "sample_size": r["sample_size"],
+                        "coverage": r["coverage"],
+                        "data_cutoff_at": r["data_cutoff_at"],
+                        "calculation_version": r["calculation_version"],
+                    })
+                return snapshots
+        except Exception as err:
+            logger.warning(f"Failed to load statistical snapshots from DB: {err}")
+            return []
+
+    def load_statistical_output(self, match_id: int, match_info: Optional[Dict[str, Any]] = None,
+                                run_db_id: Optional[int] = None) -> Dict[str, Any]:
+        """Výstup statistického enginu pro AI: klíč `prediction` a `snapshots` (jen pokud existují)."""
+        output: Dict[str, Any] = {}
+        prediction = self.load_prediction_from_db(match_id, match_info, run_db_id)
+        if prediction:
+            output["prediction"] = prediction
+        snapshots = self.load_snapshots_from_db(match_id, match_info, run_db_id)
+        if snapshots:
+            output["snapshots"] = snapshots
+        return output
+
+    @staticmethod
     def _calculate_freshness_score(claims: List[Dict[str, Any]]) -> float:
         dates = []
         now = datetime.now(timezone.utc)
@@ -212,6 +359,8 @@ class ContextBuilder:
 
         if statistics is None and match_id and self.db_path:
             statistics = self.load_statistics_from_db(int(match_id))
+            # Predikce a snapshoty statistického modelu (jen čtení; nic se nedopočítává).
+            statistics.update(self.load_statistical_output(int(match_id), enriched_match_info, run_db_id))
         else:
             statistics = dict(statistics) if statistics is not None else {}
 

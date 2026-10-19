@@ -54,10 +54,60 @@ class StatisticsRepository:
         finally:
             conn.close()
 
-    def get_team_recent_matches(self, team_id: int, cutoff_datetime: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def get_match_kickoff(self, match_id: int) -> Optional[str]:
         conn = self._get_connection()
         try:
-            # Striktní filtrace zápasů se scheduled_at <= cutoff_datetime (Data Leakage Prevention)
+            row = conn.execute("SELECT scheduled_at FROM matches WHERE id = ?", (match_id,)).fetchone()
+            return row["scheduled_at"] if row and row["scheduled_at"] else None
+        finally:
+            conn.close()
+
+    def get_league_goal_stats(self, match_id: int, cutoff_datetime: str) -> Dict[str, Any]:
+        """Průměr gólů na tým a zápas ze všech odehraných zápasů soutěže cílového zápasu.
+
+        Jen zápasy s výsledkem, ≤ cutoff a před výkopem cílového zápasu (cílový zápas se nepočítá).
+        """
+        conn = self._get_connection()
+        try:
+            target = conn.execute(
+                "SELECT competition_id, competition, scheduled_at FROM matches WHERE id = ?", (match_id,)
+            ).fetchone()
+            if not target:
+                return {"matches": 0, "mean": None}
+            if target["competition_id"] is not None:
+                comp_sql, comp_param = "m.competition_id = ?", target["competition_id"]
+            elif target["competition"] and str(target["competition"]).strip():
+                comp_sql, comp_param = "m.competition = ?", target["competition"]
+            else:
+                return {"matches": 0, "mean": None}
+
+            sql = (
+                "SELECT COUNT(*) AS n, SUM(ms.home_goals + ms.away_goals) AS goals "
+                "FROM matches m JOIN match_statistics ms ON ms.match_id = m.id "
+                f"WHERE {comp_sql} AND m.id != ? "
+                "AND ms.home_goals IS NOT NULL AND ms.away_goals IS NOT NULL "
+                "AND julianday(m.scheduled_at) <= julianday(?)"
+            )
+            params: List[Any] = [comp_param, match_id, cutoff_datetime]
+            if target["scheduled_at"]:
+                sql += " AND julianday(m.scheduled_at) < julianday(?)"
+                params.append(target["scheduled_at"])
+            row = conn.execute(sql, params).fetchone()
+            n = int(row["n"] or 0)
+            if n == 0:
+                return {"matches": 0, "mean": None}
+            return {"matches": n, "mean": float(row["goals"]) / (2.0 * n)}
+        finally:
+            conn.close()
+
+    def get_team_recent_matches(self, team_id: int, cutoff_datetime: str, limit: int = 5,
+                                before_kickoff: Optional[str] = None) -> List[Dict[str, Any]]:
+        conn = self._get_connection()
+        try:
+            # Striktní filtrace zápasů se scheduled_at <= cutoff_datetime (Data Leakage Prevention);
+            # volitelně navíc jen zápasy před výkopem cílového zápasu (backtest / zpětná analýza).
+            kickoff_sql = " AND julianday(m.scheduled_at) < julianday(?)" if before_kickoff else ""
+            params: List[Any] = [team_id, team_id, cutoff_datetime] + ([before_kickoff] if before_kickoff else []) + [limit]
             rows = conn.execute("""
                 SELECT m.id as match_id, m.home_team_id, m.away_team_id, m.scheduled_at,
                        ms.home_goals, ms.away_goals, ms.home_shots, ms.away_shots,
@@ -66,19 +116,23 @@ class StatisticsRepository:
                 JOIN match_statistics ms ON m.id = ms.match_id
                 WHERE (m.home_team_id = ? OR m.away_team_id = ?)
                   AND julianday(m.scheduled_at) <= julianday(?)
-                  AND ms.home_goals IS NOT NULL AND ms.away_goals IS NOT NULL
+                  AND ms.home_goals IS NOT NULL AND ms.away_goals IS NOT NULL""" + kickoff_sql + """
                 ORDER BY m.scheduled_at DESC
                 LIMIT ?
-            """, (team_id, team_id, cutoff_datetime, limit)).fetchall()
+            """, params).fetchall()
             return [dict(r) for r in rows]
         finally:
             conn.close()
 
     def get_head_to_head(self, home_team_id: int, away_team_id: int,
-                         cutoff_datetime: str, limit: int = 8) -> List[Dict[str, Any]]:
+                         cutoff_datetime: str, limit: int = 8,
+                         before_kickoff: Optional[str] = None) -> List[Dict[str, Any]]:
         """Return only completed H2H matches available before the research cutoff."""
         conn = self._get_connection()
         try:
+            kickoff_sql = " AND julianday(m.scheduled_at) < julianday(?)" if before_kickoff else ""
+            params: List[Any] = [home_team_id, away_team_id, away_team_id, home_team_id, cutoff_datetime] \
+                + ([before_kickoff] if before_kickoff else []) + [limit]
             rows = conn.execute("""
                 SELECT m.id as match_id, m.home_team_id, m.away_team_id, m.scheduled_at,
                        ms.home_goals, ms.away_goals, ms.home_xg, ms.away_xg,
@@ -88,10 +142,10 @@ class StatisticsRepository:
                 WHERE ((m.home_team_id = ? AND m.away_team_id = ?)
                     OR (m.home_team_id = ? AND m.away_team_id = ?))
                   AND julianday(m.scheduled_at) <= julianday(?)
-                  AND ms.home_goals IS NOT NULL AND ms.away_goals IS NOT NULL
+                  AND ms.home_goals IS NOT NULL AND ms.away_goals IS NOT NULL""" + kickoff_sql + """
                 ORDER BY m.scheduled_at DESC
                 LIMIT ?
-            """, (home_team_id, away_team_id, away_team_id, home_team_id, cutoff_datetime, limit)).fetchall()
+            """, params).fetchall()
             return [dict(r) for r in rows]
         finally:
             conn.close()

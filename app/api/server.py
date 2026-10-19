@@ -16,6 +16,7 @@ from app.search.engine import SearchEngine
 from app.search.models import QuerySpec
 from app.search.searxng_client import SearXNGClient
 from app.jobs.queue import JobQueue
+from app.ai.context_builder import ContextBuilder
 
 
 app = FastAPI(
@@ -341,7 +342,8 @@ def get_analysis_result(run_id: str, include_historical: bool = False):
         ai_res = json.loads(ai_job["result_json"]) if ai_job and ai_job["result_json"] else None
         audit_res = json.loads(audit_job["result_json"]) if audit_job and audit_job["result_json"] else None
 
-        audit_issues = conn.execute("SELECT rule_name, issue_type, severity, message, description FROM audit_issues WHERE audit_run_id IN (SELECT id FROM audit_runs WHERE run_id = ?)", (run_id,)).fetchall()
+        # Nálezy posledního auditu tohoto běhu (audit_runs.run_id = pipeline run_id).
+        audit_issues = conn.execute("SELECT rule_name, issue_type, severity, message, description FROM audit_issues WHERE audit_run_id = (SELECT id FROM audit_runs WHERE run_id = ? ORDER BY id DESC LIMIT 1)", (run_id,)).fetchall()
 
         warnings = []
         if audit_res and isinstance(audit_res, dict) and audit_res.get("warnings"):
@@ -381,6 +383,10 @@ def get_analysis_result(run_id: str, include_historical: bool = False):
             "data_cutoff_at": data_cutoff_at,
             "claims": claims,
             "claims_count": len(claims),
+            # Tip skóre ze statistického modelu (jen predikce tohoto běhu; None, pokud neexistuje).
+            "prediction": ContextBuilder(db_path=DB_PATH).load_prediction_from_db(
+                match_id, {"run_id": run_id, "data_cutoff_at": data_cutoff_at}, run_db_id, same_run_only=True
+            ) or None,
             "ai_analysis": ai_res,
             "audit": audit_res,
             "audit_issues": [dict(iss) for iss in audit_issues],

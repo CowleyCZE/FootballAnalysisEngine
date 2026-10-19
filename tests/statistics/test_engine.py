@@ -39,11 +39,12 @@ def setup_test_db(tmp_path):
 def test_statistical_engine_execution_and_leakage_prevention(setup_test_db):
     engine = StatisticalEngine(db_path=setup_test_db)
     
-    # Cutoff nastaven k 2. říjnu 2026 (zápas id=3 z 5. října NESMÍ vstoupit do výpočtu)
+    # Cutoff nastaven k 2. říjnu 2026 (zápas id=3 z 5. října NESMÍ vstoupit do výpočtu).
+    # Cílem je budoucí zápas 3; zápasy 1 a 2 jsou historie (cílový zápas nikdy není součástí vlastní historie).
     cutoff = "2026-10-02T23:59:59"
     
     report = engine.run_match_statistics(
-        match_id=1,
+        match_id=3,
         run_id=100,
         home_team_id=10,
         away_team_id=20,

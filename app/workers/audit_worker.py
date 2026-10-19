@@ -22,6 +22,16 @@ class AuditWorker:
 
         cutoff = payload.get("data_cutoff_at") or ai_analysis.get("match", {}).get("data_cutoff_at")
 
+        # Tip statistického modelu pro kontrolu, že mu AI text neodporuje. Načítá se jen
+        # s explicitním cutoffem (cutoff se nikdy neodvozuje); bez něj audit hlásí cutoff_missing.
+        if cutoff and match_id and db_path and not (statistics or {}).get("prediction"):
+            statistics = dict(statistics or {})
+            statistics.update(context_builder.load_statistical_output(
+                int(match_id),
+                {"match_id": int(match_id), "data_cutoff_at": cutoff},
+                int(run_db_id) if run_db_id else None,
+            ))
+
         auditor = AdversarialAuditor(db_path=db_path)
         return auditor.audit(
             match_id=match_id,
@@ -30,5 +40,6 @@ class AuditWorker:
             claims=claims,
             statistics=statistics,
             current_cycle=cycle,
-            data_cutoff_at=cutoff
+            data_cutoff_at=cutoff,
+            pipeline_run_id=payload.get("run_id"),
         )

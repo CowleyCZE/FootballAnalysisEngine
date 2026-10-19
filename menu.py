@@ -506,7 +506,11 @@ def show_analysis_results() -> None:
         print(f"  Historické zápasy ve vzorku: {prediction['sample_size']} | model {prediction['model_version']}")
         scores = json.loads(prediction["score_probabilities_json"] or "{}")
         if scores:
-            print("  Další pravděpodobná skóre: " + ", ".join(f"{score} ({prob:.1%})" for score, prob in list(scores.items())[:5]))
+            top3 = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:3]
+            print("  Top-3 skóre: " + ", ".join(f"{score.replace('-', ':')} ({prob:.1%})" for score, prob in top3))
+        factors = json.loads(prediction["factors_json"]) if "factors_json" in prediction.keys() and prediction["factors_json"] else {}
+        if factors.get("prior_only"):
+            print("  ! Pouze prior: pro alespoň jeden tým chybí historie, tip má nízkou důvěru.")
     else:
         print("  Zatím nelze vypočítat: chybí použitelná historie skóre obou týmů před cutoffem.")
 

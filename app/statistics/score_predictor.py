@@ -19,6 +19,7 @@ class ExactScorePredictor:
     DC_RHO = -0.08  # Dixon-Coles dependence for 0-0 / 1-0 / 0-1 / 1-1
     PRIOR_WEIGHT = 1.5
     DEFAULT_LEAGUE_MEAN = 1.30
+    MIN_LEAGUE_MATCHES = 5  # minimální počet zápasů soutěže pro použití ligového průměru
 
     @staticmethod
     def _weighted_mean(values: List[float], prior_mean: float = 1.25,
@@ -89,9 +90,22 @@ class ExactScorePredictor:
         home_context: Optional[Mapping[str, Any]] = None,
         away_context: Optional[Mapping[str, Any]] = None,
         match_context: Optional[Mapping[str, Any]] = None,
+        league_stats: Optional[Mapping[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
+        # Ligový průměr gólů: přednost má průměr ze všech zápasů soutěže (≤ cutoff), jinak
+        # stávající výpočet z předaných řádků (nebo výchozí hodnota). Zdroj je ve factors.
+        league_matches = int((league_stats or {}).get("matches") or 0)
+        league_mean_in = (league_stats or {}).get("mean")
         goals_seen = [float(r[k]) for r in rows for k in ("home_goals", "away_goals") if r.get(k) is not None]
-        league_mean = sum(goals_seen) / len(goals_seen) if len(goals_seen) >= 10 else cls.DEFAULT_LEAGUE_MEAN
+        if league_mean_in is not None and league_matches >= cls.MIN_LEAGUE_MATCHES:
+            league_mean = float(league_mean_in)
+            league_source = "league"
+        elif len(goals_seen) >= 10:
+            league_mean = sum(goals_seen) / len(goals_seen)
+            league_source = "team_rows"
+        else:
+            league_mean = cls.DEFAULT_LEAGUE_MEAN
+            league_source = "default"
         league_mean = max(0.8, min(2.0, league_mean))
 
         home_rates = cls._team_rates(rows, home_team_id, "home", league_mean)
@@ -112,6 +126,8 @@ class ExactScorePredictor:
             "away_history_matches": away_n,
             "venue_split_used": home_split and away_split,
             "league_mean_goals": round(league_mean, 3),
+            "league_mean_source": league_source,
+            "league_matches": league_matches,
             "h2h_matches": 0,
             "prior_only": prior_only,
         }
