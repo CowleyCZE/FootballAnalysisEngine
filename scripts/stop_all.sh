@@ -8,8 +8,9 @@ stop_pattern() {
   pkill -TERM -f "$pattern" 2>/dev/null || true
 }
 
-stop_pattern "$ROOT_DIR/app.main:app"
-stop_pattern "$ROOT_DIR/scripts/run_worker.py"
+stop_pattern "uvicorn app.main:app"
+stop_pattern "scripts/run_worker.py"
+stop_pattern "run_worker.py --worker-id"
 stop_pattern "$ROOT_DIR/scripts/run_local.sh"
 stop_pattern "ollama serve"
 

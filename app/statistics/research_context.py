@@ -13,7 +13,7 @@ from typing import Any, Dict
 
 
 class ResearchContextMapper:
-    FATIGUE_TERMS = ("fatigue", "fixture congestion", "short rest", "rest days", "travel", "rotation", "únava", "odpočinek", "cest")
+    FATIGUE_TERMS = ("fatigue", "fixture congestion", "short rest", "rest days", "travel", "rotation", "únava", "odpočinek", "cestov")
     MOTIVATION_TERMS = ("must win", "qualification", "relegation", "title race", "objective", "motiv", "playoff", "postup", "sestup")
 
     @classmethod

@@ -1,3 +1,8 @@
+GENERAL:
+  discovery:
+    - "{home_team} {away_team} team news {match_date}"
+    - "{home_team} {away_team} preview injuries form"
+
 FORM_HOME:
   discovery:
     - "{home_team} recent results match history"

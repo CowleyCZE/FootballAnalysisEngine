@@ -429,6 +429,7 @@ class MasterOrchestrator:
         """Provede jeden deterministický krok pipeline a řídí joby pouze daného runu."""
         self.recovery.recover_dead_workers_and_jobs()
         self.scheduler.update_blocked_jobs()
+        self._sync_research_tasks(run_id)
 
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -532,20 +533,16 @@ class MasterOrchestrator:
             return
 
         if state == MatchState.ANALYZING:
-            ai_job = next(
-                (j for j in jobs if j["job_type"] == "AI_ANALYSIS" and j["status"] == JobStatus.SUCCESS),
-                None,
-            )
-            failed_ai = next(
-                (j for j in jobs if j["job_type"] == "AI_ANALYSIS" and j["status"] in (JobStatus.FAILED, JobStatus.CANCELLED)),
-                None,
-            )
+            ai_jobs_all = [j for j in jobs if j["job_type"] == "AI_ANALYSIS"]
+            latest_ai = ai_jobs_all[-1] if ai_jobs_all else None
+            ai_job = latest_ai if latest_ai is not None and latest_ai["status"] == JobStatus.SUCCESS else None
+            failed_ai = latest_ai if latest_ai is not None and latest_ai["status"] in (JobStatus.FAILED, JobStatus.CANCELLED) else None
             if ai_job:
                 ai_res = json.loads(ai_job["result_json"]) if ai_job["result_json"] else {}
                 match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                 run_db_id = self._get_run_db_id(run_id)
                 self.state_machine.transition_to(run_id, MatchState.AUDITING, "AI Analysis complete")
-                existing_audit = next((j for j in jobs if j["job_type"] == "AUDIT"), None)
+                existing_audit = next((j for j in reversed(jobs) if j["job_type"] == "AUDIT" and j["id"] > ai_job["id"]), None)
                 if not existing_audit:
                     cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
                     self.queue.create_job(
@@ -570,11 +567,17 @@ class MasterOrchestrator:
             return
 
         if state == MatchState.AUDITING:
-            audit_job = next(
-                (j for j in jobs if j["job_type"] == "AUDIT" and j["status"] == JobStatus.SUCCESS),
-                None,
-            )
-            if not audit_job:
+            audit_jobs_all = [j for j in jobs if j["job_type"] == "AUDIT"]
+            audit_job = audit_jobs_all[-1] if audit_jobs_all else None
+            if audit_job is None:
+                return
+            ai_all = [j for j in jobs if j["job_type"] == "AI_ANALYSIS"]
+            if ai_all and audit_job["id"] < ai_all[-1]["id"]:
+                return  # waiting for audit of the newest AI analysis
+            if audit_job["status"] in (JobStatus.FAILED, JobStatus.CANCELLED):
+                self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, "Audit job failed")
+                return
+            if audit_job["status"] != JobStatus.SUCCESS:
                 return
 
             if not audit_job["result_json"]:
@@ -622,7 +625,7 @@ class MasterOrchestrator:
                                         task_type="FACT_COLLECTION",
                                         description=f"Repair research for missing coverage: {reasons}",
                                         priority=80,
-                                        required=True,
+                                        required=False,
                                         capabilities_required=["RESEARCH"],
                                     )
                                 ]
@@ -657,7 +660,7 @@ class MasterOrchestrator:
                                 task_type=task_type,
                                 description=desc,
                                 priority=prio,
-                                required=True,
+                                required=False,
                                 capabilities_required=["RESEARCH"],
                             ))
                         self._dispatch_research_tasks(task_reqs, match_id, run_id, match_ident)
@@ -677,11 +680,12 @@ class MasterOrchestrator:
             return
 
         if state == MatchState.RESEARCHING:
-            research_jobs = [
-                j for j in jobs
-                if j["job_type"] == "RESEARCH"
-                and j["status"] in terminal
-            ]
+            all_research = [j for j in jobs if j["job_type"] == "RESEARCH"]
+            repair_jobs = [j for j in all_research if self._is_repair_job(j, run_id, cycle)]
+            if repair_jobs:
+                research_jobs = repair_jobs if all(j["status"] in terminal for j in repair_jobs) else []
+            else:
+                research_jobs = [j for j in all_research if j["status"] in terminal]
             if research_jobs:
                 match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                 cutoff_str = match_ident.data_cutoff_at.isoformat() if match_ident and match_ident.data_cutoff_at else None
@@ -734,6 +738,28 @@ class MasterOrchestrator:
                     self.state_machine.transition_to(run_id, MatchState.COMPLETED, "All jobs completed and coverage passed")
                 else:
                     self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Finalizing failed coverage check: {', '.join(readiness.blocking_reasons)}")
+
+    @staticmethod
+    def _is_repair_job(job, run_id: str, cycle: int) -> bool:
+        try:
+            payload = json.loads(job["payload_json"] or "{}")
+        except Exception:
+            return False
+        tuid = str(payload.get("task_uuid") or "")
+        if tuid.startswith((f"REPAIR-{run_id}-{cycle}-", f"REPAIR-COVERAGE-{run_id}-{cycle}-")):
+            return True
+        return payload.get("cycle") == cycle
+
+    def _sync_research_tasks(self, run_id: str) -> None:
+        """Mirror terminal job outcomes into research_tasks that no worker closed (e.g. STATISTICS)."""
+        with sqlite3.connect(self.db_path, timeout=30) as conn:
+            for job_status, task_status in (("SUCCESS", "SUCCESS"), ("FAILED", "FAILED"), ("CANCELLED", "FAILED")):
+                conn.execute(
+                    "UPDATE research_tasks SET status=?, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE run_id=? AND status IN ('PLANNED','QUEUED','BLOCKED','RUNNING') "
+                    "AND job_id IN (SELECT job_id FROM jobs WHERE run_id=? AND status=?)",
+                    (task_status, run_id, run_id, job_status),
+                )
 
     def _get_run_db_id(self, run_id: str) -> int:
         with sqlite3.connect(self.db_path) as conn:

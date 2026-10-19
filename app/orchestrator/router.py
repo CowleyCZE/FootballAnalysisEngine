@@ -1,13 +1,15 @@
 import sqlite3
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.api.server import verify_api_auth
 
 from app.orchestrator.models import AnalysisRequest, ResearchReadiness
 from app.orchestrator.orchestrator import MasterOrchestrator
 from app.orchestrator.state_machine import MatchState
 
-router = APIRouter(prefix="/api/analysis", tags=["Analysis Orchestrator"])
+router = APIRouter(prefix="/api/analysis", tags=["Analysis Orchestrator"], dependencies=[Depends(verify_api_auth)])
 orchestrator = MasterOrchestrator()
 
 

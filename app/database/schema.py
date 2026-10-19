@@ -59,7 +59,18 @@ def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT INTO system_info(key, value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
 
 
+_INITIALIZED: set = set()
+
+
 def initialize_database(db_path: str) -> None:
+    key = str(Path(db_path).resolve())
+    if key in _INITIALIZED and Path(key).exists():
+        return  # schema already applied by this process
+    _initialize_database(db_path)
+    _INITIALIZED.add(key)
+
+
+def _initialize_database(db_path: str) -> None:
     schema_path = ROOT / "database" / "schema.sql"
     research_schema_path = ROOT / "database" / "research_schema.sql"
     with sqlite3.connect(db_path, timeout=30) as conn:

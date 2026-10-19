@@ -121,10 +121,18 @@ class ContextBuilder:
                             "confidence": ev["confidence"]
                         })
 
-                    parts = (c_row["claim_text"] or "").split(" ", 2)
-                    subject = parts[0] if parts else ""
-                    predicate = parts[1] if len(parts) > 1 else c_row["claim_type"] or ""
-                    obj = parts[2] if len(parts) > 2 else c_row["normalized_claim"] or ""
+                    text = c_row["claim_text"] or ""
+                    ctype = c_row["claim_type"] or ""
+                    marker = f" {ctype} " if ctype else ""
+                    if marker and marker in text:
+                        subject, _, obj = text.partition(marker)
+                        predicate = ctype
+                    else:
+                        parts = text.split(" ", 2)
+                        subject = parts[0] if parts else ""
+                        predicate = parts[1] if len(parts) > 1 else ctype
+                        obj = parts[2] if len(parts) > 2 else ""
+                    obj = obj or c_row["normalized_claim"] or ""
 
                     claims_list.append({
                         "claim_id": claim_id,
@@ -197,12 +205,12 @@ class ContextBuilder:
             match_info["run_db_id"] = run_db_id
         enriched_match_info = self.enrich_match_info(match_info, match_id)
 
-        if not claims and match_id and self.db_path:
+        if claims is None and match_id and self.db_path:
             claims = self.load_claims_from_db(int(match_id), run_db_id)
         else:
             claims = list(claims) if claims is not None else []
 
-        if not statistics and match_id and self.db_path:
+        if statistics is None and match_id and self.db_path:
             statistics = self.load_statistics_from_db(int(match_id))
         else:
             statistics = dict(statistics) if statistics is not None else {}

@@ -1,0 +1,38 @@
+A1: nová metoda _sync_research_tasks v orchestrator.py se volá na začátku každého tick. Přepíše stav research_tasks, které žádný worker neuzavřel (např. STATISTICS), podle výsledku jejich jobu. Coverage teď bere i CONFLICTED a PARTIAL jako splněné.
+A2:
+ANALYZING a AUDITING pracují s nejnovějším AI a AUDIT jobem a čekají na audit nejnovější analýzy.
+Selhaný audit job vede k UNRESOLVED; dřív pipeline jen čekala.
+RESEARCHING čeká na opravné joby aktuálního cyklu.
+Opravné úlohy jsou nepovinné (required=False), aby jejich neúspěch neshodil finalizaci.
+Do config/research_queries.yaml jsem přidal dotazy pro doménu GENERAL, aby opravné úlohy měly co hledat.
+A3: konflikty se detekují jen u vylučujících predikátů (availability_status, availability, status, is_injured, is_suspended), v research i auditním ConflictDetector.
+A4: load_claims_from_db bere predikát z claim_type a subjekt s objektem rozdělí podle něj. Když claim_type v textu není, použije se původní dělení po mezerách.
+
+Další krok jsou A5–A6 (výchozí cutoff, použití MatchResolver, konec auto-RESOLVED) a pak predikční model B7–B13.
+
+Další opravy:
+
+A5 (cutoff): cli.py a API /api/analysis/start nastaví výchozí cutoff na „teď”, pokud žádný není zadaný.
+A6 jsem nedělal: existující testy (test_fail_closed_status_checks) po start_pipeline výslovně očekávají přepis stavu na RESOLVED. Změna by znamenala přepsat testy; rozhodni, jestli ji chceš.
+Model (score_predictor.py, verze poisson-dc-context-v4):
+Zápasy se řadí podle data, takže recency váhy odpovídají skutečnému času.
+Prior je slabší (váha 1,5 místo 3) a vychází z průměru gólů v dostupných datech.
+Pokud chybí historie jen jednoho týmu, prior se použije jen za něj.
+Domácí výhoda se nepočítá dvakrát: 1,03 při použití venue splitu, jinak 1,08.
+Přidána Dixon-Coles korekce nízkých skóre (rho −0,08).
+Historie se načítá z 20 zápasů místo 10.
+Zbylé opravy:
+Falešné spuštění únavy (v češtině i na „Leicester”): hledání „cest” je nahrazeno „cestov”.
+Router /api/analysis vyžaduje token.
+Tokeny se porovnávají přes hmac.compare_digest.
+stop_all.sh už skutečně ukončí API i workery.
+SQLite používá WAL a busy_timeout; schéma se v rámci procesu inicializuje jen jednou.
+
+Zatím neřešeno:
+
+Síla soupeře (normalizace na ligový průměr).
+Absence a sestavy v predikci.
+Backtest a vracení top-3 skóre.
+Úklid mrtvého kódu.
+
+Pokračuji v tomto pořadí, jakmile pošleš výsledek testů.

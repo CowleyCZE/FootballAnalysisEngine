@@ -29,7 +29,8 @@ def main():
     orchestrator = MasterOrchestrator()
 
     if args.command == "analyze":
-        run_id = orchestrator.start_pipeline(args.match_id)
+        from datetime import datetime, timezone
+        run_id = orchestrator.start_pipeline(args.match_id, data_cutoff_at=datetime.now(timezone.utc))
         print(f"Pipeline initialized successfully.")
         print(f"Run ID: {run_id}")
 

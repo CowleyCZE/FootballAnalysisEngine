@@ -53,8 +53,8 @@ class StatisticalEngine:
                 }
 
         # 2. Načtení historie zápasů (před cutoff date)
-        home_matches = self.repo.get_team_recent_matches(home_team_id, cutoff_datetime=cutoff_datetime, limit=10)
-        away_matches = self.repo.get_team_recent_matches(away_team_id, cutoff_datetime=cutoff_datetime, limit=10)
+        home_matches = self.repo.get_team_recent_matches(home_team_id, cutoff_datetime=cutoff_datetime, limit=20)
+        away_matches = self.repo.get_team_recent_matches(away_team_id, cutoff_datetime=cutoff_datetime, limit=20)
         h2h_matches = self.repo.get_head_to_head(home_team_id, away_team_id, cutoff_datetime=cutoff_datetime, limit=8)
 
         # A clean installation can discover and cache a public structured
@@ -79,8 +79,8 @@ class StatisticalEngine:
                         f"Historie automaticky doplněna: {auto_result['imported']} zápasů ze zdroje {', '.join(auto_result.get('source') or [])}."
                     )
                 warnings.extend(auto_result.get("warnings") or [])
-                home_matches = self.repo.get_team_recent_matches(home_team_id, cutoff_datetime=cutoff_datetime, limit=10)
-                away_matches = self.repo.get_team_recent_matches(away_team_id, cutoff_datetime=cutoff_datetime, limit=10)
+                home_matches = self.repo.get_team_recent_matches(home_team_id, cutoff_datetime=cutoff_datetime, limit=20)
+                away_matches = self.repo.get_team_recent_matches(away_team_id, cutoff_datetime=cutoff_datetime, limit=20)
                 h2h_matches = self.repo.get_head_to_head(home_team_id, away_team_id, cutoff_datetime=cutoff_datetime, limit=8)
             except Exception as exc:
                 warnings.append(f"Automatické doplnění historie selhalo: {exc}")
@@ -119,8 +119,9 @@ class StatisticalEngine:
                 warnings.append("xG není dostupné; výpočet používá pouze výsledky a góly.")
 
         historical = {int(m["match_id"]): m for m in home_matches + away_matches}
+        ordered_history = sorted(historical.values(), key=lambda m: str(m.get("scheduled_at") or ""), reverse=True)
         prediction = ExactScorePredictor.predict(
-            list(historical.values()), home_team_id, away_team_id,
+            ordered_history, home_team_id, away_team_id,
             h2h_rows=h2h_matches,
             home_context=merged_home_context,
             away_context=merged_away_context,

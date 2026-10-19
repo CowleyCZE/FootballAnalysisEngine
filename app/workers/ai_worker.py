@@ -42,8 +42,9 @@ class AIWorker:
         match_id = int(payload.get("match_id") or 0)
         run_db_id = payload.get("run_db_id")
         db_path = payload.get("db_path", "database/football.db")
-        statistics = payload.get("statistics") or {}
-        claims = payload.get("claims") or []
+        # None (not []) lets ContextBuilder load verified data from the DB.
+        statistics = payload.get("statistics") or None
+        claims = payload.get("claims") or None
         conflicts = payload.get("conflicts") or []
         match_info = dict(payload.get("match") or {"match_id": match_id})
 

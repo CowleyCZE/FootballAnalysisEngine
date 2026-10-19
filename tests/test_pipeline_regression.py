@@ -179,7 +179,8 @@ def test_reg_5_repeated_ticks_do_not_create_duplicate_jobs(reg_db):
     assert ai_jobs_count_2 == 1
 
 
-def test_reg_6_zero_stats_not_presented_as_usable(reg_db):
+def test_reg_6_zero_stats_not_presented_as_usable(reg_db, monkeypatch):
+    monkeypatch.setenv("FAE_AUTO_HISTORY", "0")  # no network history import in tests
     engine = StatisticalEngine(db_path=reg_db)
     res = engine.run_match_statistics(
         match_id=1,

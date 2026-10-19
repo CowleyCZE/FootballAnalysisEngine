@@ -1,8 +1,11 @@
 """Explainable exact-score prediction with form, venue, xG, H2H and context.
 
-The predictor is deliberately deterministic and does not fabricate missing team
-facts. If both histories are absent it may emit a clearly labelled neutral
-league prior; all optional context values are bounded and reported in ``factors``.
+The predictor is deterministic and does not fabricate missing team facts. If a
+team's history is absent it falls back to a clearly labelled league prior
+(derived from the supplied rows when possible). All optional context values are
+bounded and reported in ``factors``.
+
+Model: independent Poisson goals with a Dixon-Coles low-score correction.
 """
 from __future__ import annotations
 
@@ -11,12 +14,15 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 
 class ExactScorePredictor:
-    MODEL_VERSION = "poisson-context-v3"
+    MODEL_VERSION = "poisson-dc-context-v4"
     MAX_GOALS = 7
+    DC_RHO = -0.08  # Dixon-Coles dependence for 0-0 / 1-0 / 0-1 / 1-1
+    PRIOR_WEIGHT = 1.5
+    DEFAULT_LEAGUE_MEAN = 1.30
 
     @staticmethod
     def _weighted_mean(values: List[float], prior_mean: float = 1.25,
-                       prior_weight: float = 3.0) -> Optional[float]:
+                       prior_weight: float = 1.5) -> Optional[float]:
         values = [float(v) for v in values if v is not None and math.isfinite(float(v))]
         if not values:
             return None
@@ -43,22 +49,34 @@ class ExactScorePredictor:
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _chronological(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Newest first so recency weights match real time, not list position."""
+        return sorted(rows, key=lambda r: str(r.get("scheduled_at") or ""), reverse=True)
+
     @classmethod
-    def _team_rates(cls, rows: List[Dict[str, Any]], team_id: int, venue: str) -> Optional[Tuple[float, float, int]]:
+    def _team_rates(cls, rows: List[Dict[str, Any]], team_id: int, venue: str,
+                    prior_mean: float = 1.30) -> Optional[Tuple[float, float, int, bool]]:
+        rows = cls._chronological(rows)
         all_rows = [r for r in rows if int(r.get("home_team_id")) == team_id or int(r.get("away_team_id")) == team_id]
         venue_rows = [r for r in all_rows if (venue == "home" and int(r.get("home_team_id")) == team_id) or (venue == "away" and int(r.get("away_team_id")) == team_id)]
         if not all_rows:
             return None
-        # Venue split is useful only with enough observations; otherwise shrink toward all matches.
+        pw = cls.PRIOR_WEIGHT
         all_values = [cls._team_value(r, team_id) for r in all_rows]
-        all_attack = cls._weighted_mean([v[0] for v in all_values])
-        all_defence = cls._weighted_mean([v[1] for v in all_values])
-        split_values = [cls._team_value(r, team_id) for r in venue_rows]
-        split_attack = cls._weighted_mean([v[0] for v in split_values]) if len(split_values) >= 3 else None
-        split_defence = cls._weighted_mean([v[1] for v in split_values]) if len(split_values) >= 3 else None
-        attack = 0.70 * split_attack + 0.30 * all_attack if split_attack is not None else all_attack
-        defence = 0.70 * split_defence + 0.30 * all_defence if split_defence is not None else all_defence
-        return attack, defence, len(all_rows)
+        all_attack = cls._weighted_mean([v[0] for v in all_values], prior_mean, pw)
+        all_defence = cls._weighted_mean([v[1] for v in all_values], prior_mean, pw)
+        # Venue split is useful only with enough observations; otherwise shrink toward all matches.
+        split_used = len(venue_rows) >= 3
+        if split_used:
+            split_values = [cls._team_value(r, team_id) for r in venue_rows]
+            split_attack = cls._weighted_mean([v[0] for v in split_values], prior_mean, pw)
+            split_defence = cls._weighted_mean([v[1] for v in split_values], prior_mean, pw)
+            attack = 0.70 * split_attack + 0.30 * all_attack
+            defence = 0.70 * split_defence + 0.30 * all_defence
+        else:
+            attack, defence = all_attack, all_defence
+        return attack, defence, len(all_rows), split_used
 
     @classmethod
     def predict(
@@ -72,28 +90,34 @@ class ExactScorePredictor:
         away_context: Optional[Mapping[str, Any]] = None,
         match_context: Optional[Mapping[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
-        home_rates = cls._team_rates(rows, home_team_id, "home")
-        away_rates = cls._team_rates(rows, away_team_id, "away")
+        goals_seen = [float(r[k]) for r in rows for k in ("home_goals", "away_goals") if r.get(k) is not None]
+        league_mean = sum(goals_seen) / len(goals_seen) if len(goals_seen) >= 10 else cls.DEFAULT_LEAGUE_MEAN
+        league_mean = max(0.8, min(2.0, league_mean))
+
+        home_rates = cls._team_rates(rows, home_team_id, "home", league_mean)
+        away_rates = cls._team_rates(rows, away_team_id, "away", league_mean)
         prior_only = home_rates is None or away_rates is None
-        if prior_only:
-            # This is not a team fact. It is a clearly labelled neutral league
-            # prior so an empty database produces a usable, low-confidence
-            # baseline instead of an UNRESOLVED pipeline.
-            home_attack, home_defence, home_n = 1.35, 1.20, 0
-            away_attack, away_defence, away_n = 1.10, 1.25, 0
+        # Missing history is replaced by a neutral league prior for that team
+        # only; the other team keeps its real data. This is not a team fact.
+        if home_rates is None:
+            home_attack, home_defence, home_n, home_split = league_mean * 1.08, league_mean * 0.96, 0, False
         else:
-            home_attack, home_defence, home_n = home_rates
-            away_attack, away_defence, away_n = away_rates
+            home_attack, home_defence, home_n, home_split = home_rates
+        if away_rates is None:
+            away_attack, away_defence, away_n, away_split = league_mean * 0.88, league_mean * 1.00, 0, False
+        else:
+            away_attack, away_defence, away_n, away_split = away_rates
         factors: Dict[str, Any] = {
             "home_history_matches": home_n,
             "away_history_matches": away_n,
-            "venue_split_used": home_n >= 3 and away_n >= 3,
+            "venue_split_used": home_split and away_split,
+            "league_mean_goals": round(league_mean, 3),
             "h2h_matches": 0,
             "prior_only": prior_only,
         }
 
         # H2H is intentionally capped and low-weighted: old meetings must not dominate form.
-        h2h = h2h_rows or []
+        h2h = cls._chronological(h2h_rows or [])
         h2h_values = []
         for row in h2h:
             if row.get("home_goals") is not None and row.get("away_goals") is not None:
@@ -131,15 +155,22 @@ class ExactScorePredictor:
         weather = cls._bounded(match_context.get("weather_severity"), 0.0, 1.0, 0.0)
         style = cls._bounded(match_context.get("style_goal_factor"), 0.85, 1.15, 1.0)
         context_goal_factor = (1.0 - 0.08 * rivalry - 0.06 * weather) * style
-        lam_home = 0.5 * (home_attack + away_defence) * 1.08 * context_goal_factor
+        # Home advantage is already embedded when both venue splits are used.
+        home_adv = 1.03 if (home_split and away_split) else 1.08
+        lam_home = 0.5 * (home_attack + away_defence) * home_adv * context_goal_factor
         lam_away = 0.5 * (away_attack + home_defence) * context_goal_factor
         lam_home = max(0.05, min(5.0, lam_home))
         lam_away = max(0.05, min(5.0, lam_away))
-        factors.update({"rivalry": rivalry, "weather_severity": weather, "context_goal_factor": round(context_goal_factor, 4), "home_fatigue": home_fatigue, "away_fatigue": away_fatigue, "home_motivation": home_motivation, "away_motivation": away_motivation})
+        factors.update({"home_advantage": home_adv, "rivalry": rivalry, "weather_severity": weather, "context_goal_factor": round(context_goal_factor, 4), "home_fatigue": home_fatigue, "away_fatigue": away_fatigue, "home_motivation": home_motivation, "away_motivation": away_motivation})
 
         probs_h = [math.exp(-lam_home) * lam_home ** g / math.factorial(g) for g in range(cls.MAX_GOALS + 1)]
         probs_a = [math.exp(-lam_away) * lam_away ** g / math.factorial(g) for g in range(cls.MAX_GOALS + 1)]
         grid = {(h, a): probs_h[h] * probs_a[a] for h in range(cls.MAX_GOALS + 1) for a in range(cls.MAX_GOALS + 1)}
+        rho = cls.DC_RHO
+        grid[(0, 0)] *= 1.0 - lam_home * lam_away * rho
+        grid[(0, 1)] *= 1.0 + lam_home * rho
+        grid[(1, 0)] *= 1.0 + lam_away * rho
+        grid[(1, 1)] *= 1.0 - rho
         norm = sum(grid.values())
         grid = {key: value / norm for key, value in grid.items()}
         best = max(grid, key=grid.get)

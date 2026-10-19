@@ -5,11 +5,19 @@ from app.research.models import Claim, ClaimStatus
 from app.research.cutoff_filter import CutoffFilter
 
 
+# Only predicates where one subject can hold a single value at a time. Free-text
+# predicates (team_profile_fact, team_form, general_fact...) legitimately carry many
+# different sentences and must not be treated as contradictions.
+EXCLUSIVE_PREDICATES = {"availability_status", "availability", "status", "is_injured", "is_suspended"}
+
+
 class ConflictDetector:
     def detect_and_resolve(self, claims: List[Claim]) -> List[Claim]:
         grouped: Dict[Tuple[str, str], List[Claim]] = {}
 
         for c in claims:
+            if c.predicate.lower().strip() not in EXCLUSIVE_PREDICATES:
+                continue
             if c.status in (ClaimStatus.VALID, ClaimStatus.CANDIDATE):
                 key = (c.subject.lower().strip(), c.predicate.lower().strip())
                 grouped.setdefault(key, []).append(c)

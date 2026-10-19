@@ -1,5 +1,8 @@
 from typing import List, Dict, Any
 
+EXCLUSIVE_PREDICATES = {"availability_status", "availability", "status", "is_injured", "is_suspended"}
+
+
 class ConflictDetector:
     @staticmethod
     def detect_conflicts(claims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -9,6 +12,8 @@ class ConflictDetector:
         for claim in claims:
             subj = claim.get("subject")
             pred = claim.get("predicate")
+            if str(pred or "").lower().strip() not in EXCLUSIVE_PREDICATES:
+                continue
             obj = claim.get("object") or claim.get("normalized_value")
             c_id = claim.get("id") or claim.get("claim_id")
 

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+import hmac
 import json
 import os
 import sqlite3
@@ -45,7 +46,7 @@ def verify_api_auth(
     if not provided_token and authorization and authorization.lower().startswith("bearer "):
         provided_token = authorization[7:].strip()
 
-    if provided_token != expected_token:
+    if not provided_token or not hmac.compare_digest(str(provided_token), str(expected_token)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing worker API token",
@@ -200,6 +201,8 @@ def start_analysis(req: AnalysisStartRequest):
             cutoff_dt = parse_to_utc(req.data_cutoff_at, req.timezone)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid data_cutoff_at ISO timestamp")
+    if cutoff_dt is None:
+        cutoff_dt = datetime.now(timezone.utc)  # default: everything known up to now
 
     if req.match_id is not None:
         master = MasterOrchestrator(db_path=DB_PATH)
