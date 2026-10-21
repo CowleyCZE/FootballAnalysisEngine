@@ -10,10 +10,8 @@ The system strictly follows an **evidence-first** paradigm with **mandatory data
 API Request (POST /api/analysis/start)
    │
    ▼
-MatchResolver (Resolves MatchIdentity & cutoff)
-   │
-   ▼
-MasterOrchestrator (Single canonical orchestrator)
+MasterOrchestrator (Single canonical orchestrator; zápas zadaný uživatelem je
+   │                  důvěryhodný => auto-RESOLVED, MatchResolver v toku není)
    │
    ├─► ResearchPlanner (Generates domain-specific ResearchTasks)
    ├─► JobStore (SQLite job queue & state machine)
@@ -36,7 +34,7 @@ MasterOrchestrator (Single canonical orchestrator)
 ## Key Architectural Principles
 
 1. **Evidence-First & Zero-Hallucination**: AI operates purely as a synthesizer over database-verified claims. If no verified evidence is available, AI returns an explicit `insufficient_data` response instead of fabricating facts.
-2. **Canonical Orchestration**: `MasterOrchestrator` is the single execution authority. `MatchOrchestrator` is a lightweight facade delegating directly to `MatchResolver` and `MasterOrchestrator`.
+2. **Canonical Orchestration**: `MasterOrchestrator` is the single execution authority. `MatchOrchestrator` is a lightweight facade delegating directly to `MasterOrchestrator` (no `MatchResolver` in the production flow; a user-entered match is trusted and marked `RESOLVED`).
 3. **Cutoff Enforcement**: All search queries, crawler documents, evidence items, claims, AI prompts, and audit checks strictly enforce `data_cutoff_at`. Information published after the cutoff is rejected.
 4. **Resilient Recovery & Self-Correction**: Orphaned jobs with stale heartbeats are automatically recovered to `RETRY` status. Audit violations trigger repair research tasks up to `MAX_RETRIES`.
 
@@ -69,7 +67,7 @@ python -m pytest
 ## Exact-score prediction
 
 The statistical phase now produces an explainable exact-score distribution with
-model version `poisson-context-v2`. It combines:
+model version `poisson-dc-context-v5`. It combines:
 
 - recent form and goals/xG with exponential recency weighting,
 - a venue split that shrinks toward all matches when the split sample is small,
@@ -81,6 +79,13 @@ model version `poisson-context-v2`. It combines:
 Every prediction contains `factors`, `sample_size`, the expected goals and the
 three 1X2 probabilities so the result can be reviewed rather than treated as a
 black box. Missing optional context is ignored; it is never invented.
+
+**Rule for missing history (one rule):** if either team has no historical
+matches (zero sample, or history for one team only => `prior_only`), the
+statistics result has status `INSUFFICIENT_DATA` and the pipeline ends
+`UNRESOLVED`; the neutral league prior is only shown as a low-confidence
+prediction, never treated as a usable result. The legacy status
+`COMPLETED_WITH_PRIOR` is not produced and not accepted.
 
 The autonomous research plan also collects recent form and last matches,
 home/away performance, goals, xG and xGA, fixture congestion and travel,

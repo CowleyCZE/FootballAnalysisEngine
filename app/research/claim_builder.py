@@ -2,6 +2,16 @@ import re
 from typing import List, Dict, Any, Optional
 from app.research.models import Claim, Evidence, ClaimStatus, AbsenceStatus
 
+# Jména s diakritikou (TODO 3.4): „Patrik Schick“, „Tomáš Hořavá“, „Šimeček Jan“
+_UP = "A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ"
+_LOW = "a-záčďéěíňóřšťúůýž"
+NAME_RE = re.compile(rf"\b[{_UP}][{_LOW}]+\s+[{_UP}][{_LOW}]+\b")
+
+_UNAVAILABLE_WORDS = ["ruled out", "will miss", "injured", "injury", "sidelined",
+                      "zraněn", "zranil", "chybí", "chybět", "chyběl", "nenastoup", "neodehraj", "marod", "nebude k dispozici"]
+_DOUBTFUL_WORDS = ["doubt", "assessed", "questionable", "pochybn", "otázn", "nejist", "posuzuje"]
+_SUSPENDED_WORDS = ["suspended", "suspend", "distanc", "zastaven", "trest"]
+
 
 class ClaimBuilder:
     def build_claims_from_evidence(self, evidence_list: List[Evidence], team_name: str) -> List[Claim]:
@@ -13,14 +23,14 @@ class ClaimBuilder:
 
             if "ABSENCES" in domain:
                 status = AbsenceStatus.UNKNOWN
-                if any(w in text.lower() for w in ["ruled out", "will miss", "injured", "injury", "sidelined"]):
+                if any(w in text.lower() for w in _UNAVAILABLE_WORDS):
                     status = AbsenceStatus.UNAVAILABLE
-                elif any(w in text.lower() for w in ["doubt", "assessed", "questionable"]):
+                elif any(w in text.lower() for w in _DOUBTFUL_WORDS):
                     status = AbsenceStatus.DOUBTFUL
-                elif "suspended" in text.lower():
+                elif any(w in text.lower() for w in _SUSPENDED_WORDS):
                     status = AbsenceStatus.SUSPENDED
 
-                names = re.findall(r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\b', text)
+                names = NAME_RE.findall(text)
                 found_names = [n for n in names if team_name.lower() not in n.lower()]
                 if found_names:
                     for name in found_names:

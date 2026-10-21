@@ -128,6 +128,7 @@ class StatisticalEngine:
             away_context=merged_away_context,
             match_context=merged_match_context,
             league_stats=self.repo.get_league_goal_stats(match_id, cutoff_datetime),
+            league_rows=self.repo.get_league_matches(match_id, cutoff_datetime),
         )
         if prediction and prediction.get("factors", {}).get("prior_only") and total_sample > 0:
             status = "INSUFFICIENT_DATA"

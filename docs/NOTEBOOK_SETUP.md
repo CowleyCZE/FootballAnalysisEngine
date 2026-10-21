@@ -15,7 +15,7 @@ Po vytvoření analýzy orchestrátor vytvoří úlohy pro profily domácího a 
 | Přesné skóre a statistiky | Fungují i bez Ollama a Dockeru |
 | SearXNG | Volitelná lokální služba; potřebná pro automatické živé vyhledávání |
 | Ollama | Volitelná lokální AI; výchozí model je `qwen2.5:3b`, vhodnější pro 8 GB RAM než 7B |
-| Samsung Note 9 | Volitelný vzdálený worker pro SEARCH/CRAWL/TEST, ne pro těžkou AI |
+| Samsung Note 9 | Volitelný vzdálený worker (zatím **nedostává žádnou práci**, viz níže), ne pro těžkou AI |
 
 Na disku s volným místem kolem 44 GiB je nutné hlídat velikost Ollama modelu a Docker image SearXNG. Model se nestahuje automaticky, aby setup nepřekvapil spotřebou dat a místa.
 
@@ -60,7 +60,7 @@ nevymýšlí žádná náhradní fotbalová fakta.
 
 ## Samsung Galaxy Note 9
 
-Telefon je vhodný jako úsporný pomocný worker pro veřejné vyhledávání a jednoduchý crawl. Nehostuje API ani Ollama. Na telefonu v Termuxu:
+Telefon je technicky připraven jako úsporný pomocný worker pro `SEARCH`, `CRAWL` a `TEST`. **Aktuální omezení:** orchestrátor vytváří pouze monolitické joby typu `RESEARCH` (search → crawl → evidence → claims probíhá v jednom jobu na notebooku) a samostatné joby `SEARCH`/`CRAWL` nevznikají. Note 9 proto v běžném provozu žádnou práci nedostane; použije se jen pro `TEST` (ověření spojení). Rozdělení researche na `SEARCH`/`CRAWL` joby je zatím nerealizovaný plán. Nehostuje API ani Ollama. Na telefonu v Termuxu:
 
 ```bash
 pkg update

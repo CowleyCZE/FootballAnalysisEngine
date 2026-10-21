@@ -2,11 +2,15 @@ GENERAL:
   discovery:
     - "{home_team} {away_team} team news {match_date}"
     - "{home_team} {away_team} preview injuries form"
+  discovery_cs:
+    - "{home_team} {away_team} předzápasový report sestavy zranění"
 
 FORM_HOME:
   discovery:
     - "{home_team} recent results match history"
     - "{home_team} last 5 matches results"
+  discovery_cs:
+    - "{home_team} poslední výsledky forma"
   verification:
     - "{home_team} recent form statistics"
 
@@ -14,6 +18,8 @@ FORM_AWAY:
   discovery:
     - "{away_team} recent results match history"
     - "{away_team} last 5 matches results"
+  discovery_cs:
+    - "{away_team} poslední výsledky forma"
   verification:
     - "{away_team} recent form statistics"
 
@@ -22,6 +28,8 @@ STATISTICS:
     - "{home_team} {away_team} statistics {competition}"
     - "{home_team} {away_team} xG xGA shots possession corners cards"
     - "{home_team} {away_team} pressing set pieces defensive metrics"
+  discovery_cs:
+    - "{home_team} {away_team} statistiky střely držení míče {competition}"
   verification:
     - "{home_team} {away_team} match statistics xG"
 
@@ -30,12 +38,17 @@ HEAD_TO_HEAD:
     - "{home_team} {away_team} head to head"
     - "{home_team} vs {away_team} previous meetings"
     - "{home_team} {away_team} derby rivalry goals cards"
+  discovery_cs:
+    - "{home_team} {away_team} vzájemné zápasy bilance"
 
 ABSENCES_HOME:
   discovery:
     - "{home_team} injuries"
     - "{home_team} injury news"
     - "{home_team} unavailable players"
+  discovery_cs:
+    - "{home_team} zranění marodka kdo chybí"
+    - "{home_team} omluvenky suspendace sestava"
   verification:
     - "{home_team} team news {away_team}"
     - "{home_team} injury update {match_date}"
@@ -47,6 +60,9 @@ ABSENCES_AWAY:
     - "{away_team} injuries"
     - "{away_team} injury news"
     - "{away_team} unavailable players"
+  discovery_cs:
+    - "{away_team} zranění marodka kdo chybí"
+    - "{away_team} omluvenky suspendace sestava"
   verification:
     - "{away_team} team news {home_team}"
     - "{away_team} injury update {match_date}"
@@ -57,46 +73,64 @@ EXPECTED_LINEUPS:
   discovery:
     - "{home_team} {away_team} predicted lineups"
     - "{home_team} {away_team} expected lineup formation"
+  discovery_cs:
+    - "{home_team} {away_team} předpokládané sestavy"
 
 WEATHER:
   discovery:
     - "weather forecast {venue} {match_date} football"
     - "weather {home_team} stadium {match_date} wind rain temperature pitch"
+  discovery_cs:
+    - "počasí {venue} {match_date} předpověď déšť vítr teplota"
 
 REFEREE:
   discovery:
     - "{home_team} {away_team} referee appointment {match_date}"
     - "{home_team} {away_team} referee cards fouls penalties average"
+  discovery_cs:
+    - "{home_team} {away_team} rozhodčí delegace {match_date}"
 
 RIVALRY:
   discovery:
     - "{home_team} {away_team} rivalry derby history"
     - "{home_team} {away_team} rivalry cards goals intensity"
+  discovery_cs:
+    - "{home_team} {away_team} derby rivalita historie"
 
 STYLE_MATCHUP:
   discovery:
     - "{home_team} {away_team} tactical preview pressing possession transition"
     - "{home_team} {away_team} style matchup set pieces counter attack"
+  discovery_cs:
+    - "{home_team} {away_team} taktika preview styl hry"
 
 MOTIVATION_HOME:
   discovery:
     - "{home_team} league position objectives qualification relegation motivation"
     - "{home_team} next fixtures rotation priorities cup league"
+  discovery_cs:
+    - "{home_team} tabulka cíle záchrana postup motivace"
 
 MOTIVATION_AWAY:
   discovery:
     - "{away_team} league position objectives qualification relegation motivation"
     - "{away_team} next fixtures rotation priorities cup league"
+  discovery_cs:
+    - "{away_team} tabulka cíle záchrana postup motivace"
 
 TRAVEL_FATIGUE_HOME:
   discovery:
     - "{home_team} fixture congestion rest days travel rotation"
     - "{home_team} schedule matches in last 14 days fatigue"
+  discovery_cs:
+    - "{home_team} program zápasů únava odpočinek cestování"
 
 TRAVEL_FATIGUE_AWAY:
   discovery:
     - "{away_team} fixture congestion rest days travel rotation"
     - "{away_team} schedule matches in last 14 days fatigue"
+  discovery_cs:
+    - "{away_team} program zápasů únava odpočinek cestování"
 
 TEAM_PROFILE_HOME:
   discovery:
@@ -107,6 +141,9 @@ TEAM_PROFILE_HOME:
     - "{home_team} fixture congestion rest days travel news"
     - "{home_team} previous seasons league results history"
     - "{home_team} pressing possession set pieces defensive record"
+  discovery_cs:
+    - "{home_team} tabulka {competition} body skóre forma"
+    - "{home_team} zranění suspendace trenér sestava"
   verification:
     - "{home_team} official team news injuries suspension"
     - "{home_team} official league table statistics"
@@ -120,6 +157,9 @@ TEAM_PROFILE_AWAY:
     - "{away_team} fixture congestion rest days travel news"
     - "{away_team} previous seasons league results history"
     - "{away_team} pressing possession set pieces defensive record"
+  discovery_cs:
+    - "{away_team} tabulka {competition} body skóre forma"
+    - "{away_team} zranění suspendace trenér sestava"
   verification:
     - "{away_team} official team news injuries suspension"
     - "{away_team} official league table statistics"

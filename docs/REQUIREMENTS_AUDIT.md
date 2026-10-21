@@ -5,7 +5,7 @@
 | Požadavek | Stav | Vysvětlení |
 |---|---|---|
 | Automatické vyhledávání týmových informací | **Ano, s lokálním SearXNG** | ResearchPlanner vytváří úlohy pro profily obou týmů a H2H. ResearchWorker provádí search → crawl → evidence → claims. Pro živý běh musí běžet SearXNG a notebook potřebuje internet. |
-| Použití Note 9 | **Ano, vhodně omezené** | Termux worker automaticky odebírá `SEARCH`, `CRAWL` a `TEST` úlohy. Těžké statistiky, audit a Ollama zůstávají na notebooku. Serverová adresa je nastavitelná přes `FAE_SERVER_URL`. |
+| Použití Note 9 | **Zatím ne (jen připraveno)** | Termux worker umí odebírat `SEARCH`, `CRAWL` a `TEST`, ale orchestrátor vytváří jen monolitické `RESEARCH` joby, takže telefon v běžném provozu žádnou práci nedostane (pouze `TEST`). Rozdělení na `SEARCH`/`CRAWL` joby není implementováno. Těžké statistiky, audit a Ollama zůstávají na notebooku. Serverová adresa je nastavitelná přes `FAE_SERVER_URL`. |
 | Ollama AI | **Ano, lokální** | `OllamaClient` volá lokální `/api/generate`, AIWorker validuje JSON a používá pouze evidence-first kontext. Výchozí model je `qwen2.5:3b`. |
 | Autonomní provoz | **Ano po inicializaci** | SQLite fronta, worker polling, retry, heartbeat, recovery a auditní smyčka jsou implementované. `scripts/run_local.sh` spustí API + worker bez placeného cloudu. |
 | Bezplatný provoz | **Ano bez placených API** | SearXNG a Ollama mohou běžet lokálně. Internet a veřejné weby nejsou garantovaná služba; při jejich výpadku se vrací explicitní nedostatek dat. |

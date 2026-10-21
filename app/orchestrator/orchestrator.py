@@ -374,9 +374,13 @@ class MasterOrchestrator:
             if not isinstance(data, dict):
                 return True
             st = str(data.get("status") or "").upper()
-            if st == "COMPLETED_WITH_PRIOR" and data.get("prediction", {}).get("factors", {}).get("prior_only"):
-                return True
-            if st in ("INSUFFICIENT_DATA", "INVALID_DATA", "NO_DATA"):
+            # Jedno pravidlo (TODO 2.7): bez historie obou týmů i s historií jen jednoho týmu
+            # (prior_only) engine vrací INSUFFICIENT_DATA a pipeline končí UNRESOLVED.
+            # Starý stav COMPLETED_WITH_PRIOR se nikdy nepřijímá (fail-closed).
+            if st in ("INSUFFICIENT_DATA", "INVALID_DATA", "NO_DATA", "COMPLETED_WITH_PRIOR"):
+                return False
+            factors = (data.get("prediction") or {}).get("factors") if isinstance(data.get("prediction"), dict) else None
+            if isinstance(factors, dict) and factors.get("prior_only"):
                 return False
             ss = data.get("sample_size")
             if ss is not None:

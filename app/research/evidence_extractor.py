@@ -21,6 +21,34 @@ _DOMAIN_KEYWORDS = {
     "TRAVEL_FATIGUE_AWAY": ["fixture congestion", "rest days", "travel", "rotation", "fatigue", "schedule", "odpočinek", "únava", "cestování"],
 }
 
+# České kmeny (počítá se s ohybáním, shoda je podle podyřetězce na lower-case větě) – TODO 3.4.
+_CZECH_KEYWORDS = {
+    "ABSENCES": ["zraněn", "zranění", "zranil", "marod", "chybí", "chybět", "nenastoup", "neodehraj", "nebude k dispozici", "pochybn", "suspend", "distanc", "vyřazen", "absenc", "sval", "křížové vazy"],
+    "FORM": ["výhr", "vyhrál", "prohr", "remíz", "série", "neporaz", "forma", "formě", "gól", "inkasoval", "bodů", "poslední zápas", "posledních"],
+    "STATISTICS": ["držení míče", "střel", "rohov", "gólů", "čisté konto", "přesnost přihrávek", "karty", "průměr", "statistik"],
+    "HEAD_TO_HEAD": ["vzájemn", "předchozí zápas", "poslední zápas", "bilanc", "minulý zápas", "vzájemného", "proti sobě"],
+    "EXPECTED_LINEUPS": ["sestav", "základní úderní", "základní jedenáctí", "pravděpodobná", "formační", "střídačk", "úderní sestav", "nastoupí"],
+    "WEATHER": ["počasí", "déšť", "dešt", "teplot", "stupň", "vítr", "předpověď", "bouř", "trávník", "sníž", "mlha"],
+    "REFEREE": ["rozhodčí", "hlavní rozhodčí", "žluté karty", "červené karty", "penalt", "faul", "pišťalš"],
+    "RIVALRY": ["derby", "rivalit", "prestiž", "vyhrocen", "atmosfér"],
+    "STYLE_MATCHUP": ["taktik", "presink", "pressing", "protiútok", "standardní situac", "formační", "styl hry", "ofenziv", "defenziv"],
+    "MOTIVATION": ["tabulk", "pozic", "záchran", "sestup", "postup", "boj o", "motivac", "rotac", "pohár", "evropské poháry", "titul"],
+    "TRAVEL_FATIGUE": ["únav", "odpočin", "cestován", "cestě", "nabitý program", "hustý program", "rotac", "program zápasů", "dnů pauzy", "dnů odpočinku"],
+}
+
+
+def _czech_keywords_for(domain: str) -> List[str]:
+    for prefix, words in _CZECH_KEYWORDS.items():
+        if domain == prefix or domain.startswith(prefix + "_"):
+            return words
+    return []
+
+
+def keywords_for_domain(domain: str) -> List[str]:
+    """Anglické i české klíčové fráze domény (bez duplicit, pořadí zachováno)."""
+    merged = list(_DOMAIN_KEYWORDS.get(domain, [])) + _czech_keywords_for(domain)
+    return list(dict.fromkeys(merged))
+
 
 class EvidenceExtractor:
     def extract_evidence(self, doc: Dict[str, Any], domain: str) -> List[Evidence]:
@@ -37,7 +65,7 @@ class EvidenceExtractor:
 
         evidence_list = []
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+|\n+', text) if len(s.strip()) > 15]
-        keywords = _DOMAIN_KEYWORDS.get(domain, [])
+        keywords = keywords_for_domain(domain)
 
         for sent in sentences:
             sent_lower = sent.lower()

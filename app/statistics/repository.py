@@ -100,6 +100,41 @@ class StatisticsRepository:
         finally:
             conn.close()
 
+    def get_league_matches(self, match_id: int, cutoff_datetime: str, limit: int = 2000) -> List[Dict[str, Any]]:
+        """Odehrané zápasy soutěže cílového zápasu (≤ cutoff, před výkopem, bez cílového zápasu).
+
+        Slouží k odhadu síly soupeřů; vrací jen týmy a góly.
+        """
+        conn = self._get_connection()
+        try:
+            target = conn.execute(
+                "SELECT competition_id, competition, scheduled_at FROM matches WHERE id = ?", (match_id,)
+            ).fetchone()
+            if not target:
+                return []
+            if target["competition_id"] is not None:
+                comp_sql, comp_param = "m.competition_id = ?", target["competition_id"]
+            elif target["competition"] and str(target["competition"]).strip():
+                comp_sql, comp_param = "m.competition = ?", target["competition"]
+            else:
+                return []
+            sql = (
+                "SELECT m.id AS match_id, m.home_team_id, m.away_team_id, m.scheduled_at, ms.home_goals, ms.away_goals "
+                "FROM matches m JOIN match_statistics ms ON ms.match_id = m.id "
+                f"WHERE {comp_sql} AND m.id != ? "
+                "AND ms.home_goals IS NOT NULL AND ms.away_goals IS NOT NULL "
+                "AND julianday(m.scheduled_at) <= julianday(?)"
+            )
+            params: List[Any] = [comp_param, match_id, cutoff_datetime]
+            if target["scheduled_at"]:
+                sql += " AND julianday(m.scheduled_at) < julianday(?)"
+                params.append(target["scheduled_at"])
+            sql += " ORDER BY m.scheduled_at DESC LIMIT ?"
+            params.append(limit)
+            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+        finally:
+            conn.close()
+
     def get_team_recent_matches(self, team_id: int, cutoff_datetime: str, limit: int = 5,
                                 before_kickoff: Optional[str] = None) -> List[Dict[str, Any]]:
         conn = self._get_connection()

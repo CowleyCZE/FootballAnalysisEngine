@@ -36,36 +36,50 @@ Stav k 20. 10. 2026. Podklad: `PROJECT_REPAIR_HANDOFF.md`, `postup_oprav.txt`, `
   - *Hotovo:* 20. 10. 2026 – API `prediction.top_scores` (viz 1.3); `menu.py` vol. 4: „Top-3 skóre“ + upozornění na `prior_only`. Test `tests/test_menu_prediction.py` (1). Celkem očekáváno 212 passed (nespuštěno).
 
 ## FÁZE 2 – Přesnost modelu (`app/statistics/`)
-- [ ] **2.1 Ligový průměr gólů ze celé ligy (H#7).**
+- [x] **2.1 Ligový průměr gólů ze celé ligy (H#7).**
   - *Jak:* V `engine.py` dotaz na průměr gólů všech zápasů soutěže ≤ cutoff; předat do `ExactScorePredictor.predict`. Fallback na stávající výpočet jen při prázdné lize (a označit v `factors`). Test s třemi týmy.
-- [ ] **2.2 Síla soupeře (H#8).**
+  - *Hotovo:* 20. 10. 2026 – kód už existoval (`StatisticsRepository.get_league_goal_stats`, `engine.py` předává `league_stats`, `ExactScorePredictor` má `MIN_LEAGUE_MATCHES=5` a ve `factors` `league_mean_source`/`league_matches`); chyběly testy → `tests/statistics/test_league_stats_and_leakage.py` (4: celá liga, jiná soutěž/po výkopu se nepočítá, prázdná liga, fallback `default`, engine ukládá factors). Očekáváno 216 passed (nespuštěno – ověřit `pytest -q`).
+- [x] **2.2 Síla soupeře (H#8).**
   - *Jak:* Útok/obrana týmu normalizovat na ligový průměr a na kvalitu soupeřů (iterativně 2–3 kroky, shrinkage k 1,0). Zvednout verzi modelu na `v5`, aktualizovat testy verze.
-- [ ] **2.3 Absence a sestavy (H#8).**
+  - *Hotovo:* 20. 10. 2026 – `ExactScorePredictor.opponent_ratings` (3 iterace, shrinkage 5 pseudo-zápasů k 1,0, meze 0,6–1,6), `_team_value` dělí góly sílou soupeře, `predict(..., league_rows=)`; `StatisticsRepository.get_league_matches` (jen ≤ cutoff a před výkopem); `factors.opponent_adjusted`; `MODEL_VERSION = poisson-dc-context-v5`. Testy `tests/statistics/test_opponent_strength.py` (7) → očekáváno 223 passed (nespuštěno). Pokud nějaký starý test tvrdí `v4`, změnit na `v5` (README/runbook → 8.1, 8.3).
+- [x] **2.3 Absence a sestavy (H#8).**
   - *Jak:* V `research_context.py` použít jen ověřené claims (min. 2 zdroje / validní cutoff); multiplikátor omezit (např. 0,92–1,05) a zapsat do `factors`. Bez claims = beze změny.
-- [ ] **2.4 Únik dat u backtestu (H#9).**
+  - *Hotovo:* 20. 10. 2026 – `ResearchContextMapper._absence_context`: jen `availability_status` fakta s datem zdroje i evidence ≤ cutoff (bez data = vyřazeno) a ≥ 2 různými vydavateli; UNAVAILABLE/SUSPENDED váha 1, DOUBTFUL 0,5; útočný multiplikátor 1−0,02·váha (min 0,92), obranný 1+0,01·váha (max 1,05). `ExactScorePredictor` zapisuje `factors.context_multipliers` (jen když se liší od 1). Testy `tests/statistics/test_absence_context.py` (5) → očekáváno 228 passed (nespuštěno). Pozn.: české absence v `ClaimBuilder` se zatím nerozpoznávají → bod 3.4.
+- [x] **2.4 Únik dat u backtestu (H#9).**
   - *Jak:* V načtení historie vyloučit `scheduled_at ≥ kickoff` cílového zápasu; test: cílový zápas není ve vzorku.
-- [ ] **2.5 Backtest skript.**
+  - *Hotovo:* 20. 10. 2026 – `before_kickoff` v `get_team_recent_matches`/`get_head_to_head`/`get_league_goal_stats` už v kódu byl; regresní test (zápas po výkopu a před cutoffem není ve vzorku: `home_history_matches == 4`, `sample_size == 8`) je v `test_league_stats_and_leakage.py`.
+- [x] **2.5 Backtest skript.**
   - *Jak:* `scripts/backtest.py` – pro odehrané zápasy z historie spočítat predikci k datu před výkopem a vypsat přesnost skóre, 1-X-2, log-loss. Jen čtení DB.
-- [ ] **2.6 Fuzzy slučování týmů (H#10).**
+  - *Hotovo:* 20. 10. 2026 – `scripts/backtest.py` (`run_backtest`, `main`; volby `--db --competition --min-history --limit`): DB se otvírá `mode=ro` (bez `initialize_database`), predikce jen z dat před výkopem, vypíše přesné skóre, 1-X-2, log-loss, MAE gólů a základny (vždy domácí, rovnoměrně). Testy `tests/test_backtest.py` (3, vč. kontroly nezměněného hashe DB) → očekáváno 231 passed (nespuštěno). Spuštění: `python scripts/backtest.py --db database/football.db`.
+- [x] **2.6 Fuzzy slučování týmů (H#10).**
   - *Jak:* `history_autofill._team_id` – přesná normalizovaná shoda + tabulka aliasů (`config/team_aliases.yaml`); substring shoda zrušit. Test: „Sparta Praha“ ≠ „Sparta Praha B“.
-- [ ] **2.7 Chování bez historie (H#11).**
+  - *Hotovo:* 20. 10. 2026 – `canonical_team_key` / `resolve_team_key` (bez diakritiky, interpunkce a předpon FC/FK/AC…, „B“ a „U19“ se zachovává), `config/team_aliases.yaml`, `_team_id` jen přesná shoda klíče (bez substringu). Testy `tests/statistics/test_team_matching.py` (5). Ověřeno: `pytest -q` = 236 passed (2.5 ověřeno také).
+- [x] **2.7 Chování bez historie (H#11).**
   - *Jak:* Sjednotit `COMPLETED_WITH_PRIOR` vs `INSUFFICIENT_DATA` (jedno pravidlo, zdokumentovat v README), upravit `test_reg_6` podle zvoleného pravidla.
+  - *Hotovo:* 20. 10. 2026 – zvoleno `INSUFFICIENT_DATA` => `UNRESOLVED` (fail-closed; engine už tak vracel při nulové i jednostranné historii). `orchestrator._is_statistics_data_sufficient`: mrtvá větev přijímající `COMPLETED_WITH_PRIOR` nahrazena explicitním odmítnutím + odmítnutí `prediction.factors.prior_only`. `test_reg_6` již pravidlo kodifikoval (beze změny). README: pravidlo + oprava toku bez MatchResolveru a model `v5` (to, co A6/8.1 hlásily, v README ve skutečnosti nebylo – opraveno teď; 8.1 tedy zbývá jen počet testů). Nové testy `tests/test_no_history_rule.py` (4) → očekáváno 240 passed (nespuštěno – ověřit `pytest -q`).
 
 ## FÁZE 3 – Stabilizace researchu
-- [ ] **3.1 Kaskádové selhání závislostí (H#5).**
+- [x] **3.1 Kaskádové selhání závislostí (H#5).**
   - *Jak:* `app/jobs/` scheduler: závislost splněna při **terminálním** stavu (SUCCESS/FAILED/NO_RESULT), ne jen úspěchu. Test: selhaný home profil neblokuje away.
-- [ ] **3.2 STATISTICS po research doménách (H#6).**
+  - *Hotovo:* 20. 10. 2026 – `app/orchestrator/scheduler.py` (`DependencyScheduler`, ne `app/jobs/`): blokovaný job se uvolní, jakmile jsou všechny závislosti SUCCESS/FAILED/CANCELLED; kaskádové `FAILED "Dependency failed"` odstraněno. Povinný selhaný job dál ruší pipeline (`_are_all_required_jobs_successful`). Testy `tests/orchestrator/test_dependency_scheduler.py` (3) → očekáváno 243 passed (nespuštěno). Pokud některý starý test očekával kaskádové selhání („Dependency failed“), je třeba ho upravit.
+- [x] **3.2 STATISTICS po research doménách (H#6).**
   - *Jak:* Přidat do `job_dependencies` STATISTICS → relevantní research joby (terminální stav stačí, timeout). Test pořadí.
-- [ ] **3.3 Subjekt claimů (H#14).**
+  - *Hotovo:* 20. 10. 2026 – 3.1 ověřeno (243 passed). `ResearchPlanner.create_plan`: STATISTICS závisí na všech taskích kromě týmových profilů; uvolňuje se při terminálním stavu (díky 3.1), zaseklou závislost ukončí recovery timeout. Testy `tests/orchestrator/test_statistics_dependencies.py` (2) → očekáváno 245 passed (nespuštěno). Pozor na staré testy, které claimují STATISTICS hned po startu.
+- [x] **3.3 Subjekt claimů (H#14).**
   - *Jak:* `ResearchEngine` – subjekt podle domény (HOME/AWAY/obě/zápas), ne „away jinak“. Test pro GENERAL/H2H/WEATHER.
-- [ ] **3.4 Čeština v extrakci a dotazech (H#12).**
+  - *Hotovo:* 20. 10. 2026 – 245 passed ověřeno. `ResearchEngine.subject_team_name` (`*_HOME`→domácí, `*_AWAY`→hosté, ostatní → zápasový subjekt bez týmu); použito pro dotazy i claimy. Testy `tests/research/test_claim_subject.py` (13 parametrů).
+- [x] **3.4 Čeština v extrakci a dotazech (H#12).**
   - *Jak:* Regex jmen s diakritikou (`[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+`), české klíčové fráze v `EvidenceExtractor`, česká varianta dotazů v `research_queries.yaml`. Testy na českých větách.
-- [ ] **3.5 Registr zdrojů (H#13).**
+  - *Hotovo:* 20. 10. 2026 – 3.3 ověřeno kontrolou kódu. `claim_builder.NAME_RE` (diakritika) + české stavy nepřítomnosti (zraněn/chybí/otázný/distanc); `evidence_extractor.keywords_for_domain` (EN + české kmeny pro všechny domény); `config/research_queries.yaml`: nový typ `discovery_cs` u každé domény (za `discovery`, takže se vejde do `max_queries`). Testy `tests/research/test_czech_research.py` (5) → očekáváno 263 passed (245 + 13 + 5; nespuštěno).
+- [x] **3.5 Registr zdrojů (H#13).**
   - *Jak:* Doplnit `config/source_registry.yaml` (fotbal.cz, fortunaliga.cz, idnes, sport.cz, transfermarkt, fbref…) s důvěryhodností; test načtení.
-- [ ] **3.6 HTMLParser a Playwright (H#15).**
+  - *Hotovo:* 20. 10. 2026 – ~45 domén (české oficiální, statistické, zpravodajství, agregátory); `SearchSourceRegistry.get_source_type` teď rozpozná i subdomény (sport.idnes.cz → idnes.cz), ne přípony typu `evilidnes.cz`. Testy `tests/research/test_source_registry_cz.py` (12 parametrů). Seznam klubových domén je z paměti – při použití zkontrolovat.
+- [x] **3.6 HTMLParser a Playwright (H#15).**
   - *Jak:* Jazyk detekovat/z meta, `author`/`canonical` z HTML; do runbooku přidat `playwright install chromium`; fallback loguje varování.
-- [ ] **3.7 Note 9 (H#4).**
+  - *Hotovo:* 20. 10. 2026 – `html_parser`: `detect_language` (`<html lang>`/meta/og:locale, jinak heuristika českých znaků), `extract_canonical` (link rel=canonical/og:url, relativní → absolutní), `extract_author`; metadata se čtou před `decompose()`. `crawler.py`: varování při chybějícím Playwrightu / prohlížeči. Runbook §3a. Testy `tests/research/test_html_parser_meta.py` (4). Pozor: starý test, který čekal `language=="cs"` natvrdo, by teď měl selhat.
+- [x] **3.7 Note 9 (H#4).**
   - *Jak:* Zvolit variantu: (a) dokumentaci opravit, že Note 9 zatím nedostává práci; (b) rozdělit RESEARCH na SEARCH/CRAWL joby. Výchozí: (a), zapsat do `REQUIREMENTS_AUDIT.md` + `NOTEBOOK_SETUP.md`.
+  - *Hotovo:* 20. 10. 2026 – zvolena varianta (a); oba dokumenty opraveny (Note 9 zatím nedostává žádnou práci, jen `TEST`). Varianta (b) zůstává jako budoucí plán.
 
 ## FÁZE 4 – Audit
 - [ ] **4.1 Freshness vůči cutoffu (H#16).** *Jak:* `FreshnessChecker` počítat věk k `data_cutoff_at` a podle typu domény; test.

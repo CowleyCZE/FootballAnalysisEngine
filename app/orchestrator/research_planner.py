@@ -70,4 +70,12 @@ class ResearchPlanner:
                 subject_team_id=(match_identity.home_team_id if domain.endswith("_HOME")
                                  else match_identity.away_team_id if domain.endswith("_AWAY") else None),
             ))
+        # TODO 3.2: STATISTICS čeká na research domény (jen na terminální stav, ne úspěch;
+        # zaseklé joby ukončí recovery timeoutem), aby ResearchContextMapper viděl jejich snapshoty.
+        stat_task = next((t for t in tasks if t.domain == "STATISTICS"), None)
+        if stat_task is not None:
+            stat_task.depends_on = [
+                t.task_uuid for t in tasks
+                if t is not stat_task and t.domain not in (home_profile, away_profile)
+            ]
         return tasks

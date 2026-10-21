@@ -83,6 +83,18 @@ class ResearchEngine:
         self.claim_validator = ClaimValidator()
         self.conflict_detector = ConflictDetector()
 
+    @staticmethod
+    def subject_team_name(task: ResearchTask) -> str:
+        """Subjekt claimů podle domény (TODO 3.3): *_HOME -> domácí, *_AWAY -> hosté,
+        ostatní (GENERAL, HEAD_TO_HEAD, WEATHER, REFEREE, RIVALRY, ...) = zápasová doména
+        bez týmu (prázdný řetězec), nikdy ne „hosté jinak“."""
+        domain = task.domain or ""
+        if domain.endswith("_HOME"):
+            return task.home_team
+        if domain.endswith("_AWAY"):
+            return task.away_team
+        return ""
+
     def execute(self, task: ResearchTask) -> ResearchResult:
         start_time = time.time()
         exec_uuid = f"EXEC-{uuid.uuid4().hex[:8]}"
@@ -102,7 +114,7 @@ class ResearchEngine:
             diag_warnings: List[str] = []
 
             for q in queries[: self.source_policy.get_strategy(task.domain).get("max_queries", len(queries))]:
-                team_name = task.home_team if "HOME" in task.domain else task.away_team if "AWAY" in task.domain else ""
+                team_name = self.subject_team_name(task)
                 res = []
                 search_err = None
                 try:
@@ -210,7 +222,7 @@ class ResearchEngine:
             for doc in crawled_docs:
                 all_evidence.extend(self.evidence_extractor.extract_evidence(doc, task.domain))
 
-            team_name = task.home_team if "HOME" in task.domain else task.away_team
+            team_name = self.subject_team_name(task)
             claims = self.claim_builder.build_claims_from_evidence(all_evidence, team_name)
             metrics.claims_count = len(claims)
             claims = self.claim_validator.validate_claims(claims, task.data_cutoff_at)

@@ -25,6 +25,8 @@ class EngineCrawler:
 
     async def fetch_with_playwright(self, url: str) -> CrawlResult:
         if not PLAYWRIGHT_AVAILABLE:
+            logger.warning(
+                "[CRAWLER] Playwright není nainstalován – JS stránky se nevyrenderují (pip install playwright && playwright install chromium): %s", url)
             return CrawlResult(url=url, success=False, error="Playwright is not installed")
         try:
             async with async_playwright() as p:
@@ -44,6 +46,8 @@ class EngineCrawler:
                     used_playwright=True
                 )
         except Exception as e:
+            hint = " (chybí prohlížeč? spusť : playwright install chromium)" if "Executable doesn't exist" in str(e) else ""
+            logger.warning("[CRAWLER] Playwright fallback selhal pro %s: %s%s", url, e, hint)
             return CrawlResult(url=url, success=False, error=f"Playwright error: {str(e)}")
 
     async def crawl_and_parse(self, url: str) -> tuple[CrawlResult, ParsedDocument | None]:

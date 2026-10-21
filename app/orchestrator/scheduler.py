@@ -8,7 +8,15 @@ logger = logging.getLogger(__name__)
 
 
 class DependencyScheduler:
-    """Releases jobs only when all dependencies succeeded."""
+    """Releases blocked jobs once all dependencies reached a TERMINAL state.
+
+    Závislost slouží jen k pořadí (např. profil hostů až po profilu domácích), ne jako
+    záruka úspěchu: selhání jedné domény nesmí kaskádově zabit nezávislé domény
+    (TODO 3.1). Povinné joby, které selhaly, stejně ruší výsledek pipeline v orchestrátoru
+    (`_are_all_required_jobs_successful`), takže se nic neslabí.
+    """
+
+    TERMINAL = {JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.CANCELLED}
 
     def __init__(self, db_path: str = "database/football.db"):
         self.db_path = db_path
@@ -41,19 +49,7 @@ class DependencyScheduler:
                 ).fetchall()
                 if not deps:
                     continue
-                if any(d["status"] in {JobStatus.FAILED, JobStatus.CANCELLED} for d in deps):
-                    conn.execute(
-                        "UPDATE jobs SET status=?, error_text=? WHERE id=?",
-                        (JobStatus.FAILED, "Dependency failed", job["id"]),
-                    )
-                    if has_research_tasks:
-                        conn.execute(
-                            "UPDATE research_tasks SET status='BLOCKED', updated_at=CURRENT_TIMESTAMP "
-                            "WHERE job_id=? AND status NOT IN "
-                            "('SUCCESS','PARTIAL','NO_RESULT','CONFLICTED','FAILED','BLOCKED')",
-                            (job["job_id"],),
-                        )
-                elif all(d["status"] == JobStatus.SUCCESS for d in deps):
+                if all(d["status"] in self.TERMINAL for d in deps):
                     conn.execute(
                         "UPDATE jobs SET status=? WHERE id=?",
                         (JobStatus.PENDING, job["id"]),

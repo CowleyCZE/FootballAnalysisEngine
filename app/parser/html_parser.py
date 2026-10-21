@@ -1,11 +1,68 @@
 import hashlib
 import logging
+import re
 from datetime import datetime, timezone
+from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from app.crawler.models import ParsedDocument
 from app.parser.text_cleaner import clean_text
 
 logger = logging.getLogger(__name__)
+
+_CZ_CHARS = set("áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ")
+
+
+def detect_language(soup: BeautifulSoup, text: str) -> str:
+    """Jazyk dokumentu: <html lang> / meta / og:locale, jinak heuristika (TODO 3.6)."""
+    candidates = []
+    html_tag = soup.find("html")
+    if html_tag and html_tag.get("lang"):
+        candidates.append(html_tag.get("lang"))
+    for attrs in ({"http-equiv": re.compile("content-language", re.I)}, {"name": "language"}, {"property": "og:locale"}):
+        tag = soup.find("meta", attrs=attrs)
+        if tag and tag.get("content"):
+            candidates.append(tag.get("content"))
+    for cand in candidates:
+        code = re.split(r"[-_]", str(cand).strip().lower())[0]
+        if 2 <= len(code) <= 3 and code.isalpha():
+            return code
+    sample = text[:3000]
+    letters = [c for c in sample if c.isalpha()]
+    if letters:
+        ratio = sum(1 for c in letters if c in _CZ_CHARS) / len(letters)
+        if ratio >= 0.03:
+            return "cs"
+    return "en"
+
+
+def _meta_content(soup: BeautifulSoup, *specs) -> str | None:
+    for attrs in specs:
+        tag = soup.find("meta", attrs=attrs)
+        if tag and tag.get("content") and tag.get("content").strip():
+            return tag.get("content").strip()
+    return None
+
+
+def extract_canonical(soup: BeautifulSoup, url: str) -> str:
+    link = soup.find("link", attrs={"rel": lambda v: v and "canonical" in ([v] if isinstance(v, str) else v)})
+    href = link.get("href") if link else None
+    if not href:
+        href = _meta_content(soup, {"property": "og:url"})
+    if href and href.strip():
+        return urljoin(url, href.strip())
+    return url
+
+
+def extract_author(soup: BeautifulSoup) -> str | None:
+    author = _meta_content(soup, {"name": "author"}, {"property": "article:author"}, {"name": "article:author"})
+    if author and not author.lower().startswith("http"):
+        return author
+    tag = soup.find(attrs={"itemprop": "author"}) or soup.find(attrs={"rel": "author"})
+    if tag:
+        name = tag.get("content") or tag.get_text(" ", strip=True)
+        if name:
+            return name.strip()
+    return None
 
 class HTMLParser:
     def __init__(self) -> None:
@@ -27,6 +84,10 @@ class HTMLParser:
             logger.warning("Parser lxml selhal (%s); používám html.parser.", exc)
             self.backend = "html.parser"
             soup = BeautifulSoup(html, self.backend)
+
+        # Metadata z <head> a <html> se čtou před odstraněním prvků (TODO 3.6)
+        canonical_url = extract_canonical(soup, url)
+        author = extract_author(soup)
 
         # Odstranění nežádoucích prvků (script, style, iframe, nav...)
         for tag in soup(["script", "style", "noscript", "iframe", "svg", "nav", "footer", "header"]):
@@ -57,15 +118,17 @@ class HTMLParser:
         # Základní skóre kvality získaného textu
         quality_score = 1.0 if word_count > 100 else (word_count / 100.0)
 
+        language = detect_language(soup, cleaned_text)
+
         return ParsedDocument(
             url=url,
-            canonical_url=url,
+            canonical_url=canonical_url,
             title=title,
             description=description,
-            author=None,
+            author=author,
             published_at=published_at,
             retrieved_at=datetime.now(timezone.utc).isoformat(),
-            language="cs",
+            language=language,
             text=cleaned_text,
             word_count=word_count,
             content_hash=content_hash,

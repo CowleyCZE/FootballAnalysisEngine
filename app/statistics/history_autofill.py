@@ -9,17 +9,61 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import sqlite3
 import unicodedata
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from urllib.request import Request, urlopen
+
+try:  # PyYAML je volitelné: bez něj funguje jen přesná normalizovaná shoda
+    import yaml
+except ImportError:  # pragma: no cover
+    yaml = None
 
 from app.database.schema import initialize_database
 
 GITHUB_TREE = "https://api.github.com/repos/openfootball/football.json/git/trees/master?recursive=1"
 RAW_BASE = "https://raw.githubusercontent.com/openfootball/football.json/master/"
 DEFAULT_CACHE = Path("data/history-cache")
+ALIASES_FILE = Path(__file__).resolve().parents[2] / "config" / "team_aliases.yaml"
+# Obecné klubové předpony/přípony, které nerozlišují týmy ("B" ani "U19" mezi ně nepatří).
+_CLUB_TOKENS = {"fc", "fk", "sk", "ac", "as", "sc", "afc", "sfc", "ssc", "bk", "ks", "cf", "tj"}
+
+
+def canonical_team_key(name: str) -> str:
+    """Normalizace názvu týmu pro přesnou shodu: bez diakritiky, interpunkce a klubových předpon."""
+    tokens = re.findall(r"[a-z0-9]+", _norm(name))
+    if len(tokens) > 1 and tokens[0] == "1" and tokens[1] in _CLUB_TOKENS:
+        tokens = tokens[1:]  # "1. FC Slovácko"
+    tokens = [t for t in tokens if t not in _CLUB_TOKENS]
+    return " ".join(tokens)
+
+
+@lru_cache(maxsize=8)
+def _load_aliases(path: str) -> dict:
+    """alias (kanonický klíč) -> kanonický klíč hlavního názvu z config/team_aliases.yaml."""
+    file = Path(path)
+    if yaml is None or not file.exists():
+        return {}
+    try:
+        data = yaml.safe_load(file.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    result: dict = {}
+    for canonical, aliases in (data.get("aliases") or {}).items():
+        target = canonical_team_key(canonical)
+        for alias in aliases or []:
+            key = canonical_team_key(alias)
+            if key and target:
+                result[key] = target
+    return result
+
+
+def resolve_team_key(name: str) -> str:
+    key = canonical_team_key(name)
+    return _load_aliases(str(ALIASES_FILE)).get(key, key)
 
 
 def _norm(value: str) -> str:
@@ -153,22 +197,14 @@ class HistoryAutoFiller:
 
     @staticmethod
     def _team_id(conn: sqlite3.Connection, name: str, competition: str) -> int:
-        normalized = _norm(name)
-        candidates = conn.execute("SELECT id, normalized_name FROM teams").fetchall()
-        matching = []
-        for ident, existing in candidates:
-            existing_normalized = _norm(existing)
-            if len(existing_normalized) >= 5 and (
-                existing_normalized == normalized
-                or existing_normalized in normalized
-                or normalized in existing_normalized
-            ):
-                matching.append((len(existing_normalized), int(ident)))
-        if matching:
-            # Prefer the shortest canonical form ("Baník Ostrava") over a
-            # legacy duplicate such as "FC Baník Ostrava".
-            return min(matching)[1]
-        return int(conn.execute("INSERT INTO teams(name, normalized_name, competition) VALUES (?,?,?)", (name, normalized, competition)).lastrowid)
+        # Jen přesná shoda kanonického klíče (+ tabulka aliasů). Žádná substring shoda:
+        # "Sparta Praha" a "Sparta Praha B" jsou různé týmy.
+        key = resolve_team_key(name)
+        if key:
+            for ident, existing in conn.execute("SELECT id, name FROM teams ORDER BY id").fetchall():
+                if resolve_team_key(existing) == key:
+                    return int(ident)
+        return int(conn.execute("INSERT INTO teams(name, normalized_name, competition) VALUES (?,?,?)", (name, _norm(name), competition)).lastrowid)
 
     def _team_history_count(self, home_id: int, away_id: int, cutoff_datetime: str) -> int:
         with sqlite3.connect(self.db_path) as conn:

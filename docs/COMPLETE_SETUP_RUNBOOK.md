@@ -69,6 +69,17 @@ cd ~/FootballAnalysisEngine
 
 Skript vytvoří `.venv`, nainstaluje Python závislosti, vytvoří `.env` a inicializuje databázi.
 
+### 3a. Playwright (volitelný renderování JS stránek)
+
+Crawler použije Playwright jako zálohu, když HTTP vrátí málo textu (JS stránky). Bez prohlížeče fallback jen zapíše varování do logu a pokračuje se samotným HTTP:
+
+```bash
+cd ~/FootballAnalysisEngine && source .venv/bin/activate
+pip install playwright
+playwright install chromium
+# pokud chybí systémové knihovny: sudo .venv/bin/playwright install-deps chromium
+```
+
 ## 4. Kontrola konfigurace `.env`
 
 Otevřete konfiguraci:

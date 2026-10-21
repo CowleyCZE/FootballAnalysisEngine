@@ -1,0 +1,56 @@
+# Tabulka aliasů týmů pro slučování při importu historie (history_autofill._team_id).
+# Klíč = hlavní název, hodnoty = jeho další podoby. Shoda je PŘESNÁ po normalizaci
+# (bez diakritiky/interpunkce, bez předpon FC/FK/SK/AC…); substring shoda neexistuje,
+# takže "Sparta Praha B" se s "Sparta Praha" nikdy neslije.
+aliases:
+  "Bohemians Praha 1905":
+    - "Bohemians 1905"
+    - "Bohemians Prague 1905"
+  "Sparta Praha":
+    - "AC Sparta Praha"
+    - "Sparta Prague"
+  "Slavia Praha":
+    - "SK Slavia Praha"
+    - "Slavia Prague"
+  "Viktoria Plzeň":
+    - "FC Viktoria Plzeň"
+    - "Viktoria Plzen"
+  "Baník Ostrava":
+    - "FC Baník Ostrava"
+    - "Banik Ostrava"
+  "Slovan Liberec":
+    - "FC Slovan Liberec"
+  "Sigma Olomouc":
+    - "SK Sigma Olomouc"
+  "Mladá Boleslav":
+    - "FK Mladá Boleslav"
+    - "Mlada Boleslav"
+  "Jablonec":
+    - "FK Jablonec"
+  "Slovácko":
+    - "1. FC Slovácko"
+    - "Slovacko"
+  "Hradec Králové":
+    - "FC Hradec Králové"
+    - "Hradec Kralove"
+  "Dynamo České Budějovice":
+    - "SK Dynamo České Budějovice"
+    - "Dynamo Ceske Budejovice"
+  "Teplice":
+    - "FK Teplice"
+  "Pardubice":
+    - "FK Pardubice"
+  "Karviná":
+    - "MFK Karviná"
+    - "Karvina"
+  "Zlín":
+    - "FC Zlín"
+    - "FC Fastav Zlín"
+    - "Fastav Zlín"
+    - "Zlin"
+  "Dukla Praha":
+    - "FK Dukla Praha"
+  "Slavia Praha B":
+    - "SK Slavia Praha B"
+  "Sparta Praha B":
+    - "AC Sparta Praha B"

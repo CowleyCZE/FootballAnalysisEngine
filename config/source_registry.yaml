@@ -41,3 +41,87 @@ domains:
     type: aggregator
   ruik.cz:
     type: major_news
+
+  # --- České oficiální zdroje (TODO 3.5) ---
+  fotbal.cz:
+    type: official_league
+  fortunaliga.cz:
+    type: official_league
+  chanceliga.cz:
+    type: official_league
+  fcviktoria.cz:
+    type: official_club
+  fcb.cz:
+    type: official_club
+  fcslovacko.cz:
+    type: official_club
+  fkjablonec.cz:
+    type: official_club
+  fchk.cz:
+    type: official_club
+  fcslovanliberec.cz:
+    type: official_club
+  fkteplice.cz:
+    type: official_club
+  bohemians.cz:
+    type: official_club
+  mfkkarvina.cz:
+    type: official_club
+  fkmb.cz:
+    type: official_club
+  sigmafotbal.cz:
+    type: official_club
+  dynamo.cz:
+    type: official_club
+
+  # --- Statistické poskytovatelé ---
+  transfermarkt.com:
+    type: statistical_provider
+  transfermarkt.cz:
+    type: statistical_provider
+  fbref.com:
+    type: statistical_provider
+  understat.com:
+    type: statistical_provider
+  sofascore.com:
+    type: statistical_provider
+  whoscored.com:
+    type: statistical_provider
+  soccerway.com:
+    type: statistical_provider
+  fotmob.com:
+    type: statistical_provider
+
+  # --- Zpravodajství (CZ + svt) ---
+  idnes.cz:
+    type: major_news
+  sport.cz:
+    type: major_news
+  isport.blesk.cz:
+    type: major_news
+  denik.cz:
+    type: major_news
+  novinky.cz:
+    type: major_news
+  aktualne.cz:
+    type: major_news
+  ceskatelevize.cz:
+    type: major_news
+  irozhlas.cz:
+    type: major_news
+  seznamzpravy.cz:
+    type: major_news
+  lidovky.cz:
+    type: major_news
+  espn.com:
+    type: major_news
+  theguardian.com:
+    type: major_news
+  reuters.com:
+    type: major_news
+
+  # --- Agregátory ---
+  fotbalunas.cz:
+    type: aggregator
+  footballdatabase.eu:
+    type: aggregator

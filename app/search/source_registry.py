@@ -71,6 +71,13 @@ class SearchSourceRegistry:
         if domain in self._domains:
             return self._domains[domain]
 
+        # Subdomény registrované domény (sport.idnes.cz → idnes.cz), nejdelší shoda připona
+        parts = domain.split(".")
+        for i in range(1, len(parts) - 1):
+            parent = ".".join(parts[i:])
+            if parent in self._domains:
+                return self._domains[parent]
+
         return "unknown"
 
     def get_publisher_id(self, url: str) -> str:
