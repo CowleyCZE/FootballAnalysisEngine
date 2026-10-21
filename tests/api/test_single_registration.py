@@ -4,9 +4,21 @@ from collections import Counter
 from app.main import app
 
 
+def _all_routes(application):
+    routes = []
+    for r in application.routes:
+        if hasattr(r, "methods") and hasattr(r, "path"):
+            routes.append(r)
+        elif hasattr(r, "original_router"):
+            for sub_r in getattr(r.original_router, "routes", []):
+                if hasattr(sub_r, "methods") and hasattr(sub_r, "path"):
+                    routes.append(sub_r)
+    return routes
+
+
 def test_no_duplicate_method_path_registrations():
     pairs = Counter()
-    for route in app.routes:
+    for route in _all_routes(app):
         for method in getattr(route, "methods", None) or []:
             pairs[(method, route.path)] += 1
     duplicates = {k: v for k, v in pairs.items() if v > 1 and k[0] != "HEAD"}
@@ -15,7 +27,7 @@ def test_no_duplicate_method_path_registrations():
 
 
 def test_analysis_start_registered_once_and_router_extras_present():
-    paths = [(m, r.path) for r in app.routes for m in (getattr(r, "methods", None) or [])]
+    paths = [(m, r.path) for r in _all_routes(app) for m in (getattr(r, "methods", None) or [])]
     assert paths.count(("POST", "/api/analysis/start")) == 1
     assert ("GET", "/api/analysis/{run_id}") in paths
     assert ("GET", "/api/analysis/{run_id}/readiness") in paths

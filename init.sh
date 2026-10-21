@@ -63,7 +63,8 @@ else
   note "Soubor .env již existuje."
   if grep -q "^\(WORKER_API_TOKEN\|API_SECRET_TOKEN\)=${PLACEHOLDER_TOKEN}\$" .env; then
     API_TOKEN="$(new_token)"
-    sed -i "s|^\(WORKER_API_TOKEN\|API_SECRET_TOKEN\)=${PLACEHOLDER_TOKEN}\$|\1=${API_TOKEN}|" .env
+    sed -i "s|^WORKER_API_TOKEN=${PLACEHOLDER_TOKEN}\$|WORKER_API_TOKEN=${API_TOKEN}|" .env
+    sed -i "s|^API_SECRET_TOKEN=${PLACEHOLDER_TOKEN}\$|API_SECRET_TOKEN=${API_TOKEN}|" .env
     warn "V .env byl výchozí token; nahrazen náhodným. Aktualizujte jej i na Note 9."
   fi
   grep -q '^FAE_AUTO_HISTORY=' .env || printf '\nFAE_AUTO_HISTORY=1\nFAE_HISTORY_CACHE_HOURS=24\n' >> .env

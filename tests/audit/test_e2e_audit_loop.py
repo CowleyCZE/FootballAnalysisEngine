@@ -41,7 +41,8 @@ def test_end_to_end_adversarial_audit_loop(tmp_path):
         statistics=stats_cycle1,
         max_cycles=3,
         current_cycle=1,
-        data_cutoff_at=stale_date,
+        # Stáří důkazu se měří vůči cutoffu: cutoff = teď, důkaz 20 dní starý.
+        data_cutoff_at=datetime.now(timezone.utc).isoformat(),
     )
 
     assert len(audit_run1["issues"]) >= 5
