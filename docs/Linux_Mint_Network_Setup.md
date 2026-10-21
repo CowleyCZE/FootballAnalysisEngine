@@ -25,7 +25,7 @@ telefon hostuje službu.
    Pomocník model nestahuje automaticky.
 
 Při prvním spuštění SearXNG vytvoří pomocník ignorovaný soubor
-`services/searxng/local-config/settings.yml` a šablonový tajný klíč nahradí
+`services/searxng/runtime-config-<uid>-managed/settings.yml` a šablonový tajný klíč nahradí
 náhodným místním klíčem. Tajné údaje se do Gitu neukládají.
 
 ## Přístup z telefonu a bezpečnost

@@ -1,12 +1,15 @@
-import time
-import json
-import sqlite3
-import logging
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Callable
+"""Testovací harness: jednoduchý worker s ručně dodanými handlery (TODO 7.1).
 
-from app.jobs.queue import JobQueue
+Dříve `app/jobs/worker.py`. Produkční worker je `app.workers.daemon.WorkerDaemon`
+(`scripts/run_worker.py`); tento pomocník slouží jen testům pipeline.
+"""
+import logging
+import sqlite3
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List
+
 from app.jobs.models import JobStatus
+from app.jobs.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 

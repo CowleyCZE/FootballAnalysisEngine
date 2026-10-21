@@ -106,12 +106,12 @@ Stav k 20. 10. 2026. Podklad: `PROJECT_REPAIR_HANDOFF.md`, `postup_oprav.txt`, `
   - *Hotovo:* 21. 10. 2026 – `SCHEMA_PATH` v `test_engine.py`; test `tests/statistics/test_schema_path.py` (1, s `chdir`). Ostatní testy s relativními cestami jsem neprohledával (chybí grep obsahu) – při selhání z jiného adresáře dopravit stejným způsobem.
 
 ## FÁZE 7 – Úklid mrtvého kódu (vždy `grep -rn` importů + celá sada testů)
-- [ ] **7.1** `app/jobs/worker.py`, `priorities.py`, `JobModel`, `app/orchestrator/task_dispatcher.py`, `locks.py`.
-  - *Rozpracováno:* 21. 10. 2026 – odstraněny `app/jobs/priorities.py` a `app/orchestrator/task_dispatcher.py` (bez importů; soubory přesunuty do `~/FAE_removed_7x/`, lze vrátit). **Ponecháno:** `app/jobs/worker.py` (`BaseWorkerDaemon` používají e2e testy `test_full_autonomous_pipeline` a `test_15_full_autonomous_pipeline` a export v `app/jobs/__init__.py`), `JobModel` (export v `__init__`), `locks.py` (`DeadlockDetector` export v `app/orchestrator/__init__.py`) – pro rozhodnutí potřeba `grep -rn "BaseWorkerDaemon\|DeadlockDetector\|JobModel" --include=*.py . --exclude-dir=.venv`.
+- [x] **7.1** `app/jobs/worker.py`, `priorities.py`, `JobModel`, `app/orchestrator/task_dispatcher.py`, `locks.py`.
+  - *Hotovo:* 21. 10. 2026 – 315 passed ověřeno po první části. Přesunuty `priorities.py`, `task_dispatcher.py`, `locks.py` (`DeadlockDetector` bez použití), `JobModel` odstraněn z `models.py` a `app/jobs/__init__.py`. `BaseWorkerDaemon` (`app/jobs/worker.py`) používaly jen testy (produkční worker je `app.workers.daemon.WorkerDaemon`) → přesunut jako testovací harness do `tests/worker_harness.py`, oba e2e/pipeline testy zachovány (změněn jen import). Oprava docstringu `scripts/run_worker.py`. Ověřit `pytest -q`.
 - [x] **7.2** `app/search/source_engine.py`, `query_builder.py`, `app/research/schemas/absences.py`.
   - *Hotovo:* 21. 10. 2026 – přesunuty `app/search/source_engine.py`, `app/search/query_builder.py` (nezaměnit s používaným `app/research/query_builder.py`, ten zůstává), `app/research/schemas/absences.py`. Ověřit `pytest -q`.
-- [ ] **7.3** `AISynthesizer` + `PromptManager` + `prompts/*`, `app/audit/db.py`.
-  - *Pozor:* `app/audit/db.py` **není mrtvý** – `app/audit/auditor.py` importuje `init_audit_tables`; nemaž. `AISynthesizer`/`PromptManager` jsou exportovány v `app/ai/__init__.py` a používá je `tests/ai/test_ai_engine.py`; nepovedené.
+- [x] **7.3** `AISynthesizer` + `PromptManager` + `prompts/*`, `app/audit/db.py`.
+  - *Hotovo:* 21. 10. 2026 – `AIWorker` používá vlastní prompt přímo v kódu, takže `app/ai/synthesizer.py`, `app/ai/prompts.py`, adresář `prompts/` a export v `app/ai/__init__.py` jsou odstraněny (přesunuty do `~/FAE_removed_7x/`); odstraněn jediný test, který `AISynthesizer` používal (`test_synthesizer_reproducibility_and_db`) → očekáváno **314 passed** (315 − 1). **`app/audit/db.py` ponechán** – importuje ho `app/audit/auditor.py` (`init_audit_tables`). Ověřit `pytest -q`.
 - [x] **7.4** Kořenové `run_worker.py`, `test_source_engine.py`, `test_crawler_pipeline.py`, prázdný `tests/statistics/test_splits.py`, `SplitsEngine`, `XGModule`, `StatisticExtractor`.
   - *Hotovo:* 21. 10. 2026 – vše přesunuto do `~/FAE_removed_7x/` (`app/statistics/{xg,splits,extractor}.py` bez importů). README: příkaz workeru opraven na `scripts/run_worker.py`. Ověřit `pytest -q` (při ztrátě testů počet klesl o kořenové test_*.py).
   - *Jak (7.x):* Pro každý soubor `grep -rn "<modul>" --include=*.py .`; bez importů v produkci smazat i související testy; `pytest -q` zelený.
@@ -125,8 +125,11 @@ Stav k 20. 10. 2026. Podklad: `PROJECT_REPAIR_HANDOFF.md`, `postup_oprav.txt`, `
   - *Hotovo:* 21. 10. 2026 – Playwright §3a už byl (bod 3.6); model opraven na `poisson-dc-context-v5` (byl `poisson-context-v3`), pravidlo pro chybějící historii sjednoceno (`INSUFFICIENT_DATA` → `UNRESOLVED`).
 - [x] **8.4** `scripts/network_setup.sh` (qwen2.5:3b, `OLLAMA_URL`), `docs/Linux_Mint_Network_Setup.md` (jednotná větev).
   - *Hotovo:* 21. 10. 2026 – skript: hláška o modelu `qwen2.5:3b` (z `OLLAMA_MODEL`), adresa Ollamy z `OLLAMA_URL` (fallback `OLLAMA_PORT`) i pro kontrolu `/api/tags`; dokument: odstraněno pevné `git switch football-engine`. Skript nespuštěn (interaktivní) – doporučeno `bash -n scripts/network_setup.sh`.
-- [ ] **8.5** `postup_oprav.txt` a `PROJECT_REPAIR_HANDOFF.md` aktualizovat podle hotových bodů.
-  - *Poznámka:* soubory nejsou v kořeni projektu ani v `docs/` (nenalezeny); potřeba cesta od uživatele.
+- [x] **8.5** `postup_oprav.txt` a `PROJECT_REPAIR_HANDOFF.md` aktualizovat podle hotových bodů.
+  - *Hotovo:* 21. 10. 2026 – **vynecháno na pokyn uživatele** (soubory nejsou v projektu).
+- 8.4 zkontrolováno 21. 10. 2026: skript (`qwen2.5:3b`, `OLLAMA_URL`) i dokument v pořádku; opravena cesta SearXNG configu v `Linux_Mint_Network_Setup.md` (`runtime-config-<uid>-managed`, tak jak ji vytváří skript).
+
+- Ověřeno uživatelem 21. 10. 2026: `pytest -q` = 314 passed, 1 warning (8,13 s) → fáze 6–8 potvrzeny.
 
 ## FÁZE 9 – Reálný acceptance (jen na stroji uživatele, ne v cloudu)
 - [ ] SearXNG vrací výsledky, `scripts/preflight.py` OK.

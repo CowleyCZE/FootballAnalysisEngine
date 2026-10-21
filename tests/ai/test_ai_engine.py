@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 from app.ai.schemas import AnalysisResult
 from app.ai.validator import AIValidator
 from app.ai.context_builder import ContextBuilder
-from app.ai.synthesizer import AISynthesizer
 
 def test_json_validator_valid():
     sample_json = '''
@@ -62,54 +61,6 @@ def test_conflicts_preservation():
     context = builder.build_context(match_info, claims, statistics={"xg_home": 1.5}, conflicts=conflicts)
     assert len(context["conflicts"]) == 1
     assert context["data_quality"]["conflicts"] == 1
-
-def test_synthesizer_reproducibility_and_db(tmp_path):
-    db_file = str(tmp_path / "test_ai.db")
-    
-    mock_client = MagicMock()
-    mock_client.model = "qwen2.5:7b"
-    mock_client.generate.return_value = '''
-    {
-      "match_id": 50,
-      "status": "complete",
-      "data_quality": {
-        "score": 0.85,
-        "source_count": 2,
-        "independent_sources": 1,
-        "official_sources": 1,
-        "conflicts": 0,
-        "freshness_score": 0.9,
-        "missing_data": []
-      },
-      "key_factors": [],
-      "uncertainties": [],
-      "conflicts_noted": [],
-      "conclusion": "Vyrovnaný zápas."
-    }
-    '''
-
-    synthesizer = AISynthesizer(client=mock_client, db_path=db_file)
-    
-    match_info = {"match_id": 50, "home": "Arsenal", "away": "Chelsea"}
-    claims = []
-    stats = {"ppg_home": 2.1}
-
-    res1, run_id1 = synthesizer.analyze_match(match_info, claims, stats)
-    res2, run_id2 = synthesizer.analyze_match(match_info, claims, stats)
-
-    assert res1 is not None
-    assert res1.match_id == 50
-
-    # Zkontrolovat záznamy v DB
-    conn = sqlite3.connect(db_file)
-    rows = conn.execute("SELECT run_id, input_hash, output_hash, status FROM ai_runs").fetchall()
-    conn.close()
-
-    assert len(rows) == 2
-    # Stejná data -> stejný input_hash
-    assert rows[0][1] == rows[1][1]
-    assert rows[0][3] == "SUCCESS"
-
 
 def test_context_builder_does_not_implicitly_load_database(tmp_path):
     db_file = str(tmp_path / "context.db")

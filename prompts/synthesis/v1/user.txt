@@ -1,4 +1,0 @@
-KONTEXT PRO SYNTÉZU:
-{{CONTEXT}}
-
-Vytvoř finální analytickou syntézu ve formátu JSON.

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 import app.api.server as server_module
 from app.orchestrator.orchestrator import MasterOrchestrator
-from app.jobs.worker import BaseWorkerDaemon
+from tests.worker_harness import BaseWorkerDaemon
 from app.workers.statistics_worker import StatisticsWorker
 from app.workers.ai_worker import AIWorker
 from app.workers.audit_worker import AuditWorker

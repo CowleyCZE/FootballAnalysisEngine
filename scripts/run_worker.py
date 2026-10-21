@@ -2,7 +2,7 @@
 """Run one pull-based Football Analysis Engine worker on this machine.
 
 Recommended command to run a worker from the repository root:
-    python3 run_worker.py --worker-id worker-1
+    python3 scripts/run_worker.py --worker-id worker-1
 """
 
 import argparse

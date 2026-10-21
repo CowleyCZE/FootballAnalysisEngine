@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from app.orchestrator.orchestrator import MasterOrchestrator
 from app.jobs.queue import JobQueue
 from app.jobs.models import JobStatus
-from app.jobs.worker import BaseWorkerDaemon
+from tests.worker_harness import BaseWorkerDaemon
 from app.workers.search_worker import SearchWorker
 from app.workers.crawler_worker import CrawlerWorker
 from app.workers.statistics_worker import StatisticsWorker
