@@ -82,12 +82,16 @@ Stav k 20. 10. 2026. Podklad: `PROJECT_REPAIR_HANDOFF.md`, `postup_oprav.txt`, `
   - *Hotovo:* 20. 10. 2026 – zvolena varianta (a); oba dokumenty opraveny (Note 9 zatím nedostává žádnou práci, jen `TEST`). Varianta (b) zůstává jako budoucí plán.
 
 ## FÁZE 4 – Audit
-- [ ] **4.1 Freshness vůči cutoffu (H#16).** *Jak:* `FreshnessChecker` počítat věk k `data_cutoff_at` a podle typu domény; test.
-- [ ] **4.2 ConsistencyChecker (H#17).** *Jak:* Odstranit natvrdo „vyhrál 7 z posledních 10“; používat skutečné klíče `match_statistics`; testy upravit na obecnou logiku.
-- [ ] **4.3 Sjednotit ConflictDetector (H#18).** *Jak:* Jedna implementace (např. `app/research/conflict_detector.py`), audit ji importuje; testy projdou.
+- [x] **4.1 Freshness vůči cutoffu (H#16).** *Jak:* `FreshnessChecker` počítat věk k `data_cutoff_at` a podle typu domény; test.
+  - *Hotovo:* 20. 10. 2026 – 278 passed ověřeno. `calculate_freshness(..., reference_at=cutoff)`; typ dat z predikátu claimu (`data_type_for_predicate`: lineup/injury/statistics/general) místo natvrdo `lineup`; auditor předává `parsed_cutoff`. Testy `tests/test_freshness_cutoff.py` (5). Starý test očekávající `stale_evidence` při věku počítaném k `now()` by se musel upravit.
+- [x] **4.2 ConsistencyChecker (H#17).** *Jak:* Odstranit natvrdo „vyhrál 7 z posledních 10“; používat skutečné klíče `match_statistics`; testy upravit na obecnou logiku.
+  - *Hotovo:* 20. 10. 2026 – `consistency.py`: bilance z reálné struktury (`home_team.form`/`away_team.form`: W-D-L, body, góly; ploché klíče zůstávají jako kompatibilita); kontroly součtu, bodů = 3V+R, gólového rozdílu; obecný parser tvrzení „vyhrál X z posledních N“ (ověřuje se jen při shodném N). Testy `tests/test_consistency_generic.py` (6).
+- [x] **4.3 Sjednotit ConflictDetector (H#18).** *Jak:* Jedna implementace (např. `app/research/conflict_detector.py`), audit ji importuje; testy projdou.
+  - *Hotovo:* 20. 10. 2026 – `research/conflict_detector.py` obsahuje i `detect_conflicts` (dicty z DB → nálezy), `audit/conflict_detector.py` je tenký re-export; shodná normalizace klíče (case-insensitive subjekt). Testy `tests/test_conflict_detector_unified.py` (3).
 
 ## FÁZE 5 – API / bezpečnost / provoz
-- [ ] **5.1 Jedna registrace `/api/analysis/start` (H#19).** *Jak:* Ponechat jen jednu (router), `MasterOrchestrator` vytvářet líně s cestou z configu; odstranit duplicitu v `server.py`.
+- [x] **5.1 Jedna registrace `/api/analysis/start` (H#19).** *Jak:* Ponechat jen jednu (router), `MasterOrchestrator` vytvářet líně s cestou z configu; odstranit duplicitu v `server.py`.
+  - *Hotovo:* 20. 10. 2026 – odchylka od návrhu: ponechána verze v `server.py` (má kontrakt, na který se vážou testy a Note 9: `match_id` nebo plná identita, 200 OK; verze v routeru byla stíněná a nikdy se nevolala). Z `orchestrator/router.py` odstraněny duplicitní `POST /start` a `GET /{run_id}`; zbývá readiness + cancel, orchestrátor se vytváří líně přes `get_orchestrator()` nad `server.DB_PATH`. Testy `tests/api/test_single_registration.py` (3). Pozn.: `readiness` počítá s job typem `SEARCH`, který už nevzniká (jsou `RESEARCH`) – samostatný problém, není v TODO.
 - [ ] **5.2 Náhodný token v `init.sh` (H#20).** *Jak:* `python -c "import secrets;print(secrets.token_urlsafe(32))"`; nikdy nezapisovat výchozí řetězec.
 - [ ] **5.3 `config/crawler.yaml` (H#23).** *Jak:* Načítat v `HTTPClient` (timeout, UA, retry) s výchozími hodnotami, nebo soubor odstranit.
 

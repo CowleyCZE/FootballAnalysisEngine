@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 from app.audit.db import init_audit_tables
-from app.audit.freshness import FreshnessChecker
+from app.audit.freshness import FreshnessChecker, data_type_for_predicate
 from app.audit.conflict_detector import ConflictDetector
 from app.audit.evidence_checker import EvidenceChecker
 from app.audit.consistency import ConsistencyChecker
@@ -163,7 +163,11 @@ class AdversarialAuditor:
                             "requires_research": True
                         })
 
-                fresh = FreshnessChecker.calculate_freshness(pub_at, data_type="lineup")
+                fresh = FreshnessChecker.calculate_freshness(
+                    pub_at,
+                    data_type=data_type_for_predicate(c.get("predicate")),
+                    reference_at=parsed_cutoff if (cutoff_valid and parsed_cutoff) else None,
+                )
                 if fresh["freshness_score"] < 0.3:
                         issues.append({
                             "type": "stale_evidence",

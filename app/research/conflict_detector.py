@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Dict, Tuple
+from typing import Any, List, Dict, Tuple
 from datetime import datetime, timezone
 from app.research.models import Claim, ClaimStatus
 from app.research.cutoff_filter import CutoffFilter
@@ -12,6 +12,38 @@ EXCLUSIVE_PREDICATES = {"availability_status", "availability", "status", "is_inj
 
 
 class ConflictDetector:
+    @staticmethod
+    def detect_conflicts(claims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Audit pohled na stejná pravidla (TODO 4.3): claimy jako dicty z DB -> seznam nálezů.
+        Používá stejnou množinu exkluzivních predikátů a stejné normalizované klíče (subjekt, predikát)
+        jako `detect_and_resolve`; zde se ale nic nemění, jen se hlásí rozpory."""
+        grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+        for claim in claims:
+            pred = str(claim.get("predicate") or "").lower().strip()
+            if pred not in EXCLUSIVE_PREDICATES:
+                continue
+            subj = str(claim.get("subject") or "").lower().strip()
+            obj = claim.get("object") or claim.get("object_value") or claim.get("normalized_value")
+            grouped.setdefault((subj, pred), []).append({
+                "value": str(obj).lower().strip(),
+                "claim_id": claim.get("id") or claim.get("claim_id"),
+                "subject_raw": claim.get("subject"),
+                "predicate_raw": claim.get("predicate"),
+            })
+
+        conflicts: List[Dict[str, Any]] = []
+        for (subj, pred), entries in grouped.items():
+            values = {e["value"] for e in entries}
+            if len(entries) > 1 and len(values) > 1:
+                conflicts.append({
+                    "type": "conflicting_evidence",
+                    "severity": "HIGH",
+                    "description": f"Rozpor pro {entries[0]['subject_raw']} -> {entries[0]['predicate_raw']}: hodnoty [{', '.join(sorted(values))}]",
+                    "claim_ids": [e["claim_id"] for e in entries if e["claim_id"] is not None],
+                    "requires_research": True,
+                })
+        return conflicts
+
     def detect_and_resolve(self, claims: List[Claim]) -> List[Claim]:
         grouped: Dict[Tuple[str, str], List[Claim]] = {}
 

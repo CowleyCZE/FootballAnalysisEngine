@@ -36,11 +36,14 @@ printf "Instaluji / aktualizuji závislosti z requirements.txt...\n"
 note "Závislosti v requirements.txt nainstalovány."
 
 say "3. Konfigurace .env"
+PLACEHOLDER_TOKEN='change-this-secure-token-in-production'
+new_token() { "$PYTHON" -c 'import secrets; print(secrets.token_urlsafe(32))'; }
 if [[ ! -f ".env" ]]; then
-  cat <<'EOF' > .env
+  API_TOKEN="$(new_token)"
+  cat <<EOF > .env
 # Konfigurace FootballAnalysisEngine
-WORKER_API_TOKEN=change-this-secure-token-in-production
-API_SECRET_TOKEN=change-this-secure-token-in-production
+WORKER_API_TOKEN=${API_TOKEN}
+API_SECRET_TOKEN=${API_TOKEN}
 FAE_API_PORT=8000
 SEARXNG_PORT=8080
 OLLAMA_PORT=11434
@@ -54,9 +57,15 @@ FAE_AI_MAX_CLAIMS=24
 FAE_AI_MAX_EVIDENCE_PER_CLAIM=3
 FAE_AI_MAX_EXCERPT_CHARS=500
 EOF
-  note "Soubor .env vytvořen z výchozí šablony. Upravte token dle potřeby."
+  chmod 600 .env
+  note "Soubor .env vytvořen s náhodně vygenerovaným API tokenem (stejný token zadejte na Note 9)."
 else
   note "Soubor .env již existuje."
+  if grep -q "^\(WORKER_API_TOKEN\|API_SECRET_TOKEN\)=${PLACEHOLDER_TOKEN}\$" .env; then
+    API_TOKEN="$(new_token)"
+    sed -i "s|^\(WORKER_API_TOKEN\|API_SECRET_TOKEN\)=${PLACEHOLDER_TOKEN}\$|\1=${API_TOKEN}|" .env
+    warn "V .env byl výchozí token; nahrazen náhodným. Aktualizujte jej i na Note 9."
+  fi
   grep -q '^FAE_AUTO_HISTORY=' .env || printf '\nFAE_AUTO_HISTORY=1\nFAE_HISTORY_CACHE_HOURS=24\n' >> .env
   grep -q '^OLLAMA_TIMEOUT=' .env || printf 'OLLAMA_TIMEOUT=60\nOLLAMA_MAX_RETRIES=1\nFAE_AI_MAX_CLAIMS=24\nFAE_AI_MAX_EVIDENCE_PER_CLAIM=3\nFAE_AI_MAX_EXCERPT_CHARS=500\n' >> .env
   note "Ověřena konfigurace automatického historického importu."

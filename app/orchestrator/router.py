@@ -3,58 +3,27 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+import app.api.server as server_module
 from app.api.server import verify_api_auth
 
-from app.orchestrator.models import AnalysisRequest, ResearchReadiness
+from app.orchestrator.models import ResearchReadiness
 from app.orchestrator.orchestrator import MasterOrchestrator
 from app.orchestrator.state_machine import MatchState
 
+# `POST /api/analysis/start` a `GET /api/analysis/{run_id}` jsou registrovány právě jednou,
+# v `app/api/server.py` (TODO 5.1). Tento router doplňuje jen readiness a cancel.
 router = APIRouter(prefix="/api/analysis", tags=["Analysis Orchestrator"], dependencies=[Depends(verify_api_auth)])
-orchestrator = MasterOrchestrator()
 
 
-@router.post("/start", status_code=status.HTTP_201_CREATED)
-def start_analysis(request: AnalysisRequest) -> Dict[str, Any]:
-    """Zahájí autonomní pipeline pro zápas přes MasterOrchestrator."""
-    try:
-        run_id = orchestrator.start_pipeline_from_request(request)
-        return {"run_id": run_id, "status": MatchState.DISCOVERY}
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Chyba při spuštění analýzy: {exc}",
-        ) from exc
-
-
-@router.get("/{run_id}")
-def get_analysis_status(run_id: str) -> Dict[str, Any]:
-    """Vrátí stav pipeline a všechny Joby patřící k danému běhu."""
-    with sqlite3.connect(orchestrator.db_path) as conn:
-        conn.row_factory = sqlite3.Row
-        run = conn.execute(
-            "SELECT * FROM pipeline_runs WHERE run_id = ?", (run_id,)
-        ).fetchone()
-        if not run:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
-        main_run = conn.execute(
-            "SELECT * FROM runs WHERE run_id = ?", (run_id,)
-        ).fetchone()
-        jobs = conn.execute(
-            "SELECT * FROM jobs WHERE run_id = ? ORDER BY id", (run_id,)
-        ).fetchall()
-    return {
-        "run": dict(run),
-        "main_run": dict(main_run) if main_run else None,
-        "jobs": [dict(job) for job in jobs],
-    }
+def get_orchestrator() -> MasterOrchestrator:
+    """Orchestrátor se vytváří líně a nad aktuální cestou DB (`server.DB_PATH`), ne při importu modulu."""
+    return MasterOrchestrator(db_path=server_module.DB_PATH)
 
 
 @router.get("/{run_id}/readiness", response_model=ResearchReadiness)
 def check_analysis_readiness(run_id: str) -> ResearchReadiness:
     """Vyhodnotí, zda má pipeline dostatek dokončených podkladů pro AI analýzu."""
-    with sqlite3.connect(orchestrator.db_path) as conn:
+    with sqlite3.connect(server_module.DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         run = conn.execute(
             "SELECT * FROM pipeline_runs WHERE run_id = ?", (run_id,)
@@ -89,6 +58,7 @@ def check_analysis_readiness(run_id: str) -> ResearchReadiness:
 @router.post("/{run_id}/cancel")
 def cancel_analysis(run_id: str) -> Dict[str, Any]:
     """Zastaví běh pipeline a zruší dosud nespouštěné Joby."""
+    orchestrator = get_orchestrator()
     with sqlite3.connect(orchestrator.db_path) as conn:
         conn.row_factory = sqlite3.Row
         run = conn.execute(
