@@ -92,13 +92,18 @@ Stav k 20. 10. 2026. Podklad: `PROJECT_REPAIR_HANDOFF.md`, `postup_oprav.txt`, `
 ## FÁZE 5 – API / bezpečnost / provoz
 - [x] **5.1 Jedna registrace `/api/analysis/start` (H#19).** *Jak:* Ponechat jen jednu (router), `MasterOrchestrator` vytvářet líně s cestou z configu; odstranit duplicitu v `server.py`.
   - *Hotovo:* 20. 10. 2026 – odchylka od návrhu: ponechána verze v `server.py` (má kontrakt, na který se vážou testy a Note 9: `match_id` nebo plná identita, 200 OK; verze v routeru byla stíněná a nikdy se nevolala). Z `orchestrator/router.py` odstraněny duplicitní `POST /start` a `GET /{run_id}`; zbývá readiness + cancel, orchestrátor se vytváří líně přes `get_orchestrator()` nad `server.DB_PATH`. Testy `tests/api/test_single_registration.py` (3). Pozn.: `readiness` počítá s job typem `SEARCH`, který už nevzniká (jsou `RESEARCH`) – samostatný problém, není v TODO.
-- [ ] **5.2 Náhodný token v `init.sh` (H#20).** *Jak:* `python -c "import secrets;print(secrets.token_urlsafe(32))"`; nikdy nezapisovat výchozí řetězec.
-- [ ] **5.3 `config/crawler.yaml` (H#23).** *Jak:* Načítat v `HTTPClient` (timeout, UA, retry) s výchozími hodnotami, nebo soubor odstranit.
+- [x] **5.2 Náhodný token v `init.sh` (H#20).** *Jak:* `python -c "import secrets;print(secrets.token_urlsafe(32))"`; nikdy nezapisovat výchozí řetězec.
+  - *Hotovo:* 21. 10. 2026 – 5.1 ověřeno kontrolou kódu (`server.py` má jedinou `POST /start` a `GET /{run_id}`, router má jen readiness+cancel, import bez cyklu). `init.sh` už náhodný token (`secrets.token_urlsafe(32)`, `chmod 600`, náhrada výchozího tokenu ve starém `.env`) obsahoval; chyběl test → `tests/test_init_script_token.py` (5). Ostatní `scripts/*.sh` pevný token nezapisují.
+- [x] **5.3 `config/crawler.yaml` (H#23).** *Jak:* Načítat v `HTTPClient` (timeout, UA, retry) s výchozími hodnotami, nebo soubor odstranit.
+  - *Hotovo:* 21. 10. 2026 – `app/crawler/config.py` (`load_crawler_settings`, výchozí hodnoty při chybějícím/poškozeném souboru či neplatných hodnotách); `HTTPClient` bere timeout, connect timeout, retry, UA, redirecty a limit velikosti obsahu z configu (explicitní argumenty mají přednost, signatura kompatibilní); `EngineCrawler` bere interval rate limiteru a JS timeout/enabled. Testy `tests/test_crawler_config.py` (7) → očekáváno 251+ passed (nespuštěno – chybí mi shell k uživatelskému stroji; ověřit `pytest -q`).
 
 ## FÁZE 6 – Hygiena testů
-- [ ] **6.1 Izolace env (H#21).** *Jak:* `conftest.py` autouse fixture: `FAE_AUTO_HISTORY=0`, vyčistit FAE_*/OLLAMA_* přes `monkeypatch`; `menu.py` nenačítá `.env` při importu (přesunout do `main()`).
-- [ ] **6.2 Doba testů.** *Jak:* `pytest --durations=15`, zpomalené testy zrychlit (mock sítě/sleep); cíl < 40 s.
-- [ ] **6.3 Absolutní cesty (H#22).** *Jak:* `Path(__file__).resolve().parents[n] / "database/schema.sql"` v `tests/statistics/test_engine.py`.
+- [x] **6.1 Izolace env (H#21).** *Jak:* `conftest.py` autouse fixture: `FAE_AUTO_HISTORY=0`, vyčistit FAE_*/OLLAMA_* přes `monkeypatch`; `menu.py` nenačítá `.env` při importu (přesunout do `main()`).
+  - *Hotovo:* 21. 10. 2026 – 311 passed (stav po 5.3) ověřeno uživatelem; 6.1 samotné zatím neběželo. `conftest.py`: autouse fixture `_isolate_environment` (smaže vše `FAE_*`/`OLLAMA_*`, nastaví `FAE_AUTO_HISTORY=0`); `menu._load_local_env()` se volá až z `main()`. Testy `tests/test_env_isolation.py` (3). Pozor: pokud nějaký test spoléhal na hodnoty z `.env`/prostředí, nyní selže – má si je nastavit sám přes `monkeypatch.setenv` (nespuštěno, ověřit `pytest -q`, očekáváno 315 passed s 6.3).
+- [x] **6.2 Doba testů.** *Jak:* `pytest --durations=15`, zpomalené testy zrychlit (mock sítě/sleep); cíl < 40 s.
+  - *Hotovo:* 21. 10. 2026 – 315 passed ve 119 s → **22,8 s** (ověřeno). Čas tvořila inicializace DB na každý test; `conftest.py`: session `_template_db` + autouse `_fast_database_init` (nová DB = kopie šablony; existující soubory, tedy migrační testy, jdou přes skutečnou inicializaci). Nejpomalejší zbývá `test_note9_worker_remote_disconnected_reconnect_and_no_job` (3 s, záměrný backoff) – necháno.
+- [x] **6.3 Absolutní cesty (H#22).** *Jak:* `Path(__file__).resolve().parents[n] / "database/schema.sql"` v `tests/statistics/test_engine.py`.
+  - *Hotovo:* 21. 10. 2026 – `SCHEMA_PATH` v `test_engine.py`; test `tests/statistics/test_schema_path.py` (1, s `chdir`). Ostatní testy s relativními cestami jsem neprohledával (chybí grep obsahu) – při selhání z jiného adresáře dopravit stejným způsobem.
 
 ## FÁZE 7 – Úklid mrtvého kódu (vždy `grep -rn` importů + celá sada testů)
 - [ ] **7.1** `app/jobs/worker.py`, `priorities.py`, `JobModel`, `app/orchestrator/task_dispatcher.py`, `locks.py`.

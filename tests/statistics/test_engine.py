@@ -1,8 +1,12 @@
 import sqlite3
+from pathlib import Path
 import pytest
 from app.statistics.engine import StatisticalEngine
 from app.statistics.repository import StatisticsRepository
 from app.statistics.models import MatchStatistics
+
+# Absolutní cesta ke schématu, nezávislá na pracovní adresář (TODO 6.3).
+SCHEMA_PATH = Path(__file__).resolve().parents[2] / "database" / "schema.sql"
 
 @pytest.fixture
 def setup_test_db(tmp_path):
@@ -11,7 +15,7 @@ def setup_test_db(tmp_path):
     cursor = conn.cursor()
     
     # Získání schématu
-    with open("database/schema.sql", "r") as f:
+    with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
         cursor.executescript(f.read())
         
     # Vložení testovacích dat

@@ -9,7 +9,10 @@ from typing import List, Any, Optional
 
 
 def _load_local_env() -> None:
-    """Load simple KEY=VALUE settings without requiring python-dotenv."""
+    """Load simple KEY=VALUE settings without requiring python-dotenv.
+
+    Volá se až z `main()` (TODO 6.1) – import modulu nesmí měnit `os.environ`.
+    """
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if not os.path.exists(env_path):
         return
@@ -21,8 +24,6 @@ def _load_local_env() -> None:
             key, value = line.split("=", 1)
             os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
-
-_load_local_env()
 
 try:
     from zoneinfo import ZoneInfo
@@ -712,6 +713,7 @@ ACTIONS = {
 
 
 def main() -> None:
+    _load_local_env()
     while True:
         print(MENU)
         choice = input("Vyberte volbu (1-7): ").strip()

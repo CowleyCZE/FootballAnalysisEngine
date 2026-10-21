@@ -11,6 +11,7 @@ except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
 from app.crawler.models import CrawlResult, ParsedDocument
+from app.crawler.config import load_crawler_settings
 from app.crawler.http_client import HTTPClient
 from app.crawler.rate_limiter import DomainRateLimiter
 from app.parser.html_parser import HTMLParser
@@ -18,12 +19,16 @@ from app.parser.html_parser import HTMLParser
 logger = logging.getLogger(__name__)
 
 class EngineCrawler:
-    def __init__(self, user_agent: str = "FootballAnalysisEngine/1.0"):
-        self.http_client = HTTPClient(user_agent=user_agent)
-        self.rate_limiter = DomainRateLimiter(interval_seconds=2.0)
+    def __init__(self, user_agent: str | None = None):
+        # Hodnoty z config/crawler.yaml (TODO 5.3); explicitní user_agent má přednost.
+        self.settings = load_crawler_settings()
+        self.http_client = HTTPClient(user_agent=user_agent, settings=self.settings)
+        self.rate_limiter = DomainRateLimiter(interval_seconds=self.settings.rate_limit_interval_seconds)
         self.parser = HTMLParser()
 
     async def fetch_with_playwright(self, url: str) -> CrawlResult:
+        if not self.settings.javascript_enabled:
+            return CrawlResult(url=url, success=False, error="JavaScript rendering is disabled in config/crawler.yaml")
         if not PLAYWRIGHT_AVAILABLE:
             logger.warning(
                 "[CRAWLER] Playwright není nainstalován – JS stránky se nevyrenderují (pip install playwright && playwright install chromium): %s", url)
@@ -32,7 +37,7 @@ class EngineCrawler:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
-                await page.goto(url, timeout=30000, wait_until="networkidle")
+                await page.goto(url, timeout=int(self.settings.javascript_timeout_seconds * 1000), wait_until="networkidle")
                 content = await page.content()
                 await browser.close()
 
