@@ -47,7 +47,7 @@
 | Recovery | ✅ | Pokryto testy. |
 | Dependency scheduler | ✅ | Pokryto testy. |
 | SQLite schema / FK / migrations | ✅ | Aktuální testovací sada je zelená. |
-| Plná pytest sada | ✅ | **65 passed, 0 failed.** |
+| Plná pytest sada | ✅ | **315 passed, 0 failed** (k 21. 10. 2026; původně 65 k 6. 10. 2026). |
 
 ## B. Částečně splněné
 
@@ -58,7 +58,7 @@ ResearchEngine obsahuje tok:
 
 **Query Builder → Search → Source Selection → Crawler → Document Processor → Evidence → Claims → Validation → Conflict Detection → Persistence**
 
-Existují integrační testy. Plné produkční napojení skutečného workeru na ResearchEngine a celý reálný E2E tok však není výsledkem 65/65 testů prokázán.
+Existují integrační testy. Plné produkční napojení skutečného workeru na ResearchEngine a celý reálný E2E tok však není výsledkem testů (315 passed) prokázán.
 
 ## C. Neověřené acceptance body
 
@@ -99,4 +99,4 @@ bez ručního zásahu.
 
 Samotná existence kódu ani zelený unit test nestačí k označení produkčního požadavku jako FINAL. Požadavky na autonomii, skutečné lokální služby a celý E2E tok musí být dokončeny až po reprodukovatelném acceptance testu.
 
-**Aktuální testovací výsledek: 65 passed, 0 failed.**
+**Aktuální testovací výsledek: 315 passed, 0 failed** (k 21. 10. 2026).

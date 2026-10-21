@@ -53,7 +53,7 @@ MasterOrchestrator (Single canonical orchestrator; zápas zadaný uživatelem je
 To start a worker processing all background job capabilities (RESEARCH, SEARCH, CRAWL, STATISTICS, AI_ANALYSIS, AUDIT), run from the repository root:
 
 ```bash
-python3 run_worker.py --worker-id worker-1
+python3 scripts/run_worker.py --worker-id worker-1
 ```
 
 ## Running Tests
@@ -63,6 +63,8 @@ Execute unit, integration, recovery, and E2E tests:
 ```bash
 python -m pytest
 ```
+
+Aktuální stav (21. 10. 2026): **315 passed** (~10–25 s).
 
 ## Exact-score prediction
 

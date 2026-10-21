@@ -1,0 +1,1 @@
+Šetři tokeny na zprávách pro mě a využij je k opravě  projektu. Zprávy pro mě omez na minimum. Jednej víc autonomně. Složka s projektem je "/home/cowley/FootballAnalysisEngine/" Zkontroluj naposled označený bod v ToDo listu jestli je opravdu hotový a pokud ano tak pokračuj dalším bodem. Pokračuj podle ToDo listu "docs/TODO_OPRAVY.md" 

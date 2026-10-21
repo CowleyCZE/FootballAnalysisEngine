@@ -4,8 +4,7 @@ Po připojení notebooku a případně Samsungu Note 9 ke stejné Wi-Fi spusťte
 z kořene projektu interaktivního pomocníka:
 
 ```bash
-git switch football-engine
-git pull --ff-only
+git pull --ff-only   # na aktuální větvi projektu (zjistíte: git branch --show-current)
 ./scripts/network_setup.sh
 ```
 

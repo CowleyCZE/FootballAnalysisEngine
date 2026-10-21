@@ -129,9 +129,11 @@ say "Lokální služby nalezené v repozitáři"
 API_PORT="${FAE_API_PORT:-8000}"       # app SearchWorker's documented local proxy default
 SEARX_PORT="${SEARXNG_PORT:-8080}"     # services/searxng/docker-compose.yml default
 OLLAMA_PORT="${OLLAMA_PORT:-11434}"    # app/workers/ai_worker.py default
+OLLAMA_BASE_URL="${OLLAMA_URL:-http://127.0.0.1:${OLLAMA_PORT:-11434}}"   # OLLAMA_URL (dokumentováno v runbooku) má přednost před OLLAMA_PORT
+OLLAMA_BASE_URL="${OLLAMA_BASE_URL%/}"
 note "FastAPI: http://$LAN_IP:$API_PORT (port lze změnit přes FAE_API_PORT)"
 note "SearXNG: http://127.0.0.1:$SEARX_PORT (SEARXNG_PORT)"
-note "Ollama:  http://127.0.0.1:$OLLAMA_PORT (aplikace může adresu změnit přes OLLAMA_URL)"
+note "Ollama:  $OLLAMA_BASE_URL (OLLAMA_URL, výchozí model OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:3b})"
 note "Skript na telefonu neotevírá žádný port."
 
 say "Prostředí Pythonu"
@@ -171,11 +173,11 @@ else
 fi
 
 say "Ollama – volitelná AI závislost"
-if curl --fail --silent --max-time 2 "http://127.0.0.1:$OLLAMA_PORT/api/tags" >/dev/null; then
+if curl --fail --silent --max-time 2 "$OLLAMA_BASE_URL/api/tags" >/dev/null; then
   note "Ollama je již dostupná."
 elif command_exists ollama; then
   note "Ollama je nainstalovaná, ale neodpovídá. Pro AI_ANALYSIS ji spusťte zvlášť: ollama serve"
-  note "Model se nestahuje automaticky; repo používá qwen2.5:7b, který je pro tento notebook náročný na RAM."
+  note "Model se nestahuje automaticky; výchozí je ${OLLAMA_MODEL:-qwen2.5:3b} (ollama pull ${OLLAMA_MODEL:-qwen2.5:3b}), silnější 7B je pro tento notebook náročný na RAM."
 else
   note "Ollama není nainstalovaná. Ověřený fallback enginu pro nedostupnou AI vrátí insufficient_data."
 fi

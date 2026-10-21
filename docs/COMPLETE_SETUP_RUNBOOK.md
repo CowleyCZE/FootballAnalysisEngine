@@ -303,7 +303,7 @@ Nejpravděpodobnější skóre: X:Y
 Očekávané góly: domácí A | hosté B
 Pravděpodobnosti 1-X-2: ...
 Historické zápasy ve vzorku: N
-model poisson-context-v3
+model poisson-dc-context-v5
 ```
 
 Zkontrolujte také, že oba týmy mají nenulový `Sample`, například:
@@ -313,7 +313,7 @@ Baník Ostrava   form_points   ...   Sample 5
 Sparta Praha    form_points   ...   Sample 5
 ```
 
-Pokud je `Historické zápasy ve vzorku: 0` nebo má jeden tým `Sample 0`, výsledek je pouze priorní odhad s nízkou důvěrou a je nutné doplnit historii.
+Pokud je `Historické zápasy ve vzorku: 0` nebo má jeden tým `Sample 0`, statistika skončí stavem `INSUFFICIENT_DATA` a pipeline `UNRESOLVED` (neutrální prior se zobrazí jen jako nízko důvěryhodný odhad, ne jako použitelný výsledek). Je nutné doplnit historii.
 
 Pokud je AI nedostupná, může být výsledek například:
 

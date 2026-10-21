@@ -107,17 +107,26 @@ Stav k 20. 10. 2026. Podklad: `PROJECT_REPAIR_HANDOFF.md`, `postup_oprav.txt`, `
 
 ## FÁZE 7 – Úklid mrtvého kódu (vždy `grep -rn` importů + celá sada testů)
 - [ ] **7.1** `app/jobs/worker.py`, `priorities.py`, `JobModel`, `app/orchestrator/task_dispatcher.py`, `locks.py`.
-- [ ] **7.2** `app/search/source_engine.py`, `query_builder.py`, `app/research/schemas/absences.py`.
+  - *Rozpracováno:* 21. 10. 2026 – odstraněny `app/jobs/priorities.py` a `app/orchestrator/task_dispatcher.py` (bez importů; soubory přesunuty do `~/FAE_removed_7x/`, lze vrátit). **Ponecháno:** `app/jobs/worker.py` (`BaseWorkerDaemon` používají e2e testy `test_full_autonomous_pipeline` a `test_15_full_autonomous_pipeline` a export v `app/jobs/__init__.py`), `JobModel` (export v `__init__`), `locks.py` (`DeadlockDetector` export v `app/orchestrator/__init__.py`) – pro rozhodnutí potřeba `grep -rn "BaseWorkerDaemon\|DeadlockDetector\|JobModel" --include=*.py . --exclude-dir=.venv`.
+- [x] **7.2** `app/search/source_engine.py`, `query_builder.py`, `app/research/schemas/absences.py`.
+  - *Hotovo:* 21. 10. 2026 – přesunuty `app/search/source_engine.py`, `app/search/query_builder.py` (nezaměnit s používaným `app/research/query_builder.py`, ten zůstává), `app/research/schemas/absences.py`. Ověřit `pytest -q`.
 - [ ] **7.3** `AISynthesizer` + `PromptManager` + `prompts/*`, `app/audit/db.py`.
-- [ ] **7.4** Kořenové `run_worker.py`, `test_source_engine.py`, `test_crawler_pipeline.py`, prázdný `tests/statistics/test_splits.py`, `SplitsEngine`, `XGModule`, `StatisticExtractor`.
+  - *Pozor:* `app/audit/db.py` **není mrtvý** – `app/audit/auditor.py` importuje `init_audit_tables`; nemaž. `AISynthesizer`/`PromptManager` jsou exportovány v `app/ai/__init__.py` a používá je `tests/ai/test_ai_engine.py`; nepovedené.
+- [x] **7.4** Kořenové `run_worker.py`, `test_source_engine.py`, `test_crawler_pipeline.py`, prázdný `tests/statistics/test_splits.py`, `SplitsEngine`, `XGModule`, `StatisticExtractor`.
+  - *Hotovo:* 21. 10. 2026 – vše přesunuto do `~/FAE_removed_7x/` (`app/statistics/{xg,splits,extractor}.py` bez importů). README: příkaz workeru opraven na `scripts/run_worker.py`. Ověřit `pytest -q` (při ztrátě testů počet klesl o kořenové test_*.py).
   - *Jak (7.x):* Pro každý soubor `grep -rn "<modul>" --include=*.py .`; bez importů v produkci smazat i související testy; `pytest -q` zelený.
 
 ## FÁZE 8 – Dokumentace (handoff sekce 9)
-- [ ] **8.1** README: model `poisson-dc-context-v4`, schéma bez MatchResolveru, počet testů.
-- [ ] **8.2** `docs/*Stav_Overeno*`, `*Vyvojovy_plan*`: 65 → aktuální počet.
-- [ ] **8.3** `docs/COMPLETE_SETUP_RUNBOOK.md`: model v4, `playwright install chromium`.
-- [ ] **8.4** `scripts/network_setup.sh` (qwen2.5:3b, `OLLAMA_URL`), `docs/Linux_Mint_Network_Setup.md` (jednotná větev).
+- [x] **8.1** README: model `poisson-dc-context-v4`, schéma bez MatchResolveru, počet testů.
+  - *Hotovo:* 21. 10. 2026 – README už měl model **v5** a tok bez MatchResolveru (viz 2.7); doplněn počet testů (315 passed).
+- [x] **8.2** `docs/*Stav_Overeno*`, `*Vyvojovy_plan*`: 65 → aktuální počet.
+  - *Hotovo:* 21. 10. 2026 – oba dokumenty: 315 passed (s datem; historické „65 k 6. 10.“ zachováno).
+- [x] **8.3** `docs/COMPLETE_SETUP_RUNBOOK.md`: model v4, `playwright install chromium`.
+  - *Hotovo:* 21. 10. 2026 – Playwright §3a už byl (bod 3.6); model opraven na `poisson-dc-context-v5` (byl `poisson-context-v3`), pravidlo pro chybějící historii sjednoceno (`INSUFFICIENT_DATA` → `UNRESOLVED`).
+- [x] **8.4** `scripts/network_setup.sh` (qwen2.5:3b, `OLLAMA_URL`), `docs/Linux_Mint_Network_Setup.md` (jednotná větev).
+  - *Hotovo:* 21. 10. 2026 – skript: hláška o modelu `qwen2.5:3b` (z `OLLAMA_MODEL`), adresa Ollamy z `OLLAMA_URL` (fallback `OLLAMA_PORT`) i pro kontrolu `/api/tags`; dokument: odstraněno pevné `git switch football-engine`. Skript nespuštěn (interaktivní) – doporučeno `bash -n scripts/network_setup.sh`.
 - [ ] **8.5** `postup_oprav.txt` a `PROJECT_REPAIR_HANDOFF.md` aktualizovat podle hotových bodů.
+  - *Poznámka:* soubory nejsou v kořeni projektu ani v `docs/` (nenalezeny); potřeba cesta od uživatele.
 
 ## FÁZE 9 – Reálný acceptance (jen na stroji uživatele, ne v cloudu)
 - [ ] SearXNG vrací výsledky, `scripts/preflight.py` OK.

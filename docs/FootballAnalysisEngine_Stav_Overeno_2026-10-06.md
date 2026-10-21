@@ -2,7 +2,7 @@
 
 **Datum:** 6. 10. 2026  
 **Větev:** `fix/part-11-integration`  
-**Aktuální lokální ověření:** **65 passed, 0 failed**
+**Aktuální lokální ověření:** **315 passed, 0 failed** (k 21. 10. 2026; původně 65 passed k 6. 10. 2026)
 
 ## 1. Důležitá interpretace
 
@@ -34,7 +34,7 @@ Proto jsou níže odděleny:
 | System events | HOTOVO – OVĚŘENO | Lifecycle jobů a stavů vytváří systémové události. |
 | SQLite schema / migrations / FK | HOTOVO – OVĚŘENO TESTY | Aktuální testovací sada je zelená. |
 | Recovery / scheduler | HOTOVO – OVĚŘENO TESTY | Lifecycle recovery a dependency scheduler jsou testovány. |
-| Celá pytest sada | HOTOVO – OVĚŘENO | **65 passed, 0 failed.** |
+| Celá pytest sada | HOTOVO – OVĚŘENO | **315 passed, 0 failed** (k 21. 10. 2026). |
 
 ## 3. Částečně hotové části
 
@@ -46,7 +46,7 @@ ResearchEngine již obsahuje tok:
 
 Jeho integrační testy existují.
 
-Plné produkční napojení skutečného workeru na ResearchEngine však není tímto posledním výsledkem 65/65 samo o sobě prokázáno. Proto tato položka není označena jako kompletní acceptance.
+Plné produkční napojení skutečného workeru na ResearchEngine však není tímto výsledkem testů (315 passed) samo o sobě prokázáno. Proto tato položka není označena jako kompletní acceptance.
 
 ## 4. Neověřené acceptance části
 
@@ -69,7 +69,7 @@ Před označením projektu jako FINAL je nutné skutečně ověřit:
 - explicitní `insufficient_data` bez falešných fotbalových dat,
 - bezpečné ukončení pipeline přes audit na `UNRESOLVED`,
 - regresní testy pro AI fallback a nedostupnou AI,
-- výsledná testovací sada **65/65**.
+- výsledná testovací sada **65/65** (k 6. 10. 2026; k 21. 10. 2026 je sada 315/315).
 
 ## 6. Zásada dalšího vývoje
 
