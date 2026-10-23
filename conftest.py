@@ -22,6 +22,7 @@ def _isolate_environment(monkeypatch):
         if key.startswith(_ISOLATED_PREFIXES):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("FAE_AUTO_HISTORY", "0")
+    monkeypatch.setenv("FAE_ONLINE_HISTORY", "0")
     yield
 
 

@@ -1,1 +1,42 @@
 Šetři tokeny na zprávách pro mě a využij je k opravě  projektu. Zprávy pro mě omez na minimum. Jednej víc autonomně. Složka s projektem je "/home/cowley/FootballAnalysisEngine/" Zkontroluj naposled označený bod v ToDo listu jestli je opravdu hotový a pokud ano tak pokračuj dalším bodem. Pokračuj podle ToDo listu "docs/TODO_OPRAVY.md" 
+
+Pomož mi vytvořit takovou videozprávu. Tato video zpráva se bude skládat z několika videi jdoucích za sebou. Generovat videa budeš v kvalitě 360. 
+1. video (10s):
+0-3s. Je ve videu jen černo a ticho. 
+3-6s. V černu a tichu se začne něco míhat sem a tam, různými směry a stále větší a větší rychlostí. Něco neznámého, tajemného, různobarevného, ale přesto s převažujícími těmito barvami: 
+Oranžová(jako zobák postavy), bílá(jako peří postavy), zelená(jako bunda postavy), zlatá(jako zlaté řetězy co má na sobě postava).
+6-10s. Na displeji se z toho začnou skládat písmena, z písmen slova a z těch slov věta: 
+"Dobrý den Kateřino"
+"Jaký byl doposud váš den?"
+S tímto textem první video končí.
+
+2. video (10s) Začíná posledním snímkem z předešlého videa. Při generování tohoto videa bude přiložen  obrázek s posledním snímkem z předešlého videa.jako začátek tohoto videa. 
+0-3s Zobrazený text:
+"Dobrý den Kateřino"
+"Jaký byl doposud váš den?", bude (zajímavě/ponechám na tobě jakým způsobem, jestli např. zmizí, vybouchne, rozpadne se, shoří, rozplyne se atd.) odstraněn. 
+3-5s zobrazí se text:
+"Mohl být ...."
+5-9s budou ve videu různě poletovat, poskakovat atd. slova která se dají použít k vyjádření dne. Slova mohou být ve všech náladách, mohou vyjadřovat dobrý, uspěšný den nebo třeba pravý opak.kladná, záporná, smutná veselá, v různých grafických provedeních. Slova budou neustále zrychlovat a přibývat až z nich vznikne ve videu totální chaos a zmatek. 
+9-10s během poslední sekundy všechny slova vyletí mimo záběr a nastane jen černo. černou končí druhé video.
+
+
+
+
+# Lokální notebook
+STORK_ROOT=/home/cowley/STORK_COMMAND
+POLL_SECONDS=15
+WORKER_TOKEN=hheesslloo3206
+MAX_CLIP_SECONDS=60
+
+# Groq (volitelné pro lokální transkripci/plánování; klíč nikdy necommituj)
+GROQ_API_KEY=YOUR_GROQ_API_KEY_HERE
+GROQ_MODEL=openai/gpt-oss-20b
+GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo
+
+# Vzdálená fronta – Make volá HTTPS endpoint, notebook frontu pouze polluje
+QUEUE_BASE_URL=https://stork-command-queue.onrender.com
+QUEUE_TOKEN=hheesslloo3206
+StorkQueue-2026-hheesslloo3206
+
+# Publikování V1 je ruční/draft
+TIKTOK_MODE=draft

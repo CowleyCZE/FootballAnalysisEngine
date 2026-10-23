@@ -73,7 +73,9 @@ class SearXNGClient:
         import asyncio
         lock_file = await asyncio.to_thread(self._acquire_global_slot)
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
+            # SearXNG botdetection loguje chybu, když chybí X-Forwarded-For/X-Real-IP (přímé volání bez proxy).
+            headers = {"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"}
+            async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True, headers=headers) as client:
                 response = await client.get(f"{self.base_url}/search", params=params)
                 response.raise_for_status()
                 try:

@@ -145,5 +145,6 @@ def test_ai_prompt_contains_prediction_and_forbids_changing_it(stats_db, monkeyp
     AIWorker.execute({"match_id": 88, "run_db_id": 1, "db_path": stats_db, "data_cutoff_at": CUTOFF})
 
     prompt = captured["prompt"]
-    assert '"predicted_score": "2-1"' in prompt
+    # Kontext se do promptu serializuje kompaktně (bez mezer), nezávisle na formátu JSON.
+    assert '"predicted_score":"2-1"' in prompt.replace('": "', '":"')
     assert "MUST NOT change" in prompt

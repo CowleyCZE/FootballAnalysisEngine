@@ -1,3 +1,4 @@
+import os
 import time
 from typing import Optional
 
@@ -26,7 +27,15 @@ class HTTPClient:
         return httpx.Timeout(float(self.timeout), connect=connect)
 
     async def fetch(self, url: str) -> CrawlResult:
-        headers = {"User-Agent": self.user_agent}
+        user_agent = self.user_agent
+        contact = os.getenv("FAE_CONTACT", "").strip()  # Wikimedia a další vyžadují v UA kontakt (robot policy)
+        if contact and contact not in user_agent:
+            user_agent = f"{user_agent} ({contact})"
+        headers = {
+            "User-Agent": user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "cs,en;q=0.8",
+        }
         start_time = time.time()
 
         for attempt in range(1, self.max_retries + 1):

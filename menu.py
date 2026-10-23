@@ -32,6 +32,7 @@ except ImportError:  # Python < 3.9
     sys.exit("Je vyžadován Python 3.9+ (zoneinfo).")
 
 from app.orchestrator.orchestrator import MasterOrchestrator
+from app.database.match_cleanup import delete_matches_cascade
 
 DB_PATH = "database/football.db"
 DEFAULT_TZ = "Europe/Prague"
@@ -237,7 +238,12 @@ def add_match() -> None:
     print("\n=== Přidat nový zápas ===")
     home = input_required("Domácí tým (např. 'Sparta Praha'): ")
     away = input_required("Hostující tým (např. 'Slavia Praha'): ")
-    competition = input_required("Název soutěže (např. 'Chance Liga'): ")
+    while True:
+        competition = input_required("Název soutěže (např. 'Chance Liga'): ")
+        if any(ch.isdigit() for ch in competition) and sum(ch.isdigit() for ch in competition) >= 4 and (":" in competition or "." in competition or "-" in competition):
+            print("  ! Vypadá to jako datum, ne název soutěže. Zadejte např. 'Chance Liga'.")
+            continue
+        break
     datetime_text = input_required("Datum a čas zápasu (DD.MM.YYYY HH:MM nebo YYYY-MM-DD HH:MM): ")
     tz_name = input(f"Časové pásmo [{DEFAULT_TZ}]: ").strip() or DEFAULT_TZ
 
@@ -685,6 +691,66 @@ def show_all_matches() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 7. Smazat zadané zápasy
+# ---------------------------------------------------------------------------
+
+def list_entered_matches() -> List[sqlite3.Row]:
+    """Zápasy zadané uživatelem = zápasy bez uloženého výsledku (importovaná historie se nenabízí)."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT m.id, m.status, m.scheduled_at, m.competition,
+               th.name AS home_team, ta.name AS away_team
+        FROM matches m
+        LEFT JOIN teams th ON m.home_team_id = th.id
+        LEFT JOIN teams ta ON m.away_team_id = ta.id
+        WHERE NOT EXISTS (SELECT 1 FROM match_statistics s WHERE s.match_id = m.id
+                          AND s.home_goals IS NOT NULL AND s.away_goals IS NOT NULL)
+        ORDER BY m.scheduled_at, m.id
+    """).fetchall()
+    conn.close()
+    return rows
+
+
+def delete_entered_matches() -> None:
+    print("\n=== Smazat zadané zápasy ===")
+    rows = list_entered_matches()
+    print_matches(rows)
+    if not rows:
+        return
+    available = {int(r["id"]) for r in rows}
+    raw = input("ID zápasů ke smazání (oddělené čárkou), 'vse' = všechny uvedené, Enter = zpět: ").strip()
+    if not raw:
+        return
+    if raw.lower() in {"vse", "vše", "all"}:
+        selected = sorted(available)
+    else:
+        try:
+            selected = sorted({int(p) for p in raw.replace(";", ",").replace(" ", ",").split(",") if p.strip()})
+        except ValueError:
+            print("  ! Neplatný vstup (očekávána čísla ID).")
+            return
+        unknown = [i for i in selected if i not in available]
+        if unknown:
+            print(f"  ! ID {', '.join(map(str, unknown))} nejsou mezi zadanými zápasy (zápasy s výsledkem se mazat nedají).")
+            selected = [i for i in selected if i in available]
+    if not selected:
+        return
+    answer = input(f"Opravdu trvale smazat {len(selected)} zápasů včetně jejich analýz? [ano/ne]: ").strip().lower()
+    if answer not in {"ano", "a", "y", "yes"}:
+        print("  Zrušeno, nic nebylo smazáno.")
+        return
+    conn = get_connection()
+    try:
+        deleted = delete_matches_cascade(conn, selected)
+    except sqlite3.Error as e:
+        print(f"  ! Mazání selhalo, změny vráceny: {e}")
+        return
+    finally:
+        conn.close()
+    print(f"  ✔ Smazáno zápasů: {deleted}")
+
+
+# ---------------------------------------------------------------------------
 # Hlavní smyčka
 # ---------------------------------------------------------------------------
 
@@ -699,7 +765,8 @@ Hlavní menu:
   4. Zobrazit výsledky analýzy
   5. Zkontrolovat stav analýzy
   6. Zobrazit všechny zápasy
-  7. Konec
+  7. Smazat zadané zápasy
+  8. Konec
 """
 
 ACTIONS = {
@@ -709,6 +776,7 @@ ACTIONS = {
     "4": ("Zobrazit výsledky analýzy", show_analysis_results),
     "5": ("Zkontrolovat stav analýzy", check_analysis_status),
     "6": ("Zobrazit všechny zápasy", show_all_matches),
+    "7": ("Smazat zadané zápasy", delete_entered_matches),
 }
 
 
@@ -716,8 +784,8 @@ def main() -> None:
     _load_local_env()
     while True:
         print(MENU)
-        choice = input("Vyberte volbu (1-7): ").strip()
-        if choice == "7":
+        choice = input("Vyberte volbu (1-8): ").strip()
+        if choice == "8":
             print("Ukončuji. Na shledanou!")
             break
         action = ACTIONS.get(choice)

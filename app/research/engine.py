@@ -219,8 +219,10 @@ class ResearchEngine:
                         metrics.documents_parsed += 1
 
             all_evidence = []
+            subject_team = self.subject_team_name(task)
+            entities = [subject_team] if subject_team else [task.home_team, task.away_team]
             for doc in crawled_docs:
-                all_evidence.extend(self.evidence_extractor.extract_evidence(doc, task.domain))
+                all_evidence.extend(self.evidence_extractor.extract_evidence(doc, task.domain, entities=entities))
 
             team_name = self.subject_team_name(task)
             claims = self.claim_builder.build_claims_from_evidence(all_evidence, team_name)

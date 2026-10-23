@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from app.database.schema import initialize_database
+from app.statistics.history_autofill import resolve_team_key
 
 
 def value(row: dict[str, str], *names: str) -> str:
@@ -88,6 +89,12 @@ def import_csv(csv_path: Path, db_path: Path, competition: str, timezone_name: s
 
             def team_id(name: str) -> int:
                 norm = " ".join(name.lower().split())
+                # Shoda přes kanonický klíč + aliasy (stejně jako history_autofill), ať nevznikají duplicity týmů.
+                key = resolve_team_key(name)
+                if key:
+                    for ident, existing in conn.execute("SELECT id, name FROM teams ORDER BY id").fetchall():
+                        if resolve_team_key(existing) == key:
+                            return int(ident)
                 row_team = conn.execute("SELECT id FROM teams WHERE normalized_name=?", (norm,)).fetchone()
                 if row_team:
                     return int(row_team[0])

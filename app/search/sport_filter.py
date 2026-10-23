@@ -6,7 +6,7 @@ NON_FOOTBALL_KEYWORDS = {
     "ice hockey", "hockey", "nhl", "khl", "baseball", "mlb", "cricket",
     "rugby", "golf", "f1", "formula 1", "motogp", "volleyball", "handball",
     "badminton", "table tennis", "mma", "ufc", "boxing", "nfl", "american football",
-    "snooker", "darts", "poker"
+    "snooker", "darts", "poker", "hokej", "hokejov", "lední hokej"
 }
 
 FOOTBALL_KEYWORDS = {
@@ -17,7 +17,21 @@ FOOTBALL_KEYWORDS = {
 }
 
 
+# Zjevně nefotbalové / neinformativní URL (hokej, wiki kategorie, katalogy firem a služeb).
+_BLOCKED_URL_PARTS = (
+    "eliteprospects.com", "/hc-", "/hc_", "hokej", "hockey", "/nhl", "/khl",
+    "/kategorie:", "/category:", "special:", "/katalog/", "traumatolog",
+)
+
+
+def is_blocked_url(url: str) -> bool:
+    lowered = (url or "").lower()
+    return any(part in lowered for part in _BLOCKED_URL_PARTS)
+
+
 def is_football_content(result: SearchResult) -> bool:
+    if is_blocked_url(getattr(result, "url", "") or ""):
+        return False
     text = f"{result.title} {result.content}".lower()
 
     if result.category and result.category.lower() not in ["general", "news", "sports", "sport"]:

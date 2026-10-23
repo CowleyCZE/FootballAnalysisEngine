@@ -1,6 +1,7 @@
 import httpx
 import json
 import logging
+import os
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -27,13 +28,18 @@ class OllamaClient:
         require_json: bool = True,
     ) -> str:
         url = f"{self.base_url}/api/generate"
+        options: Dict[str, Any] = {"temperature": self.temperature}
+        # Ollama má výchozí kontext jen 2-4k tokenů a delší prompt tichě ořízne (ztrácí instrukce na začátku).
+        try:
+            options["num_ctx"] = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
+            options["num_predict"] = int(os.getenv("OLLAMA_NUM_PREDICT", "2048"))
+        except ValueError:
+            pass
         payload: Dict[str, Any] = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
-            "options": {
-                "temperature": self.temperature,
-            },
+            "options": options,
         }
         if system_prompt:
             payload["system"] = system_prompt

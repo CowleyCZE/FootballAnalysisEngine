@@ -7,6 +7,7 @@ Recommended command to run a worker from the repository root:
 
 import argparse
 import logging
+import os
 import socket
 import sys
 from pathlib import Path
@@ -18,6 +19,18 @@ from app.workers.daemon import WorkerDaemon
 
 
 DEFAULT_CAPABILITIES = ["RESEARCH", "SEARCH", "CRAWL", "STATISTICS", "AI_ANALYSIS", "AUDIT"]
+
+
+def load_env_file(env_path: Path) -> None:
+    """Načte KEY=VALUE z .env (bez přepsání už nastavených proměnných)."""
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 def resolve_db_path(db_path_str: str) -> str:
@@ -39,6 +52,7 @@ def main() -> None:
         help="Capability to serve; repeat it. Defaults to all capabilities.",
     )
     args = parser.parse_args()
+    load_env_file(REPO_ROOT / ".env")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     db_abs = resolve_db_path(args.db_path)

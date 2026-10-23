@@ -90,9 +90,9 @@ class AIWorker:
             statistics=statistics,
             conflicts=conflicts,
             run_db_id=int(run_db_id) if run_db_id is not None else None,
-            max_claims=max(5, int(os.getenv("FAE_AI_MAX_CLAIMS", "24"))),
-            max_evidence_per_claim=max(1, int(os.getenv("FAE_AI_MAX_EVIDENCE_PER_CLAIM", "3"))),
-            max_excerpt_chars=max(160, int(os.getenv("FAE_AI_MAX_EXCERPT_CHARS", "500"))),
+            max_claims=max(5, int(os.getenv("FAE_AI_MAX_CLAIMS", "16"))),
+            max_evidence_per_claim=max(1, int(os.getenv("FAE_AI_MAX_EVIDENCE_PER_CLAIM", "2"))),
+            max_excerpt_chars=max(160, int(os.getenv("FAE_AI_MAX_EXCERPT_CHARS", "320"))),
         )
 
         # Zero-hallucination check: if no claims available, return insufficient_data immediately
@@ -117,14 +117,14 @@ class AIWorker:
             "You MUST NOT change, replace, recompute or contradict this tip. Only explain which evidence "
             "in the context supports or weakens it and state the uncertainty. If a claim seems to "
             "conflict with the tip, report it in uncertainties or conflicts_noted instead of altering the tip.\n\n"
-            + json.dumps(context, ensure_ascii=False, indent=2)
+            + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         )
         client = OllamaClient(
             base_url=os.getenv("OLLAMA_URL", "http://127.0.0.1:11434"),
             model=os.getenv("OLLAMA_MODEL", "qwen2.5:3b"),
             temperature=float(os.getenv("OLLAMA_TEMPERATURE", "0.1")),
-            timeout=float(os.getenv("OLLAMA_TIMEOUT", "60")),
-            max_retries=max(1, int(os.getenv("OLLAMA_MAX_RETRIES", "1"))),
+            timeout=float(os.getenv("OLLAMA_TIMEOUT", "300")),
+            max_retries=max(1, int(os.getenv("OLLAMA_MAX_RETRIES", "2"))),
         )
 
         try:

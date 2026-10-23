@@ -99,7 +99,7 @@ class JobStore:
         self.register_worker(worker_id, caps)
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            rows = conn.execute("SELECT * FROM jobs WHERE status IN ('PENDING','RETRY') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND NOT EXISTS (SELECT 1 FROM job_dependencies d JOIN jobs dep ON dep.id=d.depends_on_job_id WHERE d.job_id=jobs.id AND dep.status!='SUCCESS') ORDER BY priority DESC, id ASC", (self.now(),)).fetchall()
+            rows = conn.execute("SELECT * FROM jobs WHERE status IN ('PENDING','RETRY') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND NOT EXISTS (SELECT 1 FROM job_dependencies d JOIN jobs dep ON dep.id=d.depends_on_job_id WHERE d.job_id=jobs.id AND dep.status NOT IN ('SUCCESS','FAILED','CANCELLED')) ORDER BY priority DESC, id ASC", (self.now(),)).fetchall()
             selected = None
             for row in rows:
                 payload = json.loads(row["payload_json"] or "{}")

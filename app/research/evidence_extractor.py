@@ -1,6 +1,36 @@
 import re
-from typing import List, Dict, Any, Optional
+import unicodedata
+from typing import List, Dict, Any, Optional, Iterable
 from app.research.models import Evidence
+from app.research.topic_terms import get_topic_terms
+from app.statistics.history_autofill import ALIASES_FILE, _load_aliases, canonical_team_key, resolve_team_key
+
+MAX_EVIDENCE_PER_DOCUMENT = 40
+
+
+def _fold(value: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    return "".join(c for c in text if not unicodedata.combining(c)).lower()
+
+
+def entity_forms(names: Iterable[str]) -> set:
+    """Tvary názvů týmů (bez diakritiky, s aliasy), podle nich se pozná relevantní dokument."""
+    aliases = _load_aliases(str(ALIASES_FILE))
+    forms = set()
+    for name in names:
+        if not name:
+            continue
+        key = resolve_team_key(name)
+        group = {canonical_team_key(name)}
+        if key:
+            group.add(key)
+            group.update(a for a, target in aliases.items() if target == key)
+        for item in group:
+            if not item:
+                continue
+            forms.add(item)
+            forms.update(t for t in item.split() if len(t) >= 5)
+    return forms
 
 
 _DOMAIN_KEYWORDS = {
@@ -51,7 +81,9 @@ def keywords_for_domain(domain: str) -> List[str]:
 
 
 class EvidenceExtractor:
-    def extract_evidence(self, doc: Dict[str, Any], domain: str) -> List[Evidence]:
+    def extract_evidence(self, doc: Dict[str, Any], domain: str,
+                         entities: Optional[Iterable[str]] = None,
+                         max_items: int = MAX_EVIDENCE_PER_DOCUMENT) -> List[Evidence]:
         text = doc.get("text", "")
         url = doc.get("url", "")
         pub_at = doc.get("published_at")
@@ -63,12 +95,24 @@ class EvidenceExtractor:
         if not text:
             return []
 
+        forms = entity_forms(entities or [])
+        if forms:
+            haystack = _fold(f"{doc.get('title', '')} {text}")
+            if not any(form in haystack for form in forms):
+                return []  # dokument se netká týmů z úkolu (např. obecný text o klimatu)
+
         evidence_list = []
+        # Absence: obecné přehledy zranění (Premier League apod.) nesmí dát týmu cizí hráče.
+        # Když tým není v titulku/URL, projdou jen věty, které tým sami zmiňují.
+        strict_sentences = bool(forms) and str(domain).upper().startswith("ABSENCES") and not any(
+            form in _fold(f"{doc.get('title', '')} {url}") for form in forms)
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+|\n+', text) if len(s.strip()) > 15]
-        keywords = keywords_for_domain(domain)
+        keywords = keywords_for_domain(domain) or get_topic_terms(domain)
 
         for sent in sentences:
             sent_lower = sent.lower()
+            if strict_sentences and not any(form in _fold(sent) for form in forms):
+                continue
             if keywords:
                 if any(kw in sent_lower for kw in keywords):
                     evidence_list.append(Evidence(
@@ -93,7 +137,15 @@ class EvidenceExtractor:
                     domain=domain
                 ))
 
-        if not evidence_list and sentences:
+        if len(evidence_list) > max_items:
+            if forms:
+                mentions = [e for e in evidence_list if any(f in _fold(e.text_fragment) for f in forms)]
+                others = [e for e in evidence_list if e not in mentions]
+                evidence_list = (mentions + others)[:max_items]
+            else:
+                evidence_list = evidence_list[:max_items]
+
+        if not evidence_list and sentences and not strict_sentences:
             first_fragment = " ".join(sentences[:3])
             evidence_list.append(Evidence(
                 source_url=url,
