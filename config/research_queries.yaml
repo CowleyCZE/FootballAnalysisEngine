@@ -76,13 +76,6 @@ EXPECTED_LINEUPS:
   discovery_cs:
     - "{home_team} {away_team} předpokládané sestavy"
 
-WEATHER:
-  discovery:
-    - "weather forecast {venue} {match_date} football"
-    - "weather {home_team} stadium {match_date} wind rain temperature pitch"
-  discovery_cs:
-    - "počasí {venue} {match_date} předpověď déšť vítr teplota"
-
 REFEREE:
   discovery:
     - "{home_team} {away_team} referee appointment {match_date}"
@@ -147,6 +140,18 @@ TEAM_PROFILE_HOME:
   verification:
     - "{home_team} official team news injuries suspension"
     - "{home_team} official league table statistics"
+
+TEAM_PROFILE:
+  discovery:
+    - "{home_team} current season league table position points goal difference"
+    - "{home_team} recent form last matches results xG xGA"
+    - "{home_team} injury suspension team news"
+    - "{home_team} manager tactics strengths weaknesses home away record"
+    - "{home_team} fixture congestion rest days travel news"
+    - "{home_team} official team news statistics"
+  discovery_cs:
+    - "{home_team} tabulka výsledky forma statistiky"
+    - "{home_team} zranění suspendace trenér týmové zprávy"
 
 TEAM_PROFILE_AWAY:
   discovery:

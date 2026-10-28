@@ -1,5 +1,7 @@
 import uuid
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
@@ -83,12 +85,69 @@ class ResearchEngine:
         self.claim_validator = ClaimValidator()
         self.conflict_detector = ConflictDetector()
 
+    def _crawl_parallel(self, urls: List[str]) -> List[Dict[str, Any]]:
+        """Stáhne URL paralelně (`FAE_CRAWL_WORKERS`, výchozí 4), výsledky ve stejném pořadí.
+        Chyba jedné URL nikdy nesmí shodit celý research – vrátí se `{"status": "error"}`."""
+        def one(url: str) -> Dict[str, Any]:
+            try:
+                res = self.crawler.crawl(url)
+                return res if isinstance(res, dict) else {"status": "error", "url": url, "error": "invalid crawler result"}
+            except Exception as exc:
+                return {"status": "error", "url": url, "error": str(exc)}
+
+        try:
+            workers = max(1, int(os.getenv("FAE_CRAWL_WORKERS", "4") or 4))
+        except ValueError:
+            workers = 4
+        if workers == 1 or len(urls) <= 1:
+            return [one(url) for url in urls]
+        with ThreadPoolExecutor(max_workers=min(workers, len(urls))) as pool:
+            return list(pool.map(one, urls))
+
+    def _search_one(self, task: ResearchTask, q: Dict[str, Any]):
+        """Jeden dotaz -> (výsledky, chyba, diagnostika). Diagnostika se čte hned ve stejném vlákně
+        (`last_diagnostics` je vláknově lokální). Chyba se nevyhazuje, vrací se volajícímu."""
+        team_name = self.subject_team_name(task)
+        h2h_query = task.domain == "HEAD_TO_HEAD"
+        try:
+            res = self.search_adapter.search(
+                q["query"],
+                team="" if h2h_query else team_name,
+                domain=task.domain,
+                priority=task.priority,
+                reason=q.get("type", ""),
+                data_cutoff_at=task.data_cutoff_at,
+                home_team=task.home_team if h2h_query else None,
+                away_team=task.away_team if h2h_query else None,
+                competition=task.competition if h2h_query else None,
+            )
+        except Exception as exc:
+            return [], exc, None
+        res = res if res is not None else []
+        diag = getattr(res, "diagnostics", None) or getattr(self.search_adapter, "last_diagnostics", None)
+        return res, None, diag
+
+    def _search_parallel(self, task: ResearchTask, planned: List[Dict[str, Any]]) -> List[tuple]:
+        """Spustí dotazy souběžně (`FAE_SEARCH_WORKERS`, výchozí 3; 1 = sekvenčně). Výsledky jsou ve
+        stejném pořadí jako dotazy; DB zápisy a vyhazování chyb dělá volající v jednom vlákně.
+        Odstup startů požadavků na SearXNG nadále hlídají `SEARXNG_MIN_INTERVAL_SECONDS` a host-zámek."""
+        try:
+            workers = max(1, int(os.getenv("FAE_SEARCH_WORKERS", "3") or 3))
+        except ValueError:
+            workers = 3
+        if workers == 1 or len(planned) <= 1:
+            return [self._search_one(task, q) for q in planned]
+        with ThreadPoolExecutor(max_workers=min(workers, len(planned))) as pool:
+            return list(pool.map(lambda q: self._search_one(task, q), planned))
+
     @staticmethod
     def subject_team_name(task: ResearchTask) -> str:
         """Subjekt claimů podle domény (TODO 3.3): *_HOME -> domácí, *_AWAY -> hosté,
-        ostatní (GENERAL, HEAD_TO_HEAD, WEATHER, REFEREE, RIVALRY, ...) = zápasová doména
+        ostatní (GENERAL, HEAD_TO_HEAD, REFEREE, RIVALRY, ...) = zápasová doména
         bez týmu (prázdný řetězec), nikdy ne „hosté jinak“."""
         domain = task.domain or ""
+        if domain == "TEAM_PROFILE":
+            return task.home_team
         if domain.endswith("_HOME"):
             return task.home_team
         if domain.endswith("_AWAY"):
@@ -110,30 +169,11 @@ class ResearchEngine:
             )
             queries = self.query_builder.build_queries(task)
             metrics.queries_count = len(queries)
+            planned_queries = queries[: self.source_policy.get_strategy(task.domain).get("max_queries", len(queries))]
             search_results = []
             diag_warnings: List[str] = []
 
-            for q in queries[: self.source_policy.get_strategy(task.domain).get("max_queries", len(queries))]:
-                team_name = self.subject_team_name(task)
-                res = []
-                search_err = None
-                try:
-                    h2h_query = task.domain == "HEAD_TO_HEAD"
-                    res = self.search_adapter.search(
-                        q["query"],
-                        team="" if h2h_query else team_name,
-                        domain=task.domain,
-                        priority=task.priority,
-                        reason=q.get("type", ""),
-                        data_cutoff_at=task.data_cutoff_at,
-                        home_team=task.home_team if h2h_query else None,
-                        away_team=task.away_team if h2h_query else None,
-                        competition=task.competition if h2h_query else None,
-                    )
-                except Exception as exc:
-                    search_err = exc
-
-                diag = getattr(res, "diagnostics", None) or getattr(self.search_adapter, "last_diagnostics", None)
+            for q, (res, search_err, diag) in zip(planned_queries, self._search_parallel(task, planned_queries)):
                 if diag and hasattr(diag, "drop_reasons") and diag.drop_reasons:
                     diag_warnings.extend(diag.drop_reasons)
 
@@ -210,7 +250,10 @@ class ResearchEngine:
             crawled_docs = []
             for cand in candidates:
                 self.repository.save_source_candidate(session_id, cand["url"], cand["domain"], cand["source_type"], cand["score"], True)
-                crawl_res = self.crawler.crawl(cand["url"])
+            # Stahování probíhá paralelně (sítť + Playwright jsou nejpomalejší část); DB zápisy,
+            # zpracování dokumentů a metriky zůstávají v jednom vlákně a v původním pořadí kandidátů.
+            crawl_results = self._crawl_parallel([cand["url"] for cand in candidates])
+            for cand, crawl_res in zip(candidates, crawl_results):
                 if crawl_res.get("status") == "success":
                     metrics.sources_crawled += 1
                     doc = self.document_processor.process(crawl_res)
@@ -222,12 +265,15 @@ class ResearchEngine:
             subject_team = self.subject_team_name(task)
             entities = [subject_team] if subject_team else [task.home_team, task.away_team]
             for doc in crawled_docs:
-                all_evidence.extend(self.evidence_extractor.extract_evidence(doc, task.domain, entities=entities))
+                all_evidence.extend(self.evidence_extractor.extract_evidence(
+                    doc, task.domain, entities=entities))
 
             team_name = self.subject_team_name(task)
             claims = self.claim_builder.build_claims_from_evidence(all_evidence, team_name)
             metrics.claims_count = len(claims)
             claims = self.claim_validator.validate_claims(claims, task.data_cutoff_at)
+            if hasattr(self.claim_validator, "apply_source_weights"):
+                claims = self.claim_validator.apply_source_weights(claims, self.source_registry)
             claims = self.conflict_detector.detect_and_resolve(claims)
             valid_claims = [c for c in claims if c.status == ClaimStatus.VALID]
             conflicted_claims = [c for c in claims if c.status == ClaimStatus.CONFLICTED]

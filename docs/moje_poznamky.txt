@@ -19,7 +19,7 @@ S tímto textem první video končí.
 5-9s budou ve videu různě poletovat, poskakovat atd. slova která se dají použít k vyjádření dne. Slova mohou být ve všech náladách, mohou vyjadřovat dobrý, uspěšný den nebo třeba pravý opak.kladná, záporná, smutná veselá, v různých grafických provedeních. Slova budou neustále zrychlovat a přibývat až z nich vznikne ve videu totální chaos a zmatek. 
 9-10s během poslední sekundy všechny slova vyletí mimo záběr a nastane jen černo. černou končí druhé video.
 
-
+sudo heimdall flash --RECOVERY twrp-3.7.0_9-0-crownlte.img --no-reboot
 
 
 # Lokální notebook
@@ -29,7 +29,7 @@ WORKER_TOKEN=hheesslloo3206
 MAX_CLIP_SECONDS=60
 
 # Groq (volitelné pro lokální transkripci/plánování; klíč nikdy necommituj)
-GROQ_API_KEY=YOUR_GROQ_API_KEY_HERE
+GROQ_API_KEY=<REDACTED_NEPRIDAVEJ_DO_GITU>
 GROQ_MODEL=openai/gpt-oss-20b
 GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo
 

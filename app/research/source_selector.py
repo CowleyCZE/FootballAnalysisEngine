@@ -2,6 +2,32 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from typing import List, Dict, Any
 from app.research.source_registry import SourceRegistry
 
+# Obsah pro dospělé nikdy nesmí do research pipeline (reálný běh M589: crawler stahoval
+# porno weby z výsledků vyhledávání). Kontroluje se doména, URL i titulek/úryvek.
+BLOCKED_DOMAIN_PARTS = (
+    "porn", "xvideos", "xhamster", "xnxx", "redtube", "youporn", "tube8", "tubegalore",
+    "erome.com", "coomer", "fans.rip", "onlyfans", "fansly", "thefappening", "gotanynudes",
+    "nudes", "leaked", "topvid", "xxx", "sexvid", "sexy", "hentai", "camwhores", "chaturbate",
+)
+BLOCKED_TEXT_TERMS = (
+    "porn", "xxx", "nude", "nudes", "onlyfans", "blowjob", "big tits", "nsfw",
+    "sex video", "erotic", "hentai", "escort",
+)
+
+
+# Jiné sporty (reálný běh M593: sparta-cycling.cz) – blokuje se podle domény a titulku/URL, ne podle úrywku.
+NON_FOOTBALL_PARTS = ("cycling", "cyklist", "cyklo", "bikeshop", "velodrom", "triathlon")
+
+
+def is_blocked_source(url: str, title: str = "", snippet: str = "") -> bool:
+    host = (urlparse(url).netloc or "").lower()
+    if any(part in host for part in BLOCKED_DOMAIN_PARTS):
+        return True
+    if any(part in host or part in f"{url} {title}".lower() for part in NON_FOOTBALL_PARTS):
+        return True
+    haystack = f"{url} {title} {snippet}".lower()
+    return any(term in haystack for term in BLOCKED_TEXT_TERMS)
+
 
 class SourceSelector:
     def __init__(self, registry: SourceRegistry, max_per_domain: int = 3):
@@ -37,6 +63,8 @@ class SourceSelector:
             raw_url = res.get("url", "")
             url = self.normalize_url(raw_url)
             if not url:
+                continue
+            if is_blocked_source(url, res.get("title", "") or "", res.get("content", "") or ""):
                 continue
 
             info = self.registry.get_domain_info(url)

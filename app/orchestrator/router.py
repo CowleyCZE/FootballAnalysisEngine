@@ -34,7 +34,9 @@ def check_analysis_readiness(run_id: str) -> ResearchReadiness:
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline run nebyl nalezen.")
 
-    required_types = {"SEARCH", "STATISTICS"}
+    # Pipeline vytváří job typy RESEARCH (všechny research domény) a STATISTICS; typ SEARCH
+    # už nevzniká, takže původní podmínka nebyla nikdy splněna.
+    required_types = {"RESEARCH", "STATISTICS"}
     completed = {row["job_type"] for row in jobs if row["status"] == "SUCCESS"}
     required_complete = required_types.issubset(completed)
     state = run["state"]
@@ -44,11 +46,11 @@ def check_analysis_readiness(run_id: str) -> ResearchReadiness:
         MatchState.FINALIZING,
         MatchState.COMPLETED,
     }
-    warnings = [] if required_complete else ["Požadované discovery/statistics Joby nejsou dokončené."]
+    warnings = [] if required_complete else ["Požadované research/statistics Joby nejsou dokončené."]
     return ResearchReadiness(
         ready=ready,
         required_complete=required_complete,
-        coverage_score=1.0 if required_complete else len(completed) / len(required_types),
+        coverage_score=1.0 if required_complete else len(completed & required_types) / len(required_types),
         critical_conflicts=0,
         warnings=warnings,
         blocking_reasons=[] if ready else [f"Pipeline je ve stavu {state}"],

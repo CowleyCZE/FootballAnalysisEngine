@@ -2,6 +2,7 @@ import re
 import unicodedata
 from typing import List, Dict, Any, Optional, Iterable
 from app.research.models import Evidence
+from app.research.relevance_filter import document_mentions_entity, sentence_is_relevant
 from app.research.topic_terms import get_topic_terms
 from app.statistics.history_autofill import ALIASES_FILE, _load_aliases, canonical_team_key, resolve_team_key
 
@@ -41,7 +42,6 @@ _DOMAIN_KEYWORDS = {
     "STATISTICS": ["xg", "possession", "shots", "corners", "goals", "clean sheet", "pass accuracy", "tackles", "cards", "stats", "average"],
     "HEAD_TO_HEAD": ["head to head", "h2h", "previous meeting", "last meeting", "historic", "against each other", "record"],
     "EXPECTED_LINEUPS": ["lineup", "predicted", "starting xi", "formation", "probable", "squad", "bench", "xi", "4-3-3", "4-2-3-1", "3-5-2"],
-    "WEATHER": ["weather", "rain", "temperature", "degrees", "celsius", "wind", "pitch", "forecast", "condition", "humidity", "storm"],
     "REFEREE": ["referee", "official", "cards", "fouls", "penalt", "rozhodčí", "karty", "fauly"],
     "RIVALRY": ["derby", "rivalry", "historic", "intensity", "cards", "rivalita", "derby"],
     "STYLE_MATCHUP": ["tactic", "tactical", "pressing", "possession", "transition", "counter", "set piece", "formation", "taktika"],
@@ -58,7 +58,6 @@ _CZECH_KEYWORDS = {
     "STATISTICS": ["držení míče", "střel", "rohov", "gólů", "čisté konto", "přesnost přihrávek", "karty", "průměr", "statistik"],
     "HEAD_TO_HEAD": ["vzájemn", "předchozí zápas", "poslední zápas", "bilanc", "minulý zápas", "vzájemného", "proti sobě"],
     "EXPECTED_LINEUPS": ["sestav", "základní úderní", "základní jedenáctí", "pravděpodobná", "formační", "střídačk", "úderní sestav", "nastoupí"],
-    "WEATHER": ["počasí", "déšť", "dešt", "teplot", "stupň", "vítr", "předpověď", "bouř", "trávník", "sníž", "mlha"],
     "REFEREE": ["rozhodčí", "hlavní rozhodčí", "žluté karty", "červené karty", "penalt", "faul", "pišťalš"],
     "RIVALRY": ["derby", "rivalit", "prestiž", "vyhrocen", "atmosfér"],
     "STYLE_MATCHUP": ["taktik", "presink", "pressing", "protiútok", "standardní situac", "formační", "styl hry", "ofenziv", "defenziv"],
@@ -98,10 +97,11 @@ class EvidenceExtractor:
         forms = entity_forms(entities or [])
         if forms:
             haystack = _fold(f"{doc.get('title', '')} {text}")
-            if not any(form in haystack for form in forms):
-                return []  # dokument se netká týmů z úkolu (např. obecný text o klimatu)
+            if not document_mentions_entity(haystack, forms):
+                return []  # dokument se netká týmů z úkolu (obecný text o klimatu, starověká Sparta apod.)
 
         evidence_list = []
+
         # Absence: obecné přehledy zranění (Premier League apod.) nesmí dát týmu cizí hráče.
         # Když tým není v titulku/URL, projdou jen věty, které tým sami zmiňují.
         strict_sentences = bool(forms) and str(domain).upper().startswith("ABSENCES") and not any(
@@ -111,6 +111,8 @@ class EvidenceExtractor:
 
         for sent in sentences:
             sent_lower = sent.lower()
+            if not sentence_is_relevant(sent):
+                continue  # UI/metadata (YouTube, cookies…) a starověká historie nejsou důkaz
             if strict_sentences and not any(form in _fold(sent) for form in forms):
                 continue
             if keywords:

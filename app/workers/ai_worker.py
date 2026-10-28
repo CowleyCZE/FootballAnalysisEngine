@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from app.ai.client import OllamaClient
 from app.ai.context_builder import ContextBuilder
-from app.ai.schemas import AnalysisResult
+from app.ai.schemas import AIOutput, AnalysisResult, DataQuality, KeyFactor
 from app.ai.validator import AIValidator
 
 
@@ -38,7 +38,87 @@ class AIWorker:
         return result
 
     @staticmethod
+    def _conflict_text(conflict: Any) -> str:
+        if isinstance(conflict, str):
+            return conflict[:300]
+        if isinstance(conflict, dict):
+            parts = [f"{k}={v}" for k, v in conflict.items() if isinstance(v, (str, int, float)) and str(v).strip()]
+            return "; ".join(parts)[:300]
+        return str(conflict)[:300]
+
+    @staticmethod
+    def _compose_result(raw: str, match_id: int, context: Dict[str, Any]):
+        """TODO 11.16: z malého výstupu AI (`AIOutput`: conclusion, key_factors, uncertainties) složí
+        `AnalysisResult`. Vše ostatní je deterministické: `match_id`, `status`, `data_quality` a
+        `conflicts_noted` z kontextu; `home/away_team_analysis` = None (AI je negeneruje).
+        `evidence_ids` se ověřují proti kontextu: neexistující ID se zahodí (faktor bez platného
+        důkazu také) a zapíše se do `uncertainties`. Nic se nedomýšlí.
+        Vrací (AnalysisResult | None, chyba)."""
+        ok, parsed, error, raw_data = AIValidator.validate(raw, AIOutput)
+        if not ok or parsed is None:
+            return None, error
+        if isinstance(raw_data, dict) and str(raw_data.get("status", "")).strip().lower() == "insufficient_data":
+            return None, "AI označila data za nedostatečná (insufficient_data)"
+        conclusion = parsed.conclusion.strip()
+        if not conclusion:
+            return None, "AI nevrátila žádný závěr (conclusion)"
+
+        try:
+            data_quality = DataQuality.model_validate(context.get("data_quality") or {})
+        except Exception as exc:
+            return None, f"Neplatná data_quality z kontextu: {exc}"
+
+        known_ids = set()
+        for claim in context.get("claims") or []:
+            for ev in claim.get("evidence") or []:
+                ev_id = ev.get("evidence_id")
+                if isinstance(ev_id, int):
+                    known_ids.add(ev_id)
+
+        uncertainties = [u for u in parsed.uncertainties if str(u).strip()]
+        key_factors = []
+        for factor in parsed.key_factors:
+            valid = [i for i in factor.evidence_ids if i in known_ids]
+            invalid = [i for i in factor.evidence_ids if i not in known_ids]
+            if invalid:
+                uncertainties.append(
+                    f"Zahozena neexistující evidence_id {invalid} u faktoru „{factor.factor[:80]}“.")
+            if not valid:
+                uncertainties.append(f"Faktor „{factor.factor[:80]}“ vynechán: nemá platný odkaz na důkaz.")
+                continue
+            key_factors.append(KeyFactor(factor=factor.factor, importance=factor.importance, evidence_ids=valid))
+
+        conflicts_noted = [t for t in (AIWorker._conflict_text(c) for c in context.get("conflicts") or []) if t]
+        if not key_factors:
+            # Fail-closed: závěr bez jediného faktoru s platným odkazem na důkaz není podložený (běh M594:
+            # model napsal nepodložený závěr o „obhájci titulu“).
+            return None, "AI nevrátila žádný klíčový faktor s platným odkazem na důkaz; závěr není podložený"
+        return AnalysisResult(
+            match_id=match_id,
+            status="complete",
+            data_quality=data_quality,
+            home_team_analysis=None,
+            away_team_analysis=None,
+            key_factors=key_factors,
+            uncertainties=uncertainties,
+            conflicts_noted=conflicts_noted,
+            conclusion=conclusion,
+        ), "VALID"
+
+    @staticmethod
     def execute(payload: Dict[str, Any]) -> Dict[str, Any]:
+        if isinstance(payload, dict) and "payload_json" in payload and isinstance(payload.get("payload_json"), (str, dict)):
+            inner = payload["payload_json"]
+            if isinstance(inner, str):
+                try:
+                    inner = json.loads(inner)
+                except Exception:
+                    inner = {}
+            if isinstance(inner, dict):
+                merged = dict(payload)
+                merged.update(inner)
+                payload = merged
+
         match_id = int(payload.get("match_id") or 0)
         run_db_id = payload.get("run_db_id")
         db_path = payload.get("db_path", "database/football.db")
@@ -116,7 +196,13 @@ class AIWorker:
             "deterministic statistical model (predicted score, expected goals, 1-X-2 probabilities). "
             "You MUST NOT change, replace, recompute or contradict this tip. Only explain which evidence "
             "in the context supports or weakens it and state the uncertainty. If a claim seems to "
-            "conflict with the tip, report it in uncertainties or conflicts_noted instead of altering the tip.\n\n"
+            "conflict with the tip, report it in uncertainties or conflicts_noted instead of altering the tip.\n"
+            "Ignore claims that are not about the football clubs of this match (other sports, ancient "
+            "history, other clubs with a similar name).\n"
+            "OUTPUT: return one JSON object with exactly these keys: conclusion (non-empty string in "
+            "Czech, 2-4 sentences), key_factors (list of objects {factor, importance 0-1, evidence_ids: "
+            "list of integer evidence_id values from the context}), uncertainties (list of strings). "
+            "Nothing else.\n\n"
             + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         )
         client = OllamaClient(
@@ -126,11 +212,12 @@ class AIWorker:
             timeout=float(os.getenv("OLLAMA_TIMEOUT", "300")),
             max_retries=max(1, int(os.getenv("OLLAMA_MAX_RETRIES", "2"))),
         )
+        client.json_schema = AIOutput.model_json_schema()
 
         try:
             raw = client.generate(prompt, require_json=True)
-            ok, validated, error, raw_data = AIValidator.validate(raw, AnalysisResult)
-            if not ok or validated is None:
+            validated, error = AIWorker._compose_result(raw, match_id, context)
+            if validated is None:
                 return AIWorker._insufficient_data_result(
                     match_id,
                     f"AI výstup nebyl validní: {error}",

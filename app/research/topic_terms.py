@@ -4,6 +4,7 @@ from typing import Dict, List
 
 
 DOMAIN_TOPIC_TERMS: Dict[str, List[str]] = {
+    "TEAM_PROFILE": ["injury", "suspension", "league table", "standings", "form", "results", "xg", "tactics", "manager", "zranění", "tabulka", "forma", "výsledky"],
     "TEAM_PROFILE_HOME": ["injury", "suspension", "league table", "standings", "form", "results", "xg", "home record", "tactics", "manager", "zranění", "tabulka", "forma"],
     "TEAM_PROFILE_AWAY": ["injury", "suspension", "league table", "standings", "form", "results", "xg", "away record", "tactics", "manager", "zranění", "tabulka", "forma"],
     "HEAD_TO_HEAD": ["head to head", "previous meetings", "h2h", "derby", "rivalry", "vzájemné zápasy", "rivalita"],
@@ -45,21 +46,6 @@ DOMAIN_TOPIC_TERMS: Dict[str, List[str]] = {
         "absence",
         "zraněný",
         "suspendace",
-    ],
-    "WEATHER": [
-        "weather",
-        "forecast",
-        "temperature",
-        "wind",
-        "rain",
-        "snow",
-        "humidity",
-        "počasí",
-        "předpověď",
-        "teplota",
-        "vítr",
-        "déšť",
-        "sníh",
     ],
     "REFEREE": ["referee", "official", "cards", "fouls", "penalties", "rozhodčí", "karty", "fauly", "penalty"],
     "RIVALRY": ["derby", "rivalry", "intensity", "cards", "rivalita", "derby", "historie"],

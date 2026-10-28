@@ -42,6 +42,8 @@ class MatchStatistics:
     away_xga: Optional[float] = None
     home_npxg: Optional[float] = None
     away_npxg: Optional[float] = None
+    home_gs_adj_xg: Optional[float] = None
+    away_gs_adj_xg: Optional[float] = None
     
     # Metadata zdrojů
     xg_metric_definition: Optional[str] = None

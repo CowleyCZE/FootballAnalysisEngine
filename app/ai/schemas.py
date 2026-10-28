@@ -36,6 +36,15 @@ class TeamAnalysis(BaseModel):
     weaknesses: List[str] = Field(default_factory=list)
     tactical_notes: List[str] = Field(default_factory=list)
 
+class AIOutput(BaseModel):
+    """Malé schéma, které se posílá do Ollamy (TODO 11.16): AI generuje jen to, co sama umí –
+    závěr, klíčové faktory s odkazy na důkazy a nejistoty. Zbytek `AnalysisResult` skládá
+    `AIWorker` deterministicky z kontextu."""
+    conclusion: str
+    key_factors: List[KeyFactor] = Field(default_factory=list)
+    uncertainties: List[str] = Field(default_factory=list)
+
+
 class AnalysisResult(BaseModel):
     match_id: int
     status: str = "complete"  # "complete" nebo "insufficient_data"

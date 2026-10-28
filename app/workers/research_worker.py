@@ -137,6 +137,7 @@ class ResearchWorker:
 
         try:
             match = payload.get("match") or {}
+            team_only = bool(payload.get("team_only"))
             match_id = int(payload.get("match_id") or match.get("id") or 0)
             domain = str(payload.get("domain") or "GENERAL")
             run_id_str = str(payload.get("run_id") or "")
@@ -177,7 +178,15 @@ class ResearchWorker:
                         (run_db_id, task_id),
                     )
 
-            ctx = self._resolve_match_context(match_id, payload, match)
+            if team_only:
+                cutoff = self._parse_datetime(payload.get("data_cutoff_at"))
+                ctx = {"home_team": str(payload.get("team_name") or ""), "away_team": "",
+                       "competition": str(payload.get("competition") or ""), "venue": None,
+                       "scheduled_at": cutoff, "data_cutoff_at": cutoff}
+                if not ctx["home_team"] or payload.get("subject_team_id") is None:
+                    raise ValueError("Samostatný profil týmu vyžaduje název a ID týmu.")
+            else:
+                ctx = self._resolve_match_context(match_id, payload, match)
 
             if not task_id:
                 task_uuid = str(payload.get("task_uuid") or f"TASK-{match_id}-{domain}")
@@ -191,7 +200,7 @@ class ResearchWorker:
                         cur = conn.execute("""
                             INSERT INTO research_tasks(run_id, run_db_id, match_id, task_uuid, domain, task_type, description, required, priority, capabilities_json, data_cutoff_at, home_team, away_team, competition, scheduled_at, venue, status)
                             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, 'RUNNING')
-                        """, (run_id_str, run_db_id, match_id, task_uuid, domain, str(payload.get("task_type") or "FACT_COLLECTION"), str(payload.get("description") or f"Research for {domain}"), 0, int(payload.get("priority", 50)), ctx["data_cutoff_at"].isoformat(), ctx["home_team"], ctx["away_team"], ctx["competition"], ctx["scheduled_at"].isoformat(), ctx["venue"]))
+                        """, (run_id_str, run_db_id, None if team_only else match_id, task_uuid, domain, str(payload.get("task_type") or "FACT_COLLECTION"), str(payload.get("description") or f"Research for {domain}"), 0, int(payload.get("priority", 50)), ctx["data_cutoff_at"].isoformat(), ctx["home_team"], ctx["away_team"], ctx["competition"], ctx["scheduled_at"].isoformat(), ctx["venue"]))
                         conn.commit()
                         task_id = int(cur.lastrowid)
 
@@ -200,7 +209,7 @@ class ResearchWorker:
             task = ResearchTask(
                 task_id=task_id,
                 run_id=run_db_id,
-                match_id=match_id,
+                match_id=None if team_only else match_id,
                 domain=domain,
                 task_type=str(payload.get("task_type") or "FACT_COLLECTION"),
                 description=str(payload.get("description") or f"Research for {domain}"),
@@ -220,7 +229,7 @@ class ResearchWorker:
             status = result.status.value if isinstance(result.status, ResearchStatus) else str(result.status)
             claims: List[Dict[str, Any]] = [_serialize_claim(claim) for claim in result.claims]
             team_context_domain = (
-                domain in {"TEAM_PROFILE_HOME", "TEAM_PROFILE_AWAY", "ABSENCES_HOME", "ABSENCES_AWAY",
+                domain in {"TEAM_PROFILE", "TEAM_PROFILE_HOME", "TEAM_PROFILE_AWAY", "ABSENCES_HOME", "ABSENCES_AWAY",
                            "MOTIVATION_HOME", "MOTIVATION_AWAY", "TRAVEL_FATIGUE_HOME", "TRAVEL_FATIGUE_AWAY"}
             )
             if team_context_domain and task.subject_team_id is not None and claims:
@@ -230,7 +239,7 @@ class ResearchWorker:
                     run_id=run_id_str,
                     claims=claims,
                 )
-            elif domain in {"HEAD_TO_HEAD", "EXPECTED_LINEUPS", "WEATHER", "REFEREE", "RIVALRY", "STYLE_MATCHUP"} and claims:
+            elif domain in {"HEAD_TO_HEAD", "EXPECTED_LINEUPS", "REFEREE", "RIVALRY", "STYLE_MATCHUP"} and claims:
                 self.repository.save_match_context(
                     match_id=match_id, run_id=run_id_str,
                     cutoff_at=ctx["data_cutoff_at"].isoformat(), claims=claims, domain=domain,

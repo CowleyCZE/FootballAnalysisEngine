@@ -73,6 +73,16 @@ domains:
     type: official_club
   dynamo.cz:
     type: official_club
+  fkpardubice.cz:
+    type: official_club
+  fkdukla.cz:
+    type: official_club
+  fczbrno.cz:
+    type: official_club
+  sfc.cz:
+    type: official_club
+  fkpribram.cz:
+    type: official_club
 
   # --- Statistické poskytovatelé ---
   transfermarkt.com:

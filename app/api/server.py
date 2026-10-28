@@ -27,6 +27,9 @@ app = FastAPI(
 
 DB_PATH = "database/football.db"
 
+# Výchozí token ze šablony; server ho nikdy nepřijme (bod 11.1).
+PLACEHOLDER_TOKEN = "change-this-secure-token-in-production"
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -41,6 +44,12 @@ def verify_api_auth(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="API token authentication is not configured on the server. Access blocked for security.",
+        )
+
+    if hmac.compare_digest(str(expected_token), PLACEHOLDER_TOKEN):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="API token is the insecure default value. Run ./init.sh (generates a random token) and restart.",
         )
 
     provided_token = x_worker_token

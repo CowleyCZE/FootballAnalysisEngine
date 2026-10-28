@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from zoneinfo import ZoneInfo
 from app.orchestrator.models import AnalysisRequest, MatchIdentity
+from app.database.team_identity import find_team_id
 
 
 class MatchResolverException(Exception):
@@ -181,11 +182,10 @@ class MatchResolver:
             cursor = conn.cursor()
 
             def _get_team(team_name: str) -> Optional[sqlite3.Row]:
-                norm_name = team_name.strip().lower()
-                return cursor.execute(
-                    "SELECT id, name FROM teams WHERE lower(normalized_name) = ? OR lower(name) = ?",
-                    (norm_name, norm_name)
-                ).fetchone()
+                team_id = find_team_id(conn, team_name)
+                if team_id is None:
+                    return None
+                return cursor.execute("SELECT id,name FROM teams WHERE id=?", (team_id,)).fetchone()
 
             home_team_row = _get_team(request.home_team)
             away_team_row = _get_team(request.away_team)

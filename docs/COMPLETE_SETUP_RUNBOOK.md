@@ -285,7 +285,7 @@ Pipeline postupně provede:
 6. automatické doplnění historických zápasů,
 7. H2H historii,
 8. absence, sestavy, motivaci a únavu,
-9. počasí, rozhodčího, rivalitu a herní styl,
+9. rozhodčího, rivalitu a herní styl,
 10. výpočet očekávaných gólů,
 11. pravděpodobnosti 1-X-2,
 12. pravděpodobnostní rozdělení přesných skóre,

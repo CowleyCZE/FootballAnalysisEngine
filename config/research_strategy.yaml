@@ -15,11 +15,6 @@ EXPECTED_LINEUPS:
   min_sources: 1
   min_independent_sources: 1
   max_queries: 2
-WEATHER:
-  strategy: BASIC
-  min_sources: 1
-  min_independent_sources: 1
-  max_queries: 2
 REFEREE:
   strategy: BASIC
   min_sources: 1
@@ -62,6 +57,12 @@ DEFAULT:
   min_independent_sources: 1
   max_queries: 2
 TEAM_PROFILE_HOME:
+  strategy: DEEP
+  min_sources: 1
+  min_independent_sources: 1
+  max_queries: 8
+
+TEAM_PROFILE:
   strategy: DEEP
   min_sources: 1
   min_independent_sources: 1

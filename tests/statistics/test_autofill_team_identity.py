@@ -20,8 +20,8 @@ def _setup(tmp_path):
 DATA = {
     "name": "Czech 2020-21",
     "matches": [
-        {"date": "2020-09-12", "team1": "FK Teplice", "team2": "FC Zbrojovka Brno", "score": {"ft": [2, 1]}},
-        {"date": "2020-09-19", "team1": "FC Zbrojovka Brno", "team2": "FK Teplice", "score": {"ft": [0, 0]}},
+        {"date": "2020-09-12", "team1": "FK Teplice", "team2": "Artis Brno", "score": {"ft": [2, 1]}},
+        {"date": "2020-09-19", "team1": "Artis Brno", "team2": "FK Teplice", "score": {"ft": [0, 0]}},
     ],
 }
 CUTOFF = "2026-10-22T03:38:48"
@@ -50,7 +50,15 @@ def test_history_count_matches_either_team_in_either_role(tmp_path):
 def test_without_preferred_falls_back_to_first_exact_key(tmp_path):
     db = _setup(tmp_path)
     filler = HistoryAutoFiller(db_path=db, cache_dir=tmp_path / "cache")
-    filler._import_rows(DATA, "Chance Liga", CUTOFF)
+    zbrojovka_data = {
+        **DATA,
+        "matches": [
+            {**row, "team2": "FC Zbrojovka Brno"} if row["team1"] == "FK Teplice"
+            else {**row, "team1": "FC Zbrojovka Brno"}
+            for row in DATA["matches"]
+        ],
+    }
+    filler._import_rows(zbrojovka_data, "Chance Liga", CUTOFF)
     with sqlite3.connect(db) as conn:
         ids = {tuple(r) for r in conn.execute("SELECT home_team_id, away_team_id FROM matches")}
     assert ids == {(1, 2), (2, 1)}

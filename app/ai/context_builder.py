@@ -1,8 +1,9 @@
 import json
 import logging
+import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -335,6 +336,34 @@ class ContextBuilder:
         scores = [max(0.0, 1.0 - age / (30.0 * 24.0)) for age in ages]
         return round(sum(scores) / len(scores), 2)
 
+    @staticmethod
+    def _select_balanced_claims(claims: List[Dict[str, Any]], max_claims: int) -> List[Dict[str, Any]]:
+        """Vybere až `max_claims` tvrzení vyváženě podle `predicate` (round-robin, uvnitř skupiny
+        podle důvěryhodnosti). Čisté řazení podle důvěryhodnosti nechalo několik hlučných typů
+        (např. opakované tvrzení stejného typu) zaplnit celý kontext, takže AI neviděla absence, formu ani sestavy.
+        Výsledek je seřazen podle důvěryhodnosti; vejdou-li se všechna tvrzení, je shodný s původním řazením."""
+        by_conf = sorted(claims, key=lambda c: c.get("confidence", 0.0), reverse=True)
+        if len(by_conf) <= max_claims:
+            return by_conf
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for claim in by_conf:
+            groups.setdefault(str(claim.get("predicate") or ""), []).append(claim)
+        selected: List[Dict[str, Any]] = []
+        queues = list(groups.values())
+        while len(selected) < max_claims and any(queues):
+            for queue in queues:
+                if queue and len(selected) < max_claims:
+                    selected.append(queue.pop(0))
+        return sorted(selected, key=lambda c: c.get("confidence", 0.0), reverse=True)
+
+    @staticmethod
+    def _trim_to_chars(data: Any, max_chars: int) -> Any:
+        """Serializuje data do JSON a ořízne na max_chars znaků; vrátí zkrácený string."""
+        serialized = json.dumps(data, ensure_ascii=False)
+        if len(serialized) <= max_chars:
+            return data
+        return serialized[:max_chars]
+
     def build_context(
         self,
         match_info: Dict[str, Any],
@@ -346,6 +375,8 @@ class ContextBuilder:
         max_excerpt_chars: int = 500,
         run_db_id: Optional[int] = None,
     ) -> Dict[str, Any]:
+        max_team_profile_chars = max(500, int(os.getenv("FAE_AI_MAX_TEAM_PROFILE_CHARS", "3000")))
+        max_match_context_chars = max(500, int(os.getenv("FAE_AI_MAX_MATCH_CONTEXT_CHARS", "2000")))
         match_id = match_info.get("match_id") or match_info.get("id")
         if run_db_id is not None and "run_db_id" not in match_info:
             match_info = dict(match_info)
@@ -367,9 +398,7 @@ class ContextBuilder:
         if conflicts is None:
             conflicts = []
 
-        sorted_claims = sorted(
-            claims, key=lambda c: c.get("confidence", 0.0), reverse=True
-        )[:max_claims]
+        sorted_claims = self._select_balanced_claims(claims, max_claims)
 
         formatted_claims = []
         source_urls = set()
@@ -444,13 +473,13 @@ class ContextBuilder:
             "match": enriched_match_info,
             "statistics": statistics,
             "claims": formatted_claims,
-            "team_profiles": self.load_team_profiles(enriched_match_info),
-            "match_context": self.load_match_context(enriched_match_info),
+            "team_profiles": self.load_team_profiles(enriched_match_info, max_chars=max_team_profile_chars),
+            "match_context": self.load_match_context(enriched_match_info, max_chars=max_match_context_chars),
             "conflicts": conflicts,
             "data_quality": data_quality
         }
 
-    def load_team_profiles(self, match_info: Dict[str, Any]) -> Dict[str, Any]:
+    def load_team_profiles(self, match_info: Dict[str, Any], max_chars: int = 0) -> Dict[str, Any]:
         """Load the newest stored team snapshots not newer than this run cutoff."""
         match_id = match_info.get("match_id")
         if not match_id or not self.db_path:
@@ -473,13 +502,16 @@ class ContextBuilder:
                     else:
                         row = conn.execute("SELECT profile_json, data_cutoff_at FROM team_profile_snapshots WHERE team_id=? ORDER BY data_cutoff_at DESC, id DESC LIMIT 1", (team_id,)).fetchone()
                     if row:
-                        profiles[side] = {"as_of": row["data_cutoff_at"], "profile": json.loads(row["profile_json"])}
+                        loaded = json.loads(row["profile_json"])
+                        if max_chars > 0:
+                            loaded = self._trim_to_chars(loaded, max_chars)
+                        profiles[side] = {"as_of": row["data_cutoff_at"], "profile": loaded}
                 return profiles
         except (sqlite3.Error, ValueError, TypeError):
             logger.exception("Unable to load reusable team profiles")
             return {}
 
-    def load_match_context(self, match_info: Dict[str, Any]) -> Dict[str, Any]:
+    def load_match_context(self, match_info: Dict[str, Any], max_chars: int = 0) -> Dict[str, Any]:
         match_id = match_info.get("match_id")
         run_id = match_info.get("run_id")
         run_db_id = match_info.get("run_db_id")
@@ -493,7 +525,12 @@ class ContextBuilder:
                 if not run_id:
                     return {}
                 row = conn.execute("SELECT context_json FROM match_context_snapshots WHERE match_id=? AND run_id=?", (int(match_id), str(run_id))).fetchone()
-                return json.loads(row[0]) if row else {}
+                if not row:
+                    return {}
+                loaded = json.loads(row[0])
+                if max_chars > 0:
+                    loaded = self._trim_to_chars(loaded, max_chars)
+                return loaded
         except (sqlite3.Error, ValueError, TypeError):
             logger.exception("Unable to load match context snapshot")
             return {}

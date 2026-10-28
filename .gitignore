@@ -18,6 +18,8 @@ env/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite.gz
 
 # Secrets & Local Config
 .env

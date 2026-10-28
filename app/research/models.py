@@ -32,7 +32,7 @@ class AbsenceStatus(str, Enum):
 class ResearchTask:
     task_id: int
     run_id: int
-    match_id: int
+    match_id: Optional[int]
     domain: str
     task_type: str
     description: str

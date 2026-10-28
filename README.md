@@ -75,7 +75,7 @@ model version `poisson-dc-context-v5`. It combines:
 - a venue split that shrinks toward all matches when the split sample is small,
 - low-weight, recency-aware head-to-head history,
 - bounded context adjustments for fatigue, absences/multipliers, rivalry,
-  weather and style matchup,
+  and style matchup,
 - normalized probabilities for the complete 0–7 goal grid and the most likely score.
 
 Every prediction contains `factors`, `sample_size`, the expected goals and the
@@ -91,11 +91,11 @@ prediction, never treated as a usable result. The legacy status
 
 The autonomous research plan also collects recent form and last matches,
 home/away performance, goals, xG and xGA, fixture congestion and travel,
-motivation, expected lineups, referee profile, rivalry, weather and tactical
+motivation, expected lineups, referee profile, rivalry and tactical
 style matchup. Recent observations use recency weighting, venue splits shrink
 when the sample is small, and H2H is capped at a maximum 15% influence. Valid
 research snapshots are converted into bounded fatigue, motivation, rivalry,
-weather and style corrections; explicit numeric context supplied by a caller
+and style corrections; explicit numeric context supplied by a caller
 overrides these derived corrections.
 
 ### CLI – direct JSON mode
@@ -147,3 +147,20 @@ has fewer than five historical matches. Tipsport remains a research/current-
 results source; its public dynamic results page is not treated as a stable
 multi-season historical API. Unsupported competitions can provide direct JSON
 sources through `FAE_HISTORY_SOURCE_URLS` or use the CSV importer.
+
+### Score model accuracy: backtest and tuned parameters
+
+The exact-score model is deterministic. Its parameters can be tuned on real
+history (train/holdout split) and are written to `config/model_params.yaml`
+only when the holdout Brier score improves:
+
+```
+python -m app.statistics.backtest --write-config   # backtest + tuning, report in docs/backtest_report.json
+python -m app.statistics.xg_import soubor.csv --source NAZEV --dry-run   # xG import
+```
+
+`config/model_params.yaml` is versioned in git (reproducibility): commit it
+together with `docs/backtest_report.json`. Predictions made with tuned
+parameters carry `model_version` suffixed with `+tuned`. Set
+`FAE_TUNED_PARAMS=0` to use the built-in defaults. Re-run the backtest after
+every ~50 new finished matches.

@@ -3,6 +3,7 @@ import hashlib
 import json
 import asyncio
 import logging
+import threading
 
 try:
     from playwright.async_api import async_playwright
@@ -17,6 +18,27 @@ from app.crawler.rate_limiter import DomainRateLimiter
 from app.parser.html_parser import HTMLParser
 
 logger = logging.getLogger(__name__)
+
+# Playwright (5–15 s na stránku, Chromium v paměti) má smysl jen u stránek, které obsah dokreslují JavaScriptem.
+_JS_APP_MARKERS = (
+    'id="root"', "id='root'", 'id="app"', 'id="__next"', "__next_data__", 'id="__nuxt"', "window.__nuxt__",
+    "ng-app", "ng-version", "data-reactroot", "data-server-rendered",
+    "enable javascript", "requires javascript", "javascript is required", "javascript is disabled",
+    "povolte javascript", "zapněte javascript", "vyžaduje javascript",
+)
+_JS_MIN_SCRIPT_TAGS = 3
+
+
+def looks_js_rendered(html: str) -> bool:
+    """Odhad, zda krátká stránka je prázdná kvůli klientskému renderování (SPA), a ne proto, že je
+    skutečně prázdná/chybová/přesměrovací. Jen v prvním případě se vyplatí spustit Playwright."""
+    low = (html or "").lower()
+    if not low:
+        return False
+    return low.count("<script") >= _JS_MIN_SCRIPT_TAGS or any(marker in low for marker in _JS_APP_MARKERS)
+
+# Chromium je paměťově náročný: při paralelním crawlu běží najednou nejvýše N prohlížečů.
+_PLAYWRIGHT_SLOTS = threading.BoundedSemaphore(max(1, int(os.getenv("FAE_PLAYWRIGHT_CONCURRENCY", "2") or 2)))
 
 class EngineCrawler:
     def __init__(self, user_agent: str | None = None):
@@ -34,7 +56,9 @@ class EngineCrawler:
                 "[CRAWLER] Playwright není nainstalován – JS stránky se nevyrenderují (pip install playwright && playwright install chromium): %s", url)
             return CrawlResult(url=url, success=False, error="Playwright is not installed")
         try:
-            async with async_playwright() as p:
+            # Blokující zámek je v pořádku: každé crawl vlákno má vlastní event loop.
+            with _PLAYWRIGHT_SLOTS:
+              async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
                 await page.goto(url, timeout=int(self.settings.javascript_timeout_seconds * 1000), wait_until="networkidle")
@@ -65,7 +89,9 @@ class EngineCrawler:
         # 3. Fallback na Playwright, pokud HTTP vrátilo prázdný/JS obsah
         if result.success and result.html:
             doc = self.parser.parse(result.html, result.final_url or url)
-            if doc.word_count < 30:  # Podezření na JS vyrenderovanou stránku
+            if doc.word_count < 30 and not looks_js_rendered(result.html):
+                logger.info(f"[CRAWLER] Nízký počet slov ({doc.word_count}), stránka nevypadá jako JS aplikace – Playwright přeskočen: {url}")
+            elif doc.word_count < 30:  # Podezření na JS vyrenderovanou stránku
                 logger.info(f"[CRAWLER] Nízký počet slov ({doc.word_count}), zkouším Playwright...")
                 pw_result = await self.fetch_with_playwright(url)
                 if pw_result.success and pw_result.html:

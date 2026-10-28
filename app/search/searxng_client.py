@@ -6,6 +6,7 @@ import time
 from typing import IO
 from typing import Any
 
+import asyncio
 import httpx
 
 class SearXNGClient:
@@ -68,10 +69,13 @@ class SearXNGClient:
         if time_range:
             params["time_range"] = time_range
 
-        # Hold a host-level lock for the entire request: without it, parallel
-        # worker processes can flood upstream engines and trigger CAPTCHA/429.
-        import asyncio
+        # Pacing: zámek drží jen rozestup startů požadavků (max. 1 za `min_interval` napříč procesy),
+        # takže souběžné dotazy research úkolu se nezřetězí na dobu celého HTTP požadavku.
+        # `SEARXNG_HOLD_LOCK=1` vrací původní chování (zámek po celý požadavek).
         lock_file = await asyncio.to_thread(self._acquire_global_slot)
+        if os.getenv("SEARXNG_HOLD_LOCK", "0").strip().lower() not in {"1", "true", "yes"}:
+            await asyncio.to_thread(self._release_global_slot, lock_file)
+            lock_file = None
         try:
             # SearXNG botdetection loguje chybu, když chybí X-Forwarded-For/X-Real-IP (přímé volání bez proxy).
             headers = {"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"}

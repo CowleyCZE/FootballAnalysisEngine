@@ -1,0 +1,107 @@
+{
+  "generated_at": "2026-10-24T20:59:55+00:00",
+  "model_version": "poisson-dc-context-v5",
+  "competition": "Chance Liga",
+  "matches_evaluated": 528,
+  "default_params": {
+    "n": 528,
+    "accuracy_1x2": 0.517,
+    "baseline_accuracy_home_always": 0.4678,
+    "brier": 0.60065,
+    "baseline_brier": 0.63782,
+    "brier_skill": 0.05827,
+    "log_loss": 1.0059,
+    "exact_score_hit": 0.1098,
+    "goals_mae": 0.9449,
+    "outcome_frequencies": {
+      "home": 0.4678,
+      "draw": 0.2367,
+      "away": 0.2955
+    }
+  },
+  "tuning": {
+    "n_train": 369,
+    "n_holdout": 159,
+    "default_params": {
+      "DC_RHO": -0.08,
+      "PRIOR_WEIGHT": 1.5,
+      "FORM_DECAY": 0.14,
+      "HOME_ADV_SPLIT": 1.03,
+      "HOME_ADV_NO_SPLIT": 1.08
+    },
+    "default_train": {
+      "n": 369,
+      "accuracy_1x2": 0.5176,
+      "baseline_accuracy_home_always": 0.4986,
+      "brier": 0.59695,
+      "baseline_brier": 0.62338,
+      "brier_skill": 0.04239,
+      "log_loss": 1.00126,
+      "exact_score_hit": 0.1057,
+      "goals_mae": 0.9492,
+      "outcome_frequencies": {
+        "home": 0.4986,
+        "draw": 0.2168,
+        "away": 0.2846
+      }
+    },
+    "default_holdout": {
+      "n": 159,
+      "accuracy_1x2": 0.5157,
+      "baseline_accuracy_home_always": 0.3962,
+      "brier": 0.60924,
+      "baseline_brier": 0.66002,
+      "brier_skill": 0.07694,
+      "log_loss": 1.01667,
+      "exact_score_hit": 0.1195,
+      "goals_mae": 0.9348,
+      "outcome_frequencies": {
+        "home": 0.3962,
+        "draw": 0.283,
+        "away": 0.3208
+      }
+    },
+    "recommended": true,
+    "best_params": {
+      "DC_RHO": 0.0,
+      "PRIOR_WEIGHT": 1.0,
+      "FORM_DECAY": 0.08,
+      "HOME_ADV_SPLIT": 1.06,
+      "HOME_ADV_NO_SPLIT": 1.04
+    },
+    "tuned_train": {
+      "n": 369,
+      "accuracy_1x2": 0.5149,
+      "baseline_accuracy_home_always": 0.4986,
+      "brier": 0.59015,
+      "baseline_brier": 0.62338,
+      "brier_skill": 0.05331,
+      "log_loss": 0.99187,
+      "exact_score_hit": 0.1084,
+      "goals_mae": 0.949,
+      "outcome_frequencies": {
+        "home": 0.4986,
+        "draw": 0.2168,
+        "away": 0.2846
+      }
+    },
+    "tuned_holdout": {
+      "n": 159,
+      "accuracy_1x2": 0.522,
+      "baseline_accuracy_home_always": 0.3962,
+      "brier": 0.60603,
+      "baseline_brier": 0.66002,
+      "brier_skill": 0.0818,
+      "log_loss": 1.01349,
+      "exact_score_hit": 0.1195,
+      "goals_mae": 0.9338,
+      "outcome_frequencies": {
+        "home": 0.3962,
+        "draw": 0.283,
+        "away": 0.3208
+      }
+    },
+    "holdout_brier_gain": 0.00321
+  },
+  "config_written": true
+}

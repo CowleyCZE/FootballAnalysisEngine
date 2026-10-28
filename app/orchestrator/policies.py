@@ -19,7 +19,6 @@ class ResearchPolicy:
     OPTIONAL_DOMAINS = [
         "HEAD_TO_HEAD",
         "EXPECTED_LINEUPS",
-        "WEATHER",
         "REFEREE",
         "RIVALRY",
         "STYLE_MATCHUP",
@@ -39,7 +38,6 @@ class ResearchPolicy:
         "STATISTICS": 85,
         "EXPECTED_LINEUPS": 80,
         "HEAD_TO_HEAD": 60,
-        "WEATHER": 30,
         "REFEREE": 55,
         "RIVALRY": 45,
         "STYLE_MATCHUP": 50,

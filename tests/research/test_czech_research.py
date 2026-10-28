@@ -36,11 +36,8 @@ def test_czech_doubt_and_suspension_status():
 
 
 def test_czech_keywords_for_other_domains():
-    assert any("počasí" in w for w in keywords_for_domain("WEATHER"))
     assert any("rozhodčí" in w for w in keywords_for_domain("REFEREE"))
     assert any("tabulk" in w for w in keywords_for_domain("MOTIVATION_HOME"))
-    ev = EvidenceExtractor().extract_evidence(_doc("V neděli bude pršet, předpověď hlásí déšť a silný vítr."), "WEATHER")
-    assert ev and "déšť" in ev[0].text_fragment
 
 
 def test_czech_queries_are_generated():

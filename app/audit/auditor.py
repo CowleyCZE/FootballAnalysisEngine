@@ -189,8 +189,11 @@ class AdversarialAuditor:
         stat_issues = ConsistencyChecker.check_statistical_consistency(statistics, claims, ai_analysis)
         issues.extend(stat_issues)
 
-        # Výpočet skóre kvality podkladů
+        # Výpočet skóre kvality podkladů. MEDIUM nálezy stejného typu se počítají nejvýše do 0,25
+        # (běh M594: 20 bezdatých důkazů × 0,05 srazilo skóre na 0,0 a pipeline skončila UNRESOLVED);
+        # nálezy samotné se nesnižují a CRITICAL/HIGH se nelimitují.
         score = 1.0
+        medium_by_type: Dict[str, float] = {}
         for issue in issues:
             sev = issue.get("severity")
             if sev == "CRITICAL":
@@ -198,7 +201,9 @@ class AdversarialAuditor:
             elif sev == "HIGH":
                 score -= 0.15
             elif sev == "MEDIUM":
-                score -= 0.05
+                key = str(issue.get("type"))
+                medium_by_type[key] = medium_by_type.get(key, 0.0) + 0.05
+        score -= sum(min(0.25, v) for v in medium_by_type.values())
         score = max(0.0, round(score, 2))
 
         # Tvorba výzkumných úloh

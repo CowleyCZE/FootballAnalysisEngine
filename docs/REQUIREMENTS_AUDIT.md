@@ -45,7 +45,7 @@ nepřeváží aktuální formu.
 
 Research plán navíc obsahuje volitelné domény `REFEREE`, `RIVALRY`,
 `STYLE_MATCHUP`, `MOTIVATION_HOME/AWAY` a `TRAVEL_FATIGUE_HOME/AWAY` vedle
-lineupů a počasí. Evidence se extrahuje do claims, ukládá do týmových nebo
+lineupů. Evidence se extrahuje do claims, ukládá do týmových nebo
 zápasových snapshotů a statistický engine ji při dostupnosti převádí na
-omezené korekce únavy, motivace, rivality, počasí a stylu. Pokud data nejsou
+omezené korekce únavy, motivace, rivality a stylu. Pokud data nejsou
 ověřená nebo nejsou dostupná, korekce se nepoužije.

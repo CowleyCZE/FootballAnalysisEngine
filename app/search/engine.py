@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta
 from typing import Iterable, Optional
 
@@ -41,7 +42,18 @@ class SearchEngine:
     ):
         self.client = client or SearXNGClient()
         self.source_registry = source_registry or SearchSourceRegistry()
-        self.last_diagnostics: Optional[SearchDiagnostics] = None
+        # Diagnostika posledního hledání je uložena pro každé vlákno zvlášť: dotazy jednoho
+        # research úkolu běží souběžně (`FAE_SEARCH_WORKERS`) a sdílený atribut by se přepisoval.
+        self._diag_local = threading.local()
+        self.last_diagnostics = None
+
+    @property
+    def last_diagnostics(self) -> Optional[SearchDiagnostics]:
+        return getattr(self._diag_local, "value", None)
+
+    @last_diagnostics.setter
+    def last_diagnostics(self, value: Optional[SearchDiagnostics]) -> None:
+        self._diag_local.value = value
 
     async def search(
         self,
@@ -111,6 +123,10 @@ class SearchEngine:
                 effective_identity_threshold = min(0.30, min_identity_confidence)
             if (home_team or away_team) and effective_identity_threshold > 0 and confidence < effective_identity_threshold:
                 continue
+            # Dotaz na profil jednoho týmu (`team` bez home/away): dříve se identita neoveróvala
+            # vůbec a do research pronikly ne-fotbalové weby (běh M589). Zmínka týmu je povinná.
+            if team and not (home_team or away_team) and not self._mentions_team(result, team):
+                continue
 
             result.relevance = calculate_relevance(
                 result,
@@ -150,6 +166,20 @@ class SearchEngine:
         )
         self.last_diagnostics = diag
         return validated_results
+
+    @staticmethod
+    def _mentions_team(result: SearchResult, team: str) -> bool:
+        text = " ".join(
+            str(getattr(result, attr, "") or "") for attr in ("title", "content", "url")
+        ).lower()
+        name = team.lower().strip()
+        if not name:
+            return True
+        if name in text:
+            return True
+        ignored = {"club", "real", "fc", "fk", "sc", "city", "town", "praha", "prague"}
+        parts = [p for p in name.replace("-", " ").split() if len(p) > 3 and p not in ignored]
+        return bool(parts) and any(p in text for p in parts)
 
     @staticmethod
     def _engine_names(items) -> list[str]:

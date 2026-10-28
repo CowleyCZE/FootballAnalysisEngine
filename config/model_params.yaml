@@ -1,0 +1,12 @@
+generated_at: '2026-10-24T21:00:52+00:00'
+competition: Chance Liga
+n_train: 369
+n_holdout: 159
+holdout_brier_default: 0.60924
+holdout_brier_tuned: 0.60603
+params:
+  DC_RHO: 0.0
+  PRIOR_WEIGHT: 1.0
+  FORM_DECAY: 0.08
+  HOME_ADV_SPLIT: 1.06
+  HOME_ADV_NO_SPLIT: 1.04

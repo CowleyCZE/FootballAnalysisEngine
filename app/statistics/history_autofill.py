@@ -272,7 +272,9 @@ class HistoryAutoFiller:
                     continue  # nedohraný/neznámý výsledek se nikdy nedomýšlí
                 try:
                     hg, ag = int(hs), int(as_)
-                    time_text = str(ev.get("strTime") or "00:00:00")[:8]
+                    raw_time = str(ev.get("strTime") or "")[:8]
+                    kickoff_known = bool(raw_time and raw_time not in {"00:00", "00:00:00"})
+                    time_text = raw_time if kickoff_known else "12:00:00"
                     scheduled = datetime.fromisoformat(f"{date_text}T{time_text}").replace(tzinfo=timezone.utc)
                 except ValueError:
                     continue
@@ -293,9 +295,9 @@ class HistoryAutoFiller:
                 comp_id = int(comp[0]) if comp else int(conn.execute(
                     "INSERT INTO competitions(name, country) VALUES (?, NULL)", (league,)).lastrowid)
                 match_id = int(conn.execute(
-                    "INSERT INTO matches(external_match_id, competition, competition_id, season, home_team_id, away_team_id, scheduled_at, status) "
-                    "VALUES (?,?,?,?,?,?,?,'RESOLVED')",
-                    (ext, league, comp_id, str(ev.get("strSeason") or ""), home_id, away_id, scheduled.isoformat())).lastrowid)
+                    "INSERT INTO matches(external_match_id, competition, competition_id, season, home_team_id, away_team_id, scheduled_at, kickoff_time_known, kickoff_time_source, status) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,'RESOLVED')",
+                    (ext, league, comp_id, str(ev.get("strSeason") or ""), home_id, away_id, scheduled.isoformat(), int(kickoff_known), "TheSportsDB" if kickoff_known else None)).lastrowid)
                 conn.execute(
                     "INSERT INTO match_statistics(match_id, home_goals, away_goals, home_ft_goals, away_ft_goals) VALUES (?,?,?,?,?) "
                     "ON CONFLICT(match_id) DO UPDATE SET home_goals=excluded.home_goals, away_goals=excluded.away_goals, "
@@ -339,7 +341,11 @@ class HistoryAutoFiller:
                 if not isinstance(score, list) or len(score) < 2 or not date_text:
                     continue
                 try:
-                    scheduled = datetime.fromisoformat(date_text).replace(tzinfo=timezone.utc)
+                    parsed_dt = datetime.fromisoformat(date_text)
+                    kickoff_known = bool(re.search(r"[T ]\d{2}:\d{2}", date_text)) and parsed_dt.time().strftime("%H:%M") != "00:00"
+                    if not kickoff_known:
+                        parsed_dt = parsed_dt.replace(hour=12, minute=0, second=0, microsecond=0)
+                    scheduled = parsed_dt.replace(tzinfo=timezone.utc)
                 except ValueError:
                     continue
                 if scheduled > cutoff:
@@ -356,13 +362,13 @@ class HistoryAutoFiller:
                     # Repair rows created by an older importer version that
                     # did not strip accents or club prefixes consistently.
                     conn.execute(
-                        "UPDATE matches SET competition=?, competition_id=?, season=?, home_team_id=?, away_team_id=?, scheduled_at=?, status='RESOLVED' WHERE id=?",
-                        (competition, comp_id, season, home_id, away_id, scheduled.isoformat(), match_id),
+                        "UPDATE matches SET competition=?, competition_id=?, season=?, home_team_id=?, away_team_id=?, scheduled_at=?, kickoff_time_known=CASE WHEN ? THEN 1 ELSE kickoff_time_known END, kickoff_time_source=CASE WHEN ? THEN 'openfootball' ELSE kickoff_time_source END, status='RESOLVED' WHERE id=?",
+                        (competition, comp_id, season, home_id, away_id, scheduled.isoformat(), int(kickoff_known), int(kickoff_known), match_id),
                     )
                 else:
                     match_id = int(conn.execute(
-                        "INSERT INTO matches(external_match_id, competition, competition_id, season, home_team_id, away_team_id, scheduled_at, status) VALUES (?,?,?,?,?,?,?,'RESOLVED')",
-                        (ext, competition, comp_id, season, home_id, away_id, scheduled.isoformat()),
+                        "INSERT INTO matches(external_match_id, competition, competition_id, season, home_team_id, away_team_id, scheduled_at, kickoff_time_known, kickoff_time_source, status) VALUES (?,?,?,?,?,?,?,?,?,'RESOLVED')",
+                        (ext, competition, comp_id, season, home_id, away_id, scheduled.isoformat(), int(kickoff_known), "openfootball" if kickoff_known else None),
                     ).lastrowid)
                 conn.execute("""INSERT INTO match_statistics(match_id, home_goals, away_goals, home_ft_goals, away_ft_goals)
                     VALUES (?,?,?,?,?) ON CONFLICT(match_id) DO UPDATE SET home_goals=excluded.home_goals, away_goals=excluded.away_goals,
@@ -382,8 +388,11 @@ class HistoryAutoFiller:
         if key:
             for ident, existing in conn.execute("SELECT id, name FROM teams ORDER BY id").fetchall():
                 if resolve_team_key(existing) == key:
+                    from app.database.team_identity import register_alias
+                    register_alias(conn, int(ident), name)
                     return int(ident)
-        return int(conn.execute("INSERT INTO teams(name, normalized_name, competition) VALUES (?,?,?)", (name, _norm(name), competition)).lastrowid)
+        from app.database.team_identity import get_or_create_team
+        return get_or_create_team(conn, name, competition)
 
     def _team_history_count(self, home_id: int, away_id: int, cutoff_datetime: str) -> int:
         with sqlite3.connect(self.db_path) as conn:

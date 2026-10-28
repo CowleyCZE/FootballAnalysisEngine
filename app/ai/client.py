@@ -20,6 +20,8 @@ class OllamaClient:
         self.temperature = temperature
         self.timeout = timeout
         self.max_retries = max_retries
+        # JSON schema pro strukturovaný výstup Ollamy (TODO 11.9); None = volný JSON.
+        self.json_schema: Optional[Dict[str, Any]] = None
 
     def generate(
         self,
@@ -44,7 +46,7 @@ class OllamaClient:
         if system_prompt:
             payload["system"] = system_prompt
         if require_json:
-            payload["format"] = "json"
+            payload["format"] = self.json_schema or "json"
 
         last_exception = None
         for attempt in range(1, self.max_retries + 1):

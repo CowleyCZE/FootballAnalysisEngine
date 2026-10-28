@@ -18,7 +18,6 @@ def _task(domain):
     ("MOTIVATION_AWAY", "Slavia Praha"),
     ("GENERAL", ""),
     ("HEAD_TO_HEAD", ""),
-    ("WEATHER", ""),
     ("REFEREE", ""),
     ("RIVALRY", ""),
 ])
@@ -31,7 +30,7 @@ def _evidence(domain, text="Zápas se hraje v dešti."):
                            document_id=1, source_url="https://example.org/x")
 
 
-@pytest.mark.parametrize("domain", ["GENERAL", "HEAD_TO_HEAD", "WEATHER"])
+@pytest.mark.parametrize("domain", ["GENERAL", "HEAD_TO_HEAD"])
 def test_match_level_claims_never_use_away_team_as_subject(domain):
     team = ResearchEngine.subject_team_name(_task(domain))
     claims = ClaimBuilder().build_claims_from_evidence([_evidence(domain)], team)

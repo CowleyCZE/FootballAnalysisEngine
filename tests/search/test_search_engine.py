@@ -112,9 +112,11 @@ def test_search_engine_normalizes_deduplicates_and_ranks():
         )
     )
 
-    assert len(results) == 2
+    # Výsledek bez zmínky týmu („Other football news“) se u dotazu na jeden tým vyřazuje
+    # (běh M589: bez tohoto filtru prošly i ne-fotbalové weby).
+    assert len(results) == 1
     assert results[0].title == "Sparta Praha injury update"
-    assert results[0].relevance > results[1].relevance
+    assert results[0].relevance > 0
     assert results[0].source_type == "official_club"
 
 

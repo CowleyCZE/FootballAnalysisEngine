@@ -406,7 +406,7 @@ def test_optional_domain_failure_does_not_block_pipeline(fix_db):
         # Mark required jobs as SUCCESS
         conn.execute("UPDATE jobs SET status='SUCCESS', result_json='{\"status\": \"SUCCESS\"}' WHERE run_id=? AND job_type IN ('RESEARCH', 'STATISTICS')", (run_id,))
         # Mark optional job as FAILED
-        conn.execute("INSERT INTO jobs(job_id, run_id, match_id, job_type, status, priority, payload_json) VALUES ('OPT-1', ?, 10, 'RESEARCH', 'FAILED', 30, '{\"required\": false, \"domain\": \"WEATHER\"}')", (run_id,))
+        conn.execute("INSERT INTO jobs(job_id, run_id, match_id, job_type, status, priority, payload_json) VALUES ('OPT-1', ?, 10, 'RESEARCH', 'FAILED', 30, '{\"required\": false, \"domain\": \"RIVALRY\"}')", (run_id,))
 
     orc.tick(run_id)
 

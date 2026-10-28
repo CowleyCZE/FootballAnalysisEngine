@@ -98,7 +98,7 @@ class WorkerDaemon:
             # finalization continue so users still receive the prediction.
             if res_status == "INSUFFICIENT_DATA" and job["job_type"] == "AI_ANALYSIS":
                 stored_result = {**result, "job_outcome": "COMPLETED_WITHOUT_AI"}
-            if res_status in ("SUCCESS", "COMPLETED", "RESOLVED", "AUDIT_COMPLETE", "RESEARCH_REQUIRED", "UNRESOLVED", "CONFLICTED") or (
+            if res_status in ("SUCCESS", "COMPLETED", "COMPLETE", "RESOLVED", "AUDIT_COMPLETE", "RESEARCH_REQUIRED", "UNRESOLVED", "CONFLICTED") or (
                 res_status == "INSUFFICIENT_DATA" and prior_prediction
             ) or (res_status == "INSUFFICIENT_DATA" and job["job_type"] == "AI_ANALYSIS"):
                 self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=stored_result, worker_id=self.worker_id)
@@ -118,7 +118,10 @@ class WorkerDaemon:
         except Exception as exc:
             logger.exception("Worker %s failed job %s", self.worker_id, job_id)
             is_transient = isinstance(exc, (OSError, ConnectionError, TimeoutError)) or any(p in type(exc).__name__.lower() for p in ("http", "connect", "timeout", "request"))
-            self.queue.update_job_status(job_id, JobStatus.FAILED if not is_transient else JobStatus.RETRY, error=str(exc), worker_id=self.worker_id, force_fail=not is_transient)
+            try:
+                self.queue.update_job_status(job_id, JobStatus.FAILED if not is_transient else JobStatus.RETRY, error=str(exc), worker_id=self.worker_id, force_fail=not is_transient)
+            except KeyError:
+                logger.warning("Job %s zmizel z DB (smazán zápas/běh během zpracování) – výsledek zahozen.", job_id)
         finally:
             hb_thread.stop()
 

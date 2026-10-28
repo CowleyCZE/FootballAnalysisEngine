@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 10
 
 
 def _deduplicate_statistical_snapshots(conn: sqlite3.Connection) -> None:
@@ -39,7 +39,7 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
 
 def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
     # Run before schema.sql so dependent indexes see migrated columns.
-    for column, definition in (("external_match_id", "TEXT"), ("competition_id", "INTEGER"), ("season", "TEXT"), ("status", "TEXT"), ("venue", "TEXT")):
+    for column, definition in (("external_match_id", "TEXT"), ("competition_id", "INTEGER"), ("season", "TEXT"), ("status", "TEXT"), ("venue", "TEXT"), ("kickoff_time_known", "INTEGER NOT NULL DEFAULT 0"), ("kickoff_time_source", "TEXT")):
         _ensure_column(conn, "matches", column, definition)
     for column, definition in (
         ("run_id", "TEXT"), ("match_id", "INTEGER"), ("parent_job_id", "INTEGER"), ("job_type", "TEXT"),
@@ -56,6 +56,25 @@ def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
     for column, definition in (("worker_name", "TEXT"), ("worker_version", "TEXT"), ("worker_type", "TEXT"), ("status", "TEXT"), ("capabilities_json", "TEXT"), ("last_heartbeat", "TEXT"), ("last_seen", "TEXT"), ("updated_at", "TEXT"), ("current_job_id", "TEXT"), ("metadata_json", "TEXT"), ("registered_at", "TEXT")):
         _ensure_column(conn, "workers", column, definition)
     _ensure_column(conn, "match_predictions", "factors_json", "TEXT")
+    for column in ("home_npxg", "away_npxg", "home_gs_adj_xg", "away_gs_adj_xg"):
+        _ensure_column(conn, "match_statistics", column, "REAL")
+        _ensure_column(conn, "match_xg_observations", column, "REAL")
+    if _table_exists(conn, "research_tasks"):
+        info = conn.execute("PRAGMA table_info(research_tasks)").fetchall()
+        match_col = next((r for r in info if r[1] == "match_id"), None)
+        if match_col and int(match_col[3]) == 1:
+            # Standalone team profile jobs have no match_id. Preserve existing tasks
+            # and dependent FK target while relaxing only this column constraint.
+            conn.execute("PRAGMA foreign_keys=OFF")
+            old_sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='research_tasks'").fetchone()[0]
+            new_sql = old_sql.replace("CREATE TABLE IF NOT EXISTS research_tasks", "CREATE TABLE research_tasks_new", 1).replace("CREATE TABLE research_tasks", "CREATE TABLE research_tasks_new", 1).replace("match_id INTEGER NOT NULL", "match_id INTEGER", 1)
+            conn.execute(new_sql)
+            old_cols = [r[1] for r in info]
+            names = ",".join('"' + name + '"' for name in old_cols)
+            conn.execute(f"INSERT INTO research_tasks_new ({names}) SELECT {names} FROM research_tasks")
+            conn.execute("DROP TABLE research_tasks")
+            conn.execute("ALTER TABLE research_tasks_new RENAME TO research_tasks")
+            conn.execute("PRAGMA foreign_keys=ON")
     if _table_exists(conn, "system_info"):
         conn.execute("INSERT INTO system_info(key, value) VALUES('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(SCHEMA_VERSION),))
 
@@ -88,6 +107,10 @@ def _initialize_database(db_path: str) -> None:
         conn.executescript(schema_sql)
         _migrate_legacy_schema(conn)
         conn.executescript(research_schema_path.read_text(encoding="utf-8"))
+        from app.database.team_identity import consolidate_legacy_team_ids
+        consolidate_legacy_team_ids(conn)
+        from app.database.team_identity import consolidate_duplicate_matches
+        consolidate_duplicate_matches(conn)
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS system_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL, run_id TEXT,

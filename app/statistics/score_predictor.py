@@ -14,15 +14,57 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 
 class ExactScorePredictor:
-    MODEL_VERSION = "poisson-dc-context-v5"
+    MODEL_VERSION = "poisson-dc-context-v7"
     MAX_GOALS = 7
     DC_RHO = -0.08  # Dixon-Coles dependence for 0-0 / 1-0 / 0-1 / 1-1
     PRIOR_WEIGHT = 1.5
     DEFAULT_LEAGUE_MEAN = 1.30
+    XG_WEIGHT = 0.35  # podíl xG ve spojení s góly, pokud jsou dostupné oba údaje
     MIN_LEAGUE_MATCHES = 5  # minimální počet zápasů soutěže pro použití ligového průměru
     RATING_ITERATIONS = 3  # kroky iterativní normalizace síly soupeřů
     RATING_SHRINK = 5.0  # pseudo-zápasy shrinkage k 1,0
     RATING_BOUNDS = (0.6, 1.6)
+    FORM_DECAY = 0.14  # exponenciální úbytek váhy starších zápasů (váha = exp(-FORM_DECAY * pořadí))
+    HOME_ADV_SPLIT = 1.03  # domácí výhoda, když už je zahrnutá v domácích/venkovních rozděleních
+    HOME_ADV_NO_SPLIT = 1.08  # domácí výhoda bez rozdělení domácí/venku
+
+    # Laditelné parametry (backtest, TODO 11.10 bod 2): rozsahy chrání model před absurdními hodnotami.
+    TUNABLE_BOUNDS = {
+        "DC_RHO": (-0.25, 0.05),
+        "PRIOR_WEIGHT": (0.5, 4.0),
+        "FORM_DECAY": (0.02, 0.40),
+        "XG_WEIGHT": (0.0, 0.70),
+        "HOME_ADV_SPLIT": (0.95, 1.15),
+        "HOME_ADV_NO_SPLIT": (1.00, 1.20),
+    }
+    _DEFAULT_PARAMS = {
+        "DC_RHO": -0.08, "PRIOR_WEIGHT": 1.5, "FORM_DECAY": 0.14, "XG_WEIGHT": 0.35,
+        "HOME_ADV_SPLIT": 1.03, "HOME_ADV_NO_SPLIT": 1.08,
+    }
+    _TUNED: Dict[str, float] = {}
+
+    @classmethod
+    def apply_params(cls, params: Mapping[str, Any]) -> Dict[str, float]:
+        """Nastaví laditelné parametry (jen známé klíče, hodnoty mimo rozsah se ignorují). Vrací použité."""
+        applied: Dict[str, float] = {}
+        for key, value in (params or {}).items():
+            bounds = cls.TUNABLE_BOUNDS.get(key)
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if bounds is None or not math.isfinite(number) or not (bounds[0] <= number <= bounds[1]):
+                continue
+            setattr(cls, key, number)
+            applied[key] = number
+        cls._TUNED = {k: getattr(cls, k) for k in cls._DEFAULT_PARAMS if getattr(cls, k) != cls._DEFAULT_PARAMS[k]}
+        return applied
+
+    @classmethod
+    def reset_params(cls) -> None:
+        for key, value in cls._DEFAULT_PARAMS.items():
+            setattr(cls, key, value)
+        cls._TUNED = {}
 
     @classmethod
     def opponent_ratings(cls, league_rows: Optional[List[Mapping[str, Any]]],
@@ -61,11 +103,11 @@ class ExactScorePredictor:
         values = [float(v) for v in values if v is not None and math.isfinite(float(v))]
         if not values:
             return None
-        weights = [math.exp(-0.14 * i) for i in range(len(values))]
+        weights = [math.exp(-ExactScorePredictor.FORM_DECAY * i) for i in range(len(values))]
         return (sum(v * w for v, w in zip(values, weights)) + prior_mean * prior_weight) / (sum(weights) + prior_weight)
 
-    @staticmethod
-    def _team_value(row: Mapping[str, Any], team_id: int,
+    @classmethod
+    def _team_value(cls, row: Mapping[str, Any], team_id: int,
                     ratings: Optional[Mapping[int, Tuple[float, float]]] = None) -> Tuple[float, float]:
         is_home = int(row["home_team_id"]) == int(team_id)
         goals = row.get("home_goals" if is_home else "away_goals")
@@ -73,8 +115,10 @@ class ExactScorePredictor:
         xg = row.get("home_xg" if is_home else "away_xg")
         xga = row.get("home_xga" if is_home else "away_xga")
         # Blend observed goals with xG, but use the available series when one is absent.
-        attack = 0.65 * float(goals) + 0.35 * float(xg) if goals is not None and xg is not None else (float(xg) if xg is not None else float(goals))
-        defence = 0.65 * float(against) + 0.35 * float(xga) if against is not None and xga is not None else (float(xga) if xga is not None else float(against))
+        xg_weight = cls.XG_WEIGHT
+        goal_weight = 1.0 - xg_weight
+        attack = goal_weight * float(goals) + xg_weight * float(xg) if goals is not None and xg is not None else (float(xg) if xg is not None else float(goals))
+        defence = goal_weight * float(against) + xg_weight * float(xga) if against is not None and xga is not None else (float(xga) if xga is not None else float(against))
         if ratings:
             opp = int(row["away_team_id"] if is_home else row["home_team_id"])
             opp_atk, opp_def = ratings.get(opp, (1.0, 1.0))
@@ -134,6 +178,9 @@ class ExactScorePredictor:
         match_context: Optional[Mapping[str, Any]] = None,
         league_stats: Optional[Mapping[str, Any]] = None,
         league_rows: Optional[List[Mapping[str, Any]]] = None,
+        home_xg_rates: Optional[Mapping[str, Any]] = None,
+        away_xg_rates: Optional[Mapping[str, Any]] = None,
+        team_features: Optional[Mapping[str, Mapping[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         # Ligový průměr gólů: přednost má průměr ze všech zápasů soutěže (≤ cutoff), jinak
         # stávající výpočet z předaných řádků (nebo výchozí hodnota). Zdroj je ve factors.
@@ -167,6 +214,70 @@ class ExactScorePredictor:
             away_attack, away_defence, away_n, away_split = league_mean * 0.88, league_mean * 1.00, 0, False
         else:
             away_attack, away_defence, away_n, away_split = away_rates
+        xg_used: Dict[str, Any] = {}
+        home_values = [home_attack, home_defence]
+        away_values = [away_attack, away_defence]
+        history_xg_counts = {
+            "home": sum(1 for r in rows
+                        if int(r.get("home_team_id", -1)) == int(home_team_id)
+                        or int(r.get("away_team_id", -1)) == int(home_team_id)
+                        if (r.get("home_xg") if int(r.get("home_team_id", -1)) == int(home_team_id) else r.get("away_xg")) is not None),
+            "away": sum(1 for r in rows
+                        if int(r.get("home_team_id", -1)) == int(away_team_id)
+                        or int(r.get("away_team_id", -1)) == int(away_team_id)
+                        if (r.get("home_xg") if int(r.get("home_team_id", -1)) == int(away_team_id) else r.get("away_xg")) is not None),
+        }
+        for side, supplied, values in (
+            ("home", home_xg_rates, home_values),
+            ("away", away_xg_rates, away_values),
+        ):
+            # Completed match rows already contain xG; don't count the same sample twice.
+            if not supplied or history_xg_counts[side] >= 3:
+                continue
+            try:
+                attack_xg = float(supplied["attack"])
+                defence_xg = float(supplied["defence"])
+                n_xg = max(0, int(supplied.get("sample_size") or 0))
+                if not all(math.isfinite(v) and 0 <= v <= 8 for v in (attack_xg, defence_xg)):
+                    continue
+            except (KeyError, TypeError, ValueError):
+                continue
+            # Shrink xG-only/current-season evidence toward the established rates.
+            weight = min(0.60, n_xg / (n_xg + 5.0)) if n_xg else 0.25
+            values[0] = (1 - weight) * values[0] + weight * attack_xg
+            values[1] = (1 - weight) * values[1] + weight * defence_xg
+            xg_used[side] = {"source": supplied.get("source", "unknown"),
+                             "sample_size": n_xg, "weight": round(weight, 3),
+                             "venue_split_used": bool(supplied.get("venue_split_used"))}
+        home_attack, home_defence = home_values
+        away_attack, away_defence = away_values
+        feature_adjustments: Dict[str, Any] = {}
+        for side, values, feature in (
+            ("home", home_values, (team_features or {}).get("home", {})),
+            ("away", away_values, (team_features or {}).get("away", {})),
+        ):
+            if int(feature.get("npxg_sample_size") or 0) >= 3:
+                attack = feature.get("npxg_for_ewma")
+                defence = feature.get("npxg_against_ewma")
+                if attack is not None and defence is not None:
+                    values[0] = 0.75 * values[0] + 0.25 * float(attack)
+                    values[1] = 0.75 * values[1] + 0.25 * float(defence)
+                    feature_adjustments.setdefault(side, {})["npxg_ewma_weight"] = 0.25
+            if int(feature.get("game_state_adj_sample_size") or 0) >= 3:
+                attack = feature.get("game_state_adj_xg_for_ewma")
+                defence = feature.get("game_state_adj_xg_against_ewma")
+                if attack is not None and defence is not None:
+                    values[0] = 0.80 * values[0] + 0.20 * float(attack)
+                    values[1] = 0.80 * values[1] + 0.20 * float(defence)
+                    feature_adjustments.setdefault(side, {})["game_state_adjusted_xg_weight"] = 0.20
+            elo = feature.get("xg_elo")
+            if elo is not None and int(feature.get("xg_elo_sample_size") or 0) >= 3:
+                multiplier = max(0.90, min(1.10, 10.0 ** ((float(elo) - 1500.0) / 1200.0)))
+                values[0] *= multiplier
+                values[1] /= multiplier
+                feature_adjustments.setdefault(side, {})["xg_elo_multiplier"] = round(multiplier, 4)
+        home_attack, home_defence = home_values
+        away_attack, away_defence = away_values
         factors: Dict[str, Any] = {
             "home_history_matches": home_n,
             "away_history_matches": away_n,
@@ -177,7 +288,20 @@ class ExactScorePredictor:
             "opponent_adjusted": bool(ratings),
             "h2h_matches": 0,
             "prior_only": prior_only,
+            "historical_xg_matches": history_xg_counts,
         }
+        if xg_used:
+            factors["imported_xg"] = xg_used
+        if team_features:
+            factors["team_features"] = {
+                side: {key: (round(float(value), 4) if isinstance(value, (int, float)) and value is not None else value)
+                       for key, value in feature.items()}
+                for side, feature in team_features.items()
+            }
+            if feature_adjustments:
+                factors["team_feature_adjustments"] = feature_adjustments
+        if cls._TUNED:
+            factors["tuned_params"] = dict(cls._TUNED)
 
         # H2H is intentionally capped and low-weighted: old meetings must not dominate form.
         h2h = cls._chronological(h2h_rows or [])
@@ -226,16 +350,15 @@ class ExactScorePredictor:
         home_attack *= 1.0 + 0.06 * (home_motivation - 0.5)
         away_attack *= 1.0 + 0.06 * (away_motivation - 0.5)
         rivalry = cls._bounded(match_context.get("rivalry"), 0.0, 1.0, 0.0)
-        weather = cls._bounded(match_context.get("weather_severity"), 0.0, 1.0, 0.0)
         style = cls._bounded(match_context.get("style_goal_factor"), 0.85, 1.15, 1.0)
-        context_goal_factor = (1.0 - 0.08 * rivalry - 0.06 * weather) * style
+        context_goal_factor = (1.0 - 0.08 * rivalry) * style
         # Home advantage is already embedded when both venue splits are used.
-        home_adv = 1.03 if (home_split and away_split) else 1.08
+        home_adv = cls.HOME_ADV_SPLIT if (home_split and away_split) else cls.HOME_ADV_NO_SPLIT
         lam_home = 0.5 * (home_attack + away_defence) * home_adv * context_goal_factor
         lam_away = 0.5 * (away_attack + home_defence) * context_goal_factor
         lam_home = max(0.05, min(5.0, lam_home))
         lam_away = max(0.05, min(5.0, lam_away))
-        factors.update({"home_advantage": home_adv, "rivalry": rivalry, "weather_severity": weather, "context_goal_factor": round(context_goal_factor, 4), "home_fatigue": home_fatigue, "away_fatigue": away_fatigue, "home_motivation": home_motivation, "away_motivation": away_motivation})
+        factors.update({"home_advantage": home_adv, "rivalry": rivalry, "context_goal_factor": round(context_goal_factor, 4), "home_fatigue": home_fatigue, "away_fatigue": away_fatigue, "home_motivation": home_motivation, "away_motivation": away_motivation})
 
         probs_h = [math.exp(-lam_home) * lam_home ** g / math.factorial(g) for g in range(cls.MAX_GOALS + 1)]
         probs_a = [math.exp(-lam_away) * lam_away ** g / math.factorial(g) for g in range(cls.MAX_GOALS + 1)]
@@ -249,7 +372,8 @@ class ExactScorePredictor:
         grid = {key: value / norm for key, value in grid.items()}
         best = max(grid, key=grid.get)
         return {
-            "model_version": cls.MODEL_VERSION,
+            # Přípona "+tuned" = použity parametry z backtestu (config/model_params.yaml) → predikce je dohledatelná.
+            "model_version": cls.MODEL_VERSION + ("+tuned" if cls._TUNED else ""),
             "expected_home_goals": round(lam_home, 3), "expected_away_goals": round(lam_away, 3),
             "predicted_home_goals": best[0], "predicted_away_goals": best[1],
             "home_win_probability": round(sum(p for (h, a), p in grid.items() if h > a), 6),
@@ -259,3 +383,25 @@ class ExactScorePredictor:
             "sample_size": home_n + away_n,
             "factors": factors,
         }
+
+
+def load_tuned_params(path: Optional[str] = None) -> Dict[str, float]:
+    """Načte parametry z config/model_params.yaml (vytváří je jen `app.statistics.backtest --write-config`).
+    Soubor není – žádná změna; neplatné/mimo rozsah hodnoty se ignorují."""
+    import os
+    if os.getenv("FAE_TUNED_PARAMS", "1") == "0":
+        return {}
+    config_path = path or os.path.join(os.path.dirname(__file__), "..", "..", "config", "model_params.yaml")
+    if not os.path.exists(config_path):
+        return {}
+    try:
+        import yaml
+        with open(config_path, "r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+        params = data.get("params", data) if isinstance(data, dict) else {}
+        return ExactScorePredictor.apply_params(params)
+    except Exception:
+        return {}
+
+
+load_tuned_params()

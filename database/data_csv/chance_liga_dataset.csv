@@ -1,0 +1,241 @@
+﻿date,time_local,kickoff_local,kickoff_utc,competition,round,home_team,away_team,home_goals,away_goals,ht_home_goals,ht_away_goals,home_xg,away_xg,home_shots_on_target,away_shots_on_target,home_possession_pct,away_possession_pct,home_red_cards,away_red_cards,status
+2026-10-24,15:00,2026-10-24 15:00,2026-10-24 13:00 UTC,Chance Liga,12. kolo,FC Zlín,SK Sigma Olomouc,1.0,1.0,0.0,0.0,0.98,1.13,6.0,4.0,46.0,55.0,0,0,Finished
+2026-10-24,15:00,2026-10-24 15:00,2026-10-24 13:00 UTC,Chance Liga,12. kolo,FK Teplice,SK Artis Brno,0.0,0.0,0.0,0.0,2.31,1.39,7.0,4.0,51.0,50.0,0,0,Finished
+2026-10-24,15:00,2026-10-24 15:00,2026-10-24 13:00 UTC,Chance Liga,12. kolo,FC Zbrojovka Brno,Bohemians Praha 1905,2.0,2.0,1.0,0.0,0.9,1.66,5.0,3.0,44.0,56.0,0,0,Finished
+2026-10-24,18:00,2026-10-24 18:00,2026-10-24 16:00 UTC,Chance Liga,12. kolo,SK Slavia Praha,FK Mladá Boleslav,1.0,1.0,0.0,1.0,2.88,1.42,7.0,2.0,63.0,37.0,0,0,Finished
+2026-10-25,13:00,2026-10-25 13:00,2026-10-25 12:00 UTC,Chance Liga,12. kolo,FC Hradec Králové,FK Jablonec,,,,,,,,,,,0,0,Scheduled
+2026-10-25,15:00,2026-10-25 15:00,2026-10-25 14:00 UTC,Chance Liga,12. kolo,AC Sparta Praha,1.FC Slovácko,,,,,,,,,,,0,0,Scheduled
+2026-10-25,18:00,2026-10-25 18:00,2026-10-25 17:00 UTC,Chance Liga,12. kolo,FC Viktoria Plzeň,FK Pardubice,,,,,,,,,,,0,0,Scheduled
+2026-10-14,18:00,2026-10-14 18:00,2026-10-14 16:00 UTC,Chance Liga,6. kolo,Bohemians Praha 1905,FK Mladá Boleslav,1.0,0.0,1.0,0.0,0.63,0.86,2.0,5.0,38.0,63.0,0,0,Finished
+2026-10-17,15:00,2026-10-17 15:00,2026-10-17 13:00 UTC,Chance Liga,11. kolo,FK Mladá Boleslav,FK Teplice,1.0,0.0,1.0,0.0,0.96,1.57,3.0,2.0,53.0,47.0,0,0,Finished
+2026-10-17,15:00,2026-10-17 15:00,2026-10-17 13:00 UTC,Chance Liga,11. kolo,SK Slavia Praha,FC Hradec Králové,0.0,0.0,0.0,0.0,1.78,0.35,2.0,1.0,62.0,39.0,0,0,Finished
+2026-10-17,15:00,2026-10-17 15:00,2026-10-17 13:00 UTC,Chance Liga,11. kolo,FK Pardubice,FC Zlín,3.0,0.0,2.0,0.0,2.4,0.29,7.0,3.0,61.0,39.0,0,0,Finished
+2026-10-17,18:00,2026-10-17 18:00,2026-10-17 16:00 UTC,Chance Liga,11. kolo,SK Sigma Olomouc,FC Slovan Liberec,1.0,0.0,1.0,0.0,0.93,1.07,3.0,6.0,53.0,47.0,0,0,Finished
+2026-10-18,13:00,2026-10-18 13:00,2026-10-18 11:00 UTC,Chance Liga,11. kolo,1.FC Slovácko,FC Zbrojovka Brno,1.0,2.0,0.0,1.0,0.68,2.86,4.0,5.0,67.0,33.0,0,0,Finished
+2026-10-18,15:00,2026-10-18 15:00,2026-10-18 13:00 UTC,Chance Liga,11. kolo,FC Baník Ostrava,AC Sparta Praha,0.0,0.0,0.0,0.0,0.9,1.59,3.0,4.0,44.0,56.0,0,0,Finished
+2026-10-18,18:00,2026-10-18 18:00,2026-10-18 16:00 UTC,Chance Liga,11. kolo,FK Jablonec,FC Viktoria Plzeň,2.0,3.0,0.0,2.0,3.08,1.05,9.0,3.0,63.0,37.0,0,0,Finished
+2026-10-31,15:00,2026-10-31 15:00,2026-10-31 14:00 UTC,Chance Liga,13. kolo,FK Pardubice,FC Slovan Liberec,,,,,,,,,,,0,0,Scheduled
+2026-10-31,15:00,2026-10-31 15:00,2026-10-31 14:00 UTC,Chance Liga,13. kolo,1.FC Slovácko,FK Teplice,,,,,,,,,,,0,0,Scheduled
+2026-10-31,15:00,2026-10-31 15:00,2026-10-31 14:00 UTC,Chance Liga,13. kolo,SK Artis Brno,FC Zlín,,,,,,,,,,,0,0,Scheduled
+2026-10-31,15:00,2026-10-31 15:00,2026-10-31 14:00 UTC,Chance Liga,13. kolo,FK Jablonec,SK Slavia Praha,,,,,,,,,,,0,0,Scheduled
+2026-10-31,18:00,2026-10-31 18:00,2026-10-31 17:00 UTC,Chance Liga,13. kolo,SK Sigma Olomouc,FC Zbrojovka Brno,,,,,,,,,,,0,0,Scheduled
+2026-11-01,13:00,2026-11-01 13:00,2026-11-01 12:00 UTC,Chance Liga,13. kolo,FK Mladá Boleslav,FC Hradec Králové,,,,,,,,,,,0,0,Scheduled
+2026-11-01,15:00,2026-11-01 15:00,2026-11-01 14:00 UTC,Chance Liga,13. kolo,FC Baník Ostrava,FC Viktoria Plzeň,,,,,,,,,,,0,0,Scheduled
+2026-11-01,18:00,2026-11-01 18:00,2026-11-01 17:00 UTC,Chance Liga,13. kolo,Bohemians Praha 1905,AC Sparta Praha,,,,,,,,,,,0,0,Scheduled
+2026-11-04,18:00,2026-11-04 18:00,2026-11-04 17:00 UTC,Chance Liga,11. kolo,SK Artis Brno,Bohemians Praha 1905,,,,,,,,,,,0,0,Scheduled
+2026-11-07,15:00,2026-11-07 15:00,2026-11-07 14:00 UTC,Chance Liga,14. kolo,FC Slovan Liberec,Bohemians Praha 1905,,,,,,,,,,,0,0,Scheduled
+2026-11-07,15:00,2026-11-07 15:00,2026-11-07 14:00 UTC,Chance Liga,14. kolo,FC Zlín,1.FC Slovácko,,,,,,,,,,,0,0,Scheduled
+2026-11-07,15:00,2026-11-07 15:00,2026-11-07 14:00 UTC,Chance Liga,14. kolo,FC Hradec Králové,SK Sigma Olomouc,,,,,,,,,,,0,0,Scheduled
+2026-11-07,18:00,2026-11-07 18:00,2026-11-07 17:00 UTC,Chance Liga,14. kolo,FC Zbrojovka Brno,FC Baník Ostrava,,,,,,,,,,,0,0,Scheduled
+2026-11-08,13:00,2026-11-08 13:00,2026-11-08 12:00 UTC,Chance Liga,14. kolo,FK Teplice,FK Pardubice,,,,,,,,,,,0,0,Scheduled
+2026-11-08,15:00,2026-11-08 15:00,2026-11-08 14:00 UTC,Chance Liga,14. kolo,FK Jablonec,FK Mladá Boleslav,,,,,,,,,,,0,0,Scheduled
+2026-11-08,15:00,2026-11-08 15:00,2026-11-08 14:00 UTC,Chance Liga,14. kolo,SK Slavia Praha,SK Artis Brno,,,,,,,,,,,0,0,Scheduled
+2026-11-08,18:00,2026-11-08 18:00,2026-11-08 17:00 UTC,Chance Liga,14. kolo,FC Viktoria Plzeň,AC Sparta Praha,,,,,,,,,,,0,0,Scheduled
+2026-07-25,17:00,2026-07-25 17:00,2026-07-25 15:00 UTC,Chance Liga,1. kolo,FC Viktoria Plzeň,FC Slovan Liberec,1.0,3.0,0.0,1.0,1.07,2.5,1.0,10.0,59.0,41.0,0,0,Finished
+2026-07-25,17:00,2026-07-25 17:00,2026-07-25 15:00 UTC,Chance Liga,1. kolo,FC Zlín,FC Baník Ostrava,0.0,1.0,0.0,0.0,0.81,1.01,1.0,3.0,46.0,54.0,0,0,Finished
+2026-07-25,17:00,2026-07-25 17:00,2026-07-25 15:00 UTC,Chance Liga,1. kolo,FK Teplice,Bohemians Praha 1905,3.0,1.0,1.0,0.0,2.43,0.73,5.0,3.0,52.0,48.0,0,0,Finished
+2026-07-25,20:00,2026-07-25 20:00,2026-07-25 18:00 UTC,Chance Liga,1. kolo,FC Zbrojovka Brno,AC Sparta Praha,3.0,1.0,1.0,0.0,2.21,1.45,6.0,6.0,36.0,64.0,0,0,Finished
+2026-07-26,15:00,2026-07-26 15:00,2026-07-26 13:00 UTC,Chance Liga,1. kolo,SK Slavia Praha,1.FC Slovácko,5.0,1.0,4.0,1.0,4.15,0.57,10.0,1.0,59.0,41.0,0,0,Finished
+2026-07-26,17:30,2026-07-26 17:30,2026-07-26 15:30 UTC,Chance Liga,1. kolo,FK Jablonec,SK Sigma Olomouc,2.0,1.0,0.0,1.0,1.34,0.37,7.0,2.0,53.0,47.0,0,0,Finished
+2026-07-26,20:00,2026-07-26 20:00,2026-07-26 18:00 UTC,Chance Liga,1. kolo,FC Hradec Králové,FK Pardubice,2.0,1.0,1.0,0.0,1.11,0.31,4.0,7.0,55.0,45.0,0,0,Finished
+2026-07-27,18:00,2026-07-27 18:00,2026-07-27 16:00 UTC,Chance Liga,1. kolo,SK Artis Brno,FK Mladá Boleslav,2.0,4.0,1.0,2.0,1.57,2.17,4.0,9.0,44.0,56.0,0,0,Finished
+2026-07-31,19:00,2026-07-31 19:00,2026-07-31 17:00 UTC,Chance Liga,2. kolo,AC Sparta Praha,FC Zlín,3.0,1.0,1.0,0.0,2.27,0.95,4.0,2.0,67.0,34.0,0,0,Finished
+2026-08-01,17:00,2026-08-01 17:00,2026-08-01 15:00 UTC,Chance Liga,2. kolo,FC Slovan Liberec,FK Teplice,0.0,1.0,0.0,0.0,0.88,0.9,3.0,3.0,22.0,78.0,0,0,Finished
+2026-08-01,17:00,2026-08-01 17:00,2026-08-01 15:00 UTC,Chance Liga,2. kolo,FC Baník Ostrava,SK Slavia Praha,0.0,4.0,0.0,3.0,0.7,2.19,1.0,5.0,51.0,49.0,0,0,Finished
+2026-08-01,17:00,2026-08-01 17:00,2026-08-01 15:00 UTC,Chance Liga,2. kolo,1.FC Slovácko,SK Artis Brno,1.0,1.0,0.0,0.0,0.53,1.42,6.0,2.0,66.0,34.0,0,0,Finished
+2026-08-01,20:00,2026-08-01 20:00,2026-08-01 18:00 UTC,Chance Liga,2. kolo,FC Viktoria Plzeň,FC Zbrojovka Brno,1.0,1.0,1.0,0.0,0.8,0.65,2.0,2.0,57.0,43.0,0,0,Finished
+2026-08-02,15:00,2026-08-02 15:00,2026-08-02 13:00 UTC,Chance Liga,2. kolo,SK Sigma Olomouc,FK Mladá Boleslav,2.0,2.0,1.0,1.0,2.48,1.17,8.0,5.0,52.0,48.0,0,0,Finished
+2026-08-02,17:30,2026-08-02 17:30,2026-08-02 15:30 UTC,Chance Liga,2. kolo,Bohemians Praha 1905,FC Hradec Králové,0.0,0.0,0.0,0.0,0.68,0.83,4.0,3.0,49.0,52.0,0,0,Finished
+2026-08-02,20:00,2026-08-02 20:00,2026-08-02 18:00 UTC,Chance Liga,2. kolo,FK Pardubice,FK Jablonec,0.0,2.0,0.0,2.0,2.75,0.61,2.0,2.0,58.0,42.0,0,0,Finished
+2026-08-07,19:00,2026-08-07 19:00,2026-08-07 17:00 UTC,Chance Liga,3. kolo,FC Zbrojovka Brno,FC Slovan Liberec,0.0,1.0,0.0,0.0,0.52,2.75,4.0,6.0,47.0,53.0,0,0,Finished
+2026-08-08,17:00,2026-08-08 17:00,2026-08-08 15:00 UTC,Chance Liga,3. kolo,FC Zlín,Bohemians Praha 1905,0.0,2.0,0.0,1.0,0.82,1.94,0.0,4.0,59.0,41.0,0,0,Finished
+2026-08-08,17:00,2026-08-08 17:00,2026-08-08 15:00 UTC,Chance Liga,3. kolo,FK Teplice,FC Viktoria Plzeň,5.0,5.0,3.0,4.0,1.46,2.32,6.0,8.0,40.0,61.0,0,0,Finished
+2026-08-08,20:00,2026-08-08 20:00,2026-08-08 18:00 UTC,Chance Liga,3. kolo,FK Mladá Boleslav,AC Sparta Praha,2.0,0.0,2.0,0.0,1.47,0.8,4.0,0.0,33.0,67.0,0,0,Finished
+2026-08-09,15:00,2026-08-09 15:00,2026-08-09 13:00 UTC,Chance Liga,3. kolo,SK Slavia Praha,FK Pardubice,2.0,1.0,0.0,0.0,2.86,0.66,5.0,3.0,74.0,26.0,0,0,Finished
+2026-08-09,17:00,2026-08-09 17:00,2026-08-09 15:00 UTC,Chance Liga,3. kolo,FK Jablonec,1.FC Slovácko,1.0,0.0,0.0,0.0,0.36,0.58,2.0,2.0,60.0,40.0,0,0,Finished
+2026-08-09,17:00,2026-08-09 17:00,2026-08-09 15:00 UTC,Chance Liga,3. kolo,FC Hradec Králové,FC Baník Ostrava,2.0,1.0,1.0,0.0,2.39,0.8,4.0,4.0,58.0,42.0,0,0,Finished
+2026-08-09,20:00,2026-08-09 20:00,2026-08-09 18:00 UTC,Chance Liga,3. kolo,SK Artis Brno,SK Sigma Olomouc,1.0,2.0,0.0,1.0,1.61,1.09,1.0,7.0,27.0,73.0,0,0,Finished
+2026-08-15,17:00,2026-08-15 17:00,2026-08-15 15:00 UTC,Chance Liga,4. kolo,AC Sparta Praha,FK Teplice,4.0,1.0,3.0,1.0,2.12,0.82,13.0,5.0,65.0,35.0,0,0,Finished
+2026-08-15,17:00,2026-08-15 17:00,2026-08-15 15:00 UTC,Chance Liga,4. kolo,FK Pardubice,FK Mladá Boleslav,1.0,1.0,1.0,0.0,1.37,0.75,3.0,3.0,31.0,69.0,0,0,Finished
+2026-08-15,17:00,2026-08-15 17:00,2026-08-15 15:00 UTC,Chance Liga,4. kolo,1.FC Slovácko,SK Sigma Olomouc,1.0,2.0,0.0,1.0,1.04,2.02,6.0,4.0,46.0,55.0,0,0,Finished
+2026-08-15,20:00,2026-08-15 20:00,2026-08-15 18:00 UTC,Chance Liga,4. kolo,FC Viktoria Plzeň,FC Zlín,3.0,2.0,2.0,1.0,2.22,1.06,6.0,5.0,62.0,38.0,0,0,Finished
+2026-08-16,15:00,2026-08-16 15:00,2026-08-16 13:00 UTC,Chance Liga,4. kolo,FC Baník Ostrava,SK Artis Brno,1.0,0.0,1.0,0.0,2.23,0.91,4.0,3.0,49.0,51.0,0,0,Finished
+2026-08-16,20:00,2026-08-16 20:00,2026-08-16 18:00 UTC,Chance Liga,4. kolo,FC Slovan Liberec,SK Slavia Praha,1.0,1.0,0.0,1.0,1.48,0.67,5.0,3.0,49.0,51.0,0,0,Finished
+2026-09-02,18:00,2026-09-02 18:00,2026-09-02 16:00 UTC,Chance Liga,4. kolo,FC Zbrojovka Brno,FC Hradec Králové,1.0,0.0,0.0,0.0,1.48,0.53,3.0,4.0,39.0,61.0,0,0,Finished
+2026-09-02,20:00,2026-09-02 20:00,2026-09-02 18:00 UTC,Chance Liga,4. kolo,Bohemians Praha 1905,FK Jablonec,1.0,1.0,0.0,1.0,1.75,1.15,3.0,2.0,54.0,46.0,0,0,Finished
+2026-08-22,17:00,2026-08-22 17:00,2026-08-22 15:00 UTC,Chance Liga,5. kolo,FK Mladá Boleslav,1.FC Slovácko,2.0,1.0,1.0,0.0,1.16,2.18,4.0,5.0,46.0,55.0,0,0,Finished
+2026-08-22,17:00,2026-08-22 17:00,2026-08-22 15:00 UTC,Chance Liga,5. kolo,SK Artis Brno,AC Sparta Praha,0.0,4.0,0.0,2.0,1.21,1.78,0.0,9.0,42.0,58.0,0,0,Finished
+2026-08-22,17:00,2026-08-22 17:00,2026-08-22 15:00 UTC,Chance Liga,5. kolo,FC Zlín,FC Slovan Liberec,0.0,1.0,0.0,0.0,0.38,1.15,1.0,4.0,37.0,64.0,0,0,Finished
+2026-08-22,20:00,2026-08-22 20:00,2026-08-22 18:00 UTC,Chance Liga,5. kolo,SK Slavia Praha,Bohemians Praha 1905,2.0,2.0,1.0,1.0,2.74,0.81,7.0,2.0,61.0,39.0,0,0,Finished
+2026-08-23,17:00,2026-08-23 17:00,2026-08-23 15:00 UTC,Chance Liga,5. kolo,FK Teplice,FC Zbrojovka Brno,0.0,2.0,0.0,1.0,0.82,0.69,2.0,3.0,52.0,48.0,0,0,Finished
+2026-08-23,20:00,2026-08-23 20:00,2026-08-23 18:00 UTC,Chance Liga,5. kolo,SK Sigma Olomouc,FK Pardubice,3.0,1.0,1.0,0.0,1.48,1.15,4.0,1.0,63.0,37.0,0,0,Finished
+2026-09-09,17:00,2026-09-09 17:00,2026-09-09 15:00 UTC,Chance Liga,5. kolo,FK Jablonec,FC Baník Ostrava,3.0,0.0,1.0,0.0,2.87,0.85,7.0,2.0,58.0,42.0,0,0,Finished
+2026-09-09,19:00,2026-09-09 19:00,2026-09-09 17:00 UTC,Chance Liga,5. kolo,FC Hradec Králové,FC Viktoria Plzeň,0.0,0.0,0.0,0.0,0.92,0.21,3.0,2.0,51.0,49.0,0,0,Finished
+2026-08-29,17:00,2026-08-29 17:00,2026-08-29 15:00 UTC,Chance Liga,6. kolo,FK Pardubice,SK Artis Brno,1.0,2.0,1.0,0.0,3.01,1.01,6.0,4.0,46.0,54.0,0,0,Finished
+2026-08-29,17:00,2026-08-29 17:00,2026-08-29 15:00 UTC,Chance Liga,6. kolo,FC Zbrojovka Brno,FC Zlín,3.0,2.0,1.0,0.0,1.16,1.01,3.0,3.0,53.0,47.0,0,0,Finished
+2026-08-29,20:00,2026-08-29 20:00,2026-08-29 18:00 UTC,Chance Liga,6. kolo,FC Baník Ostrava,SK Sigma Olomouc,1.0,0.0,1.0,0.0,0.35,1.65,3.0,2.0,38.0,62.0,0,0,Finished
+2026-08-30,15:00,2026-08-30 15:00,2026-08-30 13:00 UTC,Chance Liga,6. kolo,FC Slovan Liberec,FC Hradec Králové,2.0,0.0,1.0,0.0,1.93,0.38,6.0,3.0,53.0,47.0,0,0,Finished
+2026-08-30,17:00,2026-08-30 17:00,2026-08-30 15:00 UTC,Chance Liga,6. kolo,FC Viktoria Plzeň,1.FC Slovácko,1.0,1.0,0.0,0.0,1.22,0.42,4.0,3.0,56.0,44.0,0,0,Finished
+2026-08-30,17:00,2026-08-30 17:00,2026-08-30 15:00 UTC,Chance Liga,6. kolo,FK Teplice,FK Jablonec,2.0,0.0,0.0,0.0,0.89,1.4,5.0,1.0,38.0,62.0,0,0,Finished
+2026-08-30,20:00,2026-08-30 20:00,2026-08-30 18:00 UTC,Chance Liga,6. kolo,AC Sparta Praha,SK Slavia Praha,0.0,3.0,0.0,1.0,2.62,2.03,5.0,5.0,71.0,29.0,0,0,Finished
+2026-09-05,15:00,2026-09-05 15:00,2026-09-05 13:00 UTC,Chance Liga,7. kolo,1.FC Slovácko,FK Pardubice,0.0,0.0,0.0,0.0,0.89,0.7,2.0,4.0,59.0,41.0,0,0,Finished
+2026-09-05,15:00,2026-09-05 15:00,2026-09-05 13:00 UTC,Chance Liga,7. kolo,SK Sigma Olomouc,Bohemians Praha 1905,3.0,0.0,2.0,0.0,1.93,0.87,8.0,3.0,54.0,46.0,0,0,Finished
+2026-09-05,15:00,2026-09-05 15:00,2026-09-05 13:00 UTC,Chance Liga,7. kolo,SK Slavia Praha,FC Zbrojovka Brno,4.0,0.0,1.0,0.0,4.33,0.79,6.0,0.0,47.0,53.0,0,0,Finished
+2026-09-05,18:00,2026-09-05 18:00,2026-09-05 16:00 UTC,Chance Liga,7. kolo,SK Artis Brno,FC Viktoria Plzeň,0.0,3.0,0.0,3.0,0.44,1.7,1.0,9.0,52.0,48.0,0,0,Finished
+2026-09-06,13:00,2026-09-06 13:00,2026-09-06 11:00 UTC,Chance Liga,7. kolo,FK Mladá Boleslav,FC Baník Ostrava,4.0,0.0,2.0,0.0,3.1,2.44,9.0,5.0,51.0,49.0,0,0,Finished
+2026-09-06,15:00,2026-09-06 15:00,2026-09-06 13:00 UTC,Chance Liga,7. kolo,FK Jablonec,FC Slovan Liberec,1.0,2.0,0.0,0.0,2.47,0.32,5.0,3.0,65.0,35.0,0,0,Finished
+2026-09-06,15:00,2026-09-06 15:00,2026-09-06 13:00 UTC,Chance Liga,7. kolo,FC Zlín,FK Teplice,1.0,3.0,0.0,1.0,0.96,1.35,2.0,7.0,55.0,45.0,0,0,Finished
+2026-09-06,18:00,2026-09-06 18:00,2026-09-06 16:00 UTC,Chance Liga,7. kolo,FC Hradec Králové,AC Sparta Praha,2.0,1.0,2.0,1.0,1.14,1.18,5.0,6.0,30.0,70.0,0,0,Finished
+2026-09-12,15:00,2026-09-12 15:00,2026-09-12 13:00 UTC,Chance Liga,8. kolo,FC Slovan Liberec,FK Mladá Boleslav,3.0,0.0,1.0,0.0,3.16,0.74,8.0,3.0,42.0,58.0,0,0,Finished
+2026-09-12,15:00,2026-09-12 15:00,2026-09-12 13:00 UTC,Chance Liga,8. kolo,Bohemians Praha 1905,1.FC Slovácko,2.0,0.0,1.0,0.0,3.7,0.24,8.0,0.0,54.0,46.0,0,0,Finished
+2026-09-12,15:00,2026-09-12 15:00,2026-09-12 13:00 UTC,Chance Liga,8. kolo,FC Zbrojovka Brno,SK Artis Brno,2.0,1.0,2.0,0.0,2.08,1.58,9.0,4.0,46.0,55.0,0,0,Finished
+2026-09-12,18:00,2026-09-12 18:00,2026-09-12 16:00 UTC,Chance Liga,8. kolo,AC Sparta Praha,FK Jablonec,2.0,0.0,1.0,0.0,1.67,0.9,7.0,2.0,62.0,38.0,0,0,Finished
+2026-09-13,13:00,2026-09-13 13:00,2026-09-13 11:00 UTC,Chance Liga,8. kolo,FC Baník Ostrava,FK Pardubice,1.0,2.0,0.0,1.0,1.12,2.56,4.0,7.0,62.0,38.0,0,0,Finished
+2026-09-13,15:00,2026-09-13 15:00,2026-09-13 13:00 UTC,Chance Liga,8. kolo,FC Viktoria Plzeň,SK Sigma Olomouc,2.0,3.0,1.0,2.0,2.25,0.6,3.0,4.0,56.0,44.0,0,0,Finished
+2026-09-13,15:00,2026-09-13 15:00,2026-09-13 13:00 UTC,Chance Liga,8. kolo,FC Zlín,FC Hradec Králové,1.0,2.0,1.0,1.0,1.54,0.96,4.0,5.0,31.0,69.0,0,0,Finished
+2026-09-13,18:00,2026-09-13 18:00,2026-09-13 16:00 UTC,Chance Liga,8. kolo,FK Teplice,SK Slavia Praha,0.0,2.0,0.0,1.0,1.0,1.21,2.0,7.0,46.0,54.0,0,0,Finished
+2026-09-19,15:00,2026-09-19 15:00,2026-09-19 13:00 UTC,Chance Liga,9. kolo,FK Pardubice,Bohemians Praha 1905,2.0,1.0,1.0,1.0,0.94,1.05,6.0,3.0,47.0,53.0,0,0,Finished
+2026-09-19,15:00,2026-09-19 15:00,2026-09-19 13:00 UTC,Chance Liga,9. kolo,FK Mladá Boleslav,FC Zbrojovka Brno,2.0,0.0,1.0,0.0,1.03,2.49,5.0,6.0,54.0,47.0,0,0,Finished
+2026-09-19,15:00,2026-09-19 15:00,2026-09-19 13:00 UTC,Chance Liga,9. kolo,SK Artis Brno,FC Slovan Liberec,0.0,0.0,0.0,0.0,0.66,0.46,2.0,1.0,53.0,47.0,0,0,Finished
+2026-09-19,18:00,2026-09-19 18:00,2026-09-19 16:00 UTC,Chance Liga,9. kolo,1.FC Slovácko,FC Baník Ostrava,2.0,2.0,0.0,1.0,1.91,2.68,5.0,7.0,54.0,46.0,0,0,Finished
+2026-09-20,13:00,2026-09-20 13:00,2026-09-20 11:00 UTC,Chance Liga,9. kolo,FC Hradec Králové,FK Teplice,0.0,2.0,0.0,1.0,1.53,0.93,7.0,2.0,65.0,35.0,0,0,Finished
+2026-09-20,15:00,2026-09-20 15:00,2026-09-20 13:00 UTC,Chance Liga,9. kolo,SK Sigma Olomouc,AC Sparta Praha,0.0,3.0,0.0,1.0,0.86,1.88,4.0,5.0,47.0,53.0,0,0,Finished
+2026-09-20,15:00,2026-09-20 15:00,2026-09-20 13:00 UTC,Chance Liga,9. kolo,FK Jablonec,FC Zlín,1.0,1.0,0.0,1.0,1.16,0.39,8.0,4.0,78.0,22.0,0,0,Finished
+2026-09-20,18:00,2026-09-20 18:00,2026-09-20 16:00 UTC,Chance Liga,9. kolo,SK Slavia Praha,FC Viktoria Plzeň,2.0,1.0,0.0,0.0,1.88,0.82,5.0,4.0,64.0,36.0,0,0,Finished
+2026-10-09,18:00,2026-10-09 18:00,2026-10-09 16:00 UTC,Chance Liga,10. kolo,FC Zlín,SK Slavia Praha,0.0,1.0,0.0,1.0,0.18,2.11,1.0,3.0,31.0,69.0,0,0,Finished
+2026-10-10,15:00,2026-10-10 15:00,2026-10-10 13:00 UTC,Chance Liga,10. kolo,FC Viktoria Plzeň,FK Mladá Boleslav,3.0,0.0,2.0,0.0,2.75,1.57,7.0,4.0,38.0,62.0,0,0,Finished
+2026-10-10,15:00,2026-10-10 15:00,2026-10-10 13:00 UTC,Chance Liga,10. kolo,FC Zbrojovka Brno,FK Jablonec,0.0,1.0,0.0,0.0,0.56,1.26,3.0,6.0,49.0,51.0,0,0,Finished
+2026-10-10,15:00,2026-10-10 15:00,2026-10-10 13:00 UTC,Chance Liga,10. kolo,FC Hradec Králové,SK Artis Brno,2.0,4.0,1.0,1.0,1.76,1.33,4.0,9.0,50.0,50.0,0,0,Finished
+2026-10-10,18:00,2026-10-10 18:00,2026-10-10 16:00 UTC,Chance Liga,10. kolo,Bohemians Praha 1905,FC Baník Ostrava,1.0,0.0,1.0,0.0,2.51,0.73,5.0,2.0,49.0,51.0,0,0,Finished
+2026-10-11,13:00,2026-10-11 13:00,2026-10-11 11:00 UTC,Chance Liga,10. kolo,FC Slovan Liberec,1.FC Slovácko,0.0,2.0,0.0,1.0,1.69,0.88,5.0,2.0,67.0,33.0,0,0,Finished
+2026-10-11,15:00,2026-10-11 15:00,2026-10-11 13:00 UTC,Chance Liga,10. kolo,FK Teplice,SK Sigma Olomouc,1.0,1.0,0.0,1.0,2.12,1.14,7.0,6.0,48.0,52.0,0,0,Finished
+2026-10-11,18:00,2026-10-11 18:00,2026-10-11 16:00 UTC,Chance Liga,10. kolo,AC Sparta Praha,FK Pardubice,2.0,0.0,1.0,0.0,2.36,1.06,8.0,5.0,54.0,46.0,0,0,Finished
+2026-02-15,,2026-02-15,,Chance Liga,12. kolo,FC Slovan Liberec,FC Baník Ostrava,,,,,,,,,,,0,0,Scheduled
+2026-11-21,15:00,2026-11-21 15:00,2026-11-21 14:00 UTC,Chance Liga,15. kolo,SK Artis Brno,FK Jablonec,,,,,,,,,,,0,0,Scheduled
+2026-11-21,15:00,2026-11-21 15:00,2026-11-21 14:00 UTC,Chance Liga,15. kolo,SK Sigma Olomouc,SK Slavia Praha,,,,,,,,,,,0,0,Scheduled
+2026-11-21,15:00,2026-11-21 15:00,2026-11-21 14:00 UTC,Chance Liga,15. kolo,FK Mladá Boleslav,FC Zlín,,,,,,,,,,,0,0,Scheduled
+2026-11-21,15:00,2026-11-21 15:00,2026-11-21 14:00 UTC,Chance Liga,15. kolo,FC Baník Ostrava,FK Teplice,,,,,,,,,,,0,0,Scheduled
+2026-11-21,18:00,2026-11-21 18:00,2026-11-21 17:00 UTC,Chance Liga,15. kolo,Bohemians Praha 1905,FC Viktoria Plzeň,,,,,,,,,,,0,0,Scheduled
+2026-11-22,13:00,2026-11-22 13:00,2026-11-22 12:00 UTC,Chance Liga,15. kolo,FK Pardubice,FC Zbrojovka Brno,,,,,,,,,,,0,0,Scheduled
+2026-11-22,15:00,2026-11-22 15:00,2026-11-22 14:00 UTC,Chance Liga,15. kolo,1.FC Slovácko,FC Hradec Králové,,,,,,,,,,,0,0,Scheduled
+2026-11-22,18:00,2026-11-22 18:00,2026-11-22 17:00 UTC,Chance Liga,15. kolo,AC Sparta Praha,FC Slovan Liberec,,,,,,,,,,,0,0,Scheduled
+2026-11-27,18:00,2026-11-27 18:00,2026-11-27 17:00 UTC,Chance Liga,16. kolo,SK Artis Brno,1.FC Slovácko,,,,,,,,,,,0,0,Scheduled
+2026-11-28,15:00,2026-11-28 15:00,2026-11-28 14:00 UTC,Chance Liga,16. kolo,FK Teplice,FC Slovan Liberec,,,,,,,,,,,0,0,Scheduled
+2026-11-28,15:00,2026-11-28 15:00,2026-11-28 14:00 UTC,Chance Liga,16. kolo,FK Mladá Boleslav,SK Sigma Olomouc,,,,,,,,,,,0,0,Scheduled
+2026-11-28,18:00,2026-11-28 18:00,2026-11-28 17:00 UTC,Chance Liga,16. kolo,FC Hradec Králové,Bohemians Praha 1905,,,,,,,,,,,0,0,Scheduled
+2026-11-29,13:00,2026-11-29 13:00,2026-11-29 12:00 UTC,Chance Liga,16. kolo,SK Slavia Praha,FC Baník Ostrava,,,,,,,,,,,0,0,Scheduled
+2026-11-29,15:00,2026-11-29 15:00,2026-11-29 14:00 UTC,Chance Liga,16. kolo,FK Jablonec,FK Pardubice,,,,,,,,,,,0,0,Scheduled
+2026-11-29,15:00,2026-11-29 15:00,2026-11-29 14:00 UTC,Chance Liga,16. kolo,FC Zbrojovka Brno,FC Viktoria Plzeň,,,,,,,,,,,0,0,Scheduled
+2026-11-29,18:00,2026-11-29 18:00,2026-11-29 17:00 UTC,Chance Liga,16. kolo,FC Zlín,AC Sparta Praha,,,,,,,,,,,0,0,Scheduled
+2026-12-04,18:00,2026-12-04 18:00,2026-12-04 17:00 UTC,Chance Liga,17. kolo,FK Pardubice,SK Slavia Praha,,,,,,,,,,,0,0,Scheduled
+2026-12-05,15:00,2026-12-05 15:00,2026-12-05 14:00 UTC,Chance Liga,17. kolo,SK Sigma Olomouc,SK Artis Brno,,,,,,,,,,,0,0,Scheduled
+2026-12-05,15:00,2026-12-05 15:00,2026-12-05 14:00 UTC,Chance Liga,17. kolo,1.FC Slovácko,FK Jablonec,,,,,,,,,,,0,0,Scheduled
+2026-12-05,15:00,2026-12-05 15:00,2026-12-05 14:00 UTC,Chance Liga,17. kolo,FC Slovan Liberec,FC Zbrojovka Brno,,,,,,,,,,,0,0,Scheduled
+2026-12-05,18:00,2026-12-05 18:00,2026-12-05 17:00 UTC,Chance Liga,17. kolo,AC Sparta Praha,FK Mladá Boleslav,,,,,,,,,,,0,0,Scheduled
+2026-12-06,13:00,2026-12-06 13:00,2026-12-06 12:00 UTC,Chance Liga,17. kolo,Bohemians Praha 1905,FC Zlín,,,,,,,,,,,0,0,Scheduled
+2026-12-06,15:00,2026-12-06 15:00,2026-12-06 14:00 UTC,Chance Liga,17. kolo,FC Viktoria Plzeň,FK Teplice,,,,,,,,,,,0,0,Scheduled
+2026-12-06,18:00,2026-12-06 18:00,2026-12-06 17:00 UTC,Chance Liga,17. kolo,FC Baník Ostrava,FC Hradec Králové,,,,,,,,,,,0,0,Scheduled
+2026-12-12,15:00,2026-12-12 15:00,2026-12-12 14:00 UTC,Chance Liga,18. kolo,SK Artis Brno,FC Baník Ostrava,,,,,,,,,,,0,0,Scheduled
+2026-12-12,15:00,2026-12-12 15:00,2026-12-12 14:00 UTC,Chance Liga,18. kolo,FK Mladá Boleslav,FK Pardubice,,,,,,,,,,,0,0,Scheduled
+2026-12-12,18:00,2026-12-12 18:00,2026-12-12 17:00 UTC,Chance Liga,18. kolo,FC Hradec Králové,FC Zbrojovka Brno,,,,,,,,,,,0,0,Scheduled
+2026-12-13,13:00,2026-12-13 13:00,2026-12-13 12:00 UTC,Chance Liga,18. kolo,SK Sigma Olomouc,1.FC Slovácko,,,,,,,,,,,0,0,Scheduled
+2026-12-13,15:00,2026-12-13 15:00,2026-12-13 14:00 UTC,Chance Liga,18. kolo,FK Jablonec,Bohemians Praha 1905,,,,,,,,,,,0,0,Scheduled
+2026-12-13,18:00,2026-12-13 18:00,2026-12-13 17:00 UTC,Chance Liga,18. kolo,SK Slavia Praha,FC Slovan Liberec,,,,,,,,,,,0,0,Scheduled
+2026-12-14,17:00,2026-12-14 17:00,2026-12-14 16:00 UTC,Chance Liga,18. kolo,FC Zlín,FC Viktoria Plzeň,,,,,,,,,,,0,0,Scheduled
+2026-12-14,19:00,2026-12-14 19:00,2026-12-14 18:00 UTC,Chance Liga,18. kolo,FK Teplice,AC Sparta Praha,,,,,,,,,,,0,0,Scheduled
+2027-01-30,,2027-01-30,,Chance Liga,19. kolo,FK Pardubice,SK Sigma Olomouc,,,,,,,,,,,0,0,Scheduled
+2027-01-30,,2027-01-30,,Chance Liga,19. kolo,1.FC Slovácko,FK Mladá Boleslav,,,,,,,,,,,0,0,Scheduled
+2027-01-30,,2027-01-30,,Chance Liga,19. kolo,AC Sparta Praha,SK Artis Brno,,,,,,,,,,,0,0,Scheduled
+2027-01-30,,2027-01-30,,Chance Liga,19. kolo,FC Baník Ostrava,FK Jablonec,,,,,,,,,,,0,0,Scheduled
+2027-01-30,,2027-01-30,,Chance Liga,19. kolo,Bohemians Praha 1905,SK Slavia Praha,,,,,,,,,,,0,0,Scheduled
+2027-01-30,,2027-01-30,,Chance Liga,19. kolo,FC Viktoria Plzeň,FC Hradec Králové,,,,,,,,,,,0,0,Scheduled
+2027-01-30,,2027-01-30,,Chance Liga,19. kolo,FC Slovan Liberec,FC Zlín,,,,,,,,,,,0,0,Scheduled
+2027-01-30,,2027-01-30,,Chance Liga,19. kolo,FC Zbrojovka Brno,FK Teplice,,,,,,,,,,,0,0,Scheduled
+2027-02-06,,2027-02-06,,Chance Liga,20. kolo,1.FC Slovácko,FC Viktoria Plzeň,,,,,,,,,,,0,0,Scheduled
+2027-02-06,,2027-02-06,,Chance Liga,20. kolo,FK Mladá Boleslav,Bohemians Praha 1905,,,,,,,,,,,0,0,Scheduled
+2027-02-06,,2027-02-06,,Chance Liga,20. kolo,SK Sigma Olomouc,FC Baník Ostrava,,,,,,,,,,,0,0,Scheduled
+2027-02-06,,2027-02-06,,Chance Liga,20. kolo,SK Artis Brno,FK Pardubice,,,,,,,,,,,0,0,Scheduled
+2027-02-06,,2027-02-06,,Chance Liga,20. kolo,FC Hradec Králové,FC Slovan Liberec,,,,,,,,,,,0,0,Scheduled
+2027-02-06,,2027-02-06,,Chance Liga,20. kolo,FC Zlín,FC Zbrojovka Brno,,,,,,,,,,,0,0,Scheduled
+2027-02-06,,2027-02-06,,Chance Liga,20. kolo,SK Slavia Praha,AC Sparta Praha,,,,,,,,,,,0,0,Scheduled
+2027-02-06,,2027-02-06,,Chance Liga,20. kolo,FK Jablonec,FK Teplice,,,,,,,,,,,0,0,Scheduled
+2027-02-13,,2027-02-13,,Chance Liga,21. kolo,FK Pardubice,1.FC Slovácko,,,,,,,,,,,0,0,Scheduled
+2027-02-13,,2027-02-13,,Chance Liga,21. kolo,Bohemians Praha 1905,SK Sigma Olomouc,,,,,,,,,,,0,0,Scheduled
+2027-02-13,,2027-02-13,,Chance Liga,21. kolo,FC Baník Ostrava,FK Mladá Boleslav,,,,,,,,,,,0,0,Scheduled
+2027-02-13,,2027-02-13,,Chance Liga,21. kolo,FC Viktoria Plzeň,SK Artis Brno,,,,,,,,,,,0,0,Scheduled
+2027-02-13,,2027-02-13,,Chance Liga,21. kolo,FC Slovan Liberec,FK Jablonec,,,,,,,,,,,0,0,Scheduled
+2027-02-13,,2027-02-13,,Chance Liga,21. kolo,AC Sparta Praha,FC Hradec Králové,,,,,,,,,,,0,0,Scheduled
+2027-02-13,,2027-02-13,,Chance Liga,21. kolo,FK Teplice,FC Zlín,,,,,,,,,,,0,0,Scheduled
+2027-02-13,,2027-02-13,,Chance Liga,21. kolo,FC Zbrojovka Brno,SK Slavia Praha,,,,,,,,,,,0,0,Scheduled
+2027-02-20,,2027-02-20,,Chance Liga,22. kolo,SK Sigma Olomouc,FC Viktoria Plzeň,,,,,,,,,,,0,0,Scheduled
+2027-02-20,,2027-02-20,,Chance Liga,22. kolo,FK Mladá Boleslav,FC Slovan Liberec,,,,,,,,,,,0,0,Scheduled
+2027-02-20,,2027-02-20,,Chance Liga,22. kolo,1.FC Slovácko,Bohemians Praha 1905,,,,,,,,,,,0,0,Scheduled
+2027-02-20,,2027-02-20,,Chance Liga,22. kolo,FK Pardubice,FC Baník Ostrava,,,,,,,,,,,0,0,Scheduled
+2027-02-20,,2027-02-20,,Chance Liga,22. kolo,FC Hradec Králové,FC Zlín,,,,,,,,,,,0,0,Scheduled
+2027-02-20,,2027-02-20,,Chance Liga,22. kolo,SK Artis Brno,FC Zbrojovka Brno,,,,,,,,,,,0,0,Scheduled
+2027-02-20,,2027-02-20,,Chance Liga,22. kolo,FK Jablonec,AC Sparta Praha,,,,,,,,,,,0,0,Scheduled
+2027-02-20,,2027-02-20,,Chance Liga,22. kolo,SK Slavia Praha,FK Teplice,,,,,,,,,,,0,0,Scheduled
+2027-02-27,,2027-02-27,,Chance Liga,23. kolo,Bohemians Praha 1905,FK Pardubice,,,,,,,,,,,0,0,Scheduled
+2027-02-27,,2027-02-27,,Chance Liga,23. kolo,FC Baník Ostrava,1.FC Slovácko,,,,,,,,,,,0,0,Scheduled
+2027-02-27,,2027-02-27,,Chance Liga,23. kolo,AC Sparta Praha,SK Sigma Olomouc,,,,,,,,,,,0,0,Scheduled
+2027-02-27,,2027-02-27,,Chance Liga,23. kolo,FC Zbrojovka Brno,FK Mladá Boleslav,,,,,,,,,,,0,0,Scheduled
+2027-02-27,,2027-02-27,,Chance Liga,23. kolo,FC Slovan Liberec,SK Artis Brno,,,,,,,,,,,0,0,Scheduled
+2027-02-27,,2027-02-27,,Chance Liga,23. kolo,FK Teplice,FC Hradec Králové,,,,,,,,,,,0,0,Scheduled
+2027-02-27,,2027-02-27,,Chance Liga,23. kolo,FC Zlín,FK Jablonec,,,,,,,,,,,0,0,Scheduled
+2027-02-27,,2027-02-27,,Chance Liga,23. kolo,FC Viktoria Plzeň,SK Slavia Praha,,,,,,,,,,,0,0,Scheduled
+2027-03-06,,2027-03-06,,Chance Liga,24. kolo,FK Mladá Boleslav,FC Viktoria Plzeň,,,,,,,,,,,0,0,Scheduled
+2027-03-06,,2027-03-06,,Chance Liga,24. kolo,SK Sigma Olomouc,FK Teplice,,,,,,,,,,,0,0,Scheduled
+2027-03-06,,2027-03-06,,Chance Liga,24. kolo,FK Jablonec,FC Zbrojovka Brno,,,,,,,,,,,0,0,Scheduled
+2027-03-06,,2027-03-06,,Chance Liga,24. kolo,1.FC Slovácko,FC Slovan Liberec,,,,,,,,,,,0,0,Scheduled
+2027-03-06,,2027-03-06,,Chance Liga,24. kolo,FC Baník Ostrava,Bohemians Praha 1905,,,,,,,,,,,0,0,Scheduled
+2027-03-06,,2027-03-06,,Chance Liga,24. kolo,FK Pardubice,AC Sparta Praha,,,,,,,,,,,0,0,Scheduled
+2027-03-06,,2027-03-06,,Chance Liga,24. kolo,SK Artis Brno,FC Hradec Králové,,,,,,,,,,,0,0,Scheduled
+2027-03-06,,2027-03-06,,Chance Liga,24. kolo,SK Slavia Praha,FC Zlín,,,,,,,,,,,0,0,Scheduled
+2027-03-13,,2027-03-13,,Chance Liga,25. kolo,FC Zbrojovka Brno,1.FC Slovácko,,,,,,,,,,,0,0,Scheduled
+2027-03-13,,2027-03-13,,Chance Liga,25. kolo,FC Slovan Liberec,SK Sigma Olomouc,,,,,,,,,,,0,0,Scheduled
+2027-03-13,,2027-03-13,,Chance Liga,25. kolo,FK Teplice,FK Mladá Boleslav,,,,,,,,,,,0,0,Scheduled
+2027-03-13,,2027-03-13,,Chance Liga,25. kolo,FC Viktoria Plzeň,FK Jablonec,,,,,,,,,,,0,0,Scheduled
+2027-03-13,,2027-03-13,,Chance Liga,25. kolo,Bohemians Praha 1905,SK Artis Brno,,,,,,,,,,,0,0,Scheduled
+2027-03-13,,2027-03-13,,Chance Liga,25. kolo,FC Hradec Králové,SK Slavia Praha,,,,,,,,,,,0,0,Scheduled
+2027-03-13,,2027-03-13,,Chance Liga,25. kolo,FC Zlín,FK Pardubice,,,,,,,,,,,0,0,Scheduled
+2027-03-13,,2027-03-13,,Chance Liga,25. kolo,AC Sparta Praha,FC Baník Ostrava,,,,,,,,,,,0,0,Scheduled
+2027-03-20,,2027-03-20,,Chance Liga,26. kolo,FK Pardubice,FC Viktoria Plzeň,,,,,,,,,,,0,0,Scheduled
+2027-03-20,,2027-03-20,,Chance Liga,26. kolo,FK Mladá Boleslav,SK Slavia Praha,,,,,,,,,,,0,0,Scheduled
+2027-03-20,,2027-03-20,,Chance Liga,26. kolo,FK Jablonec,FC Hradec Králové,,,,,,,,,,,0,0,Scheduled
+2027-03-20,,2027-03-20,,Chance Liga,26. kolo,SK Sigma Olomouc,FC Zlín,,,,,,,,,,,0,0,Scheduled
+2027-03-20,,2027-03-20,,Chance Liga,26. kolo,SK Artis Brno,FK Teplice,,,,,,,,,,,0,0,Scheduled
+2027-03-20,,2027-03-20,,Chance Liga,26. kolo,Bohemians Praha 1905,FC Zbrojovka Brno,,,,,,,,,,,0,0,Scheduled
+2027-03-20,,2027-03-20,,Chance Liga,26. kolo,FC Baník Ostrava,FC Slovan Liberec,,,,,,,,,,,0,0,Scheduled
+2027-03-20,,2027-03-20,,Chance Liga,26. kolo,1.FC Slovácko,AC Sparta Praha,,,,,,,,,,,0,0,Scheduled
+2027-04-03,,2027-04-03,,Chance Liga,27. kolo,AC Sparta Praha,Bohemians Praha 1905,,,,,,,,,,,0,0,Scheduled
+2027-04-03,,2027-04-03,,Chance Liga,27. kolo,FC Viktoria Plzeň,FC Baník Ostrava,,,,,,,,,,,0,0,Scheduled
+2027-04-03,,2027-04-03,,Chance Liga,27. kolo,FC Slovan Liberec,FK Pardubice,,,,,,,,,,,0,0,Scheduled
+2027-04-03,,2027-04-03,,Chance Liga,27. kolo,FK Teplice,1.FC Slovácko,,,,,,,,,,,0,0,Scheduled
+2027-04-03,,2027-04-03,,Chance Liga,27. kolo,FC Zbrojovka Brno,SK Sigma Olomouc,,,,,,,,,,,0,0,Scheduled
+2027-04-03,,2027-04-03,,Chance Liga,27. kolo,FC Hradec Králové,FK Mladá Boleslav,,,,,,,,,,,0,0,Scheduled
+2027-04-03,,2027-04-03,,Chance Liga,27. kolo,FC Zlín,SK Artis Brno,,,,,,,,,,,0,0,Scheduled
+2027-04-03,,2027-04-03,,Chance Liga,27. kolo,SK Slavia Praha,FK Jablonec,,,,,,,,,,,0,0,Scheduled
+2027-04-10,,2027-04-10,,Chance Liga,28. kolo,AC Sparta Praha,FC Viktoria Plzeň,,,,,,,,,,,0,0,Scheduled
+2027-04-10,,2027-04-10,,Chance Liga,28. kolo,Bohemians Praha 1905,FC Slovan Liberec,,,,,,,,,,,0,0,Scheduled
+2027-04-10,,2027-04-10,,Chance Liga,28. kolo,FC Baník Ostrava,FC Zbrojovka Brno,,,,,,,,,,,0,0,Scheduled
+2027-04-10,,2027-04-10,,Chance Liga,28. kolo,FK Pardubice,FK Teplice,,,,,,,,,,,0,0,Scheduled
+2027-04-10,,2027-04-10,,Chance Liga,28. kolo,1.FC Slovácko,FC Zlín,,,,,,,,,,,0,0,Scheduled
+2027-04-10,,2027-04-10,,Chance Liga,28. kolo,SK Sigma Olomouc,FC Hradec Králové,,,,,,,,,,,0,0,Scheduled
+2027-04-10,,2027-04-10,,Chance Liga,28. kolo,FK Mladá Boleslav,FK Jablonec,,,,,,,,,,,0,0,Scheduled
+2027-04-10,,2027-04-10,,Chance Liga,28. kolo,SK Artis Brno,SK Slavia Praha,,,,,,,,,,,0,0,Scheduled
+2027-04-17,,2027-04-17,,Chance Liga,29. kolo,FC Viktoria Plzeň,Bohemians Praha 1905,,,,,,,,,,,0,0,Scheduled
+2027-04-17,,2027-04-17,,Chance Liga,29. kolo,FC Slovan Liberec,AC Sparta Praha,,,,,,,,,,,0,0,Scheduled
+2027-04-17,,2027-04-17,,Chance Liga,29. kolo,FK Jablonec,SK Artis Brno,,,,,,,,,,,0,0,Scheduled
+2027-04-17,,2027-04-17,,Chance Liga,29. kolo,SK Slavia Praha,SK Sigma Olomouc,,,,,,,,,,,0,0,Scheduled
+2027-04-17,,2027-04-17,,Chance Liga,29. kolo,FC Hradec Králové,1.FC Slovácko,,,,,,,,,,,0,0,Scheduled
+2027-04-17,,2027-04-17,,Chance Liga,29. kolo,FC Zlín,FK Mladá Boleslav,,,,,,,,,,,0,0,Scheduled
+2027-04-17,,2027-04-17,,Chance Liga,29. kolo,FK Teplice,FC Baník Ostrava,,,,,,,,,,,0,0,Scheduled
+2027-04-17,,2027-04-17,,Chance Liga,29. kolo,FC Zbrojovka Brno,FK Pardubice,,,,,,,,,,,0,0,Scheduled
+2027-04-24,,2027-04-24,,Chance Liga,30. kolo,FC Slovan Liberec,FC Viktoria Plzeň,,,,,,,,,,,0,0,Scheduled
+2027-04-24,,2027-04-24,,Chance Liga,30. kolo,FK Mladá Boleslav,SK Artis Brno,,,,,,,,,,,0,0,Scheduled
+2027-04-24,,2027-04-24,,Chance Liga,30. kolo,SK Sigma Olomouc,FK Jablonec,,,,,,,,,,,0,0,Scheduled
+2027-04-24,,2027-04-24,,Chance Liga,30. kolo,1.FC Slovácko,SK Slavia Praha,,,,,,,,,,,0,0,Scheduled
+2027-04-24,,2027-04-24,,Chance Liga,30. kolo,FK Pardubice,FC Hradec Králové,,,,,,,,,,,0,0,Scheduled
+2027-04-24,,2027-04-24,,Chance Liga,30. kolo,FC Baník Ostrava,FC Zlín,,,,,,,,,,,0,0,Scheduled
+2027-04-24,,2027-04-24,,Chance Liga,30. kolo,Bohemians Praha 1905,FK Teplice,,,,,,,,,,,0,0,Scheduled
+2027-04-24,,2027-04-24,,Chance Liga,30. kolo,AC Sparta Praha,FC Zbrojovka Brno,,,,,,,,,,,0,0,Scheduled

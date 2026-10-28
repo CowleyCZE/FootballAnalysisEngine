@@ -16,7 +16,6 @@ HALF_LIVES = {
 # Typ dat podle predikátu claimu (TODO 4.1) – čerstvost sestavy je jiná věc než týmový profil.
 PREDICATE_DATA_TYPE = {
     "expected_lineup": "lineup",
-    "weather_condition": "lineup",
     "availability_status": "injury",
     "absence_report": "injury",
     "fatigue_context": "injury",

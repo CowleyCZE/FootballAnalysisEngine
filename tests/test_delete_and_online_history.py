@@ -57,8 +57,8 @@ def _fake_get_json(url, timeout=20.0):
         query = url.split("t=", 1)[1]
         if query.startswith("Teplice"):
             return {"teams": [{"idTeam": "10", "strTeam": "FK Teplice", "strSport": "Soccer"}]}
-        if "Zbrojovka" in query and "FC" not in query:
-            return {"teams": [{"idTeam": "11", "strTeam": "FC Zbrojovka Brno", "strSport": "Soccer"}]}
+        if "Artis" in query:
+            return {"teams": [{"idTeam": "11", "strTeam": "Artis Brno", "strSport": "Soccer"}]}
         return {"teams": None}
     if "eventslast.php?id=10" in url:
         return {"results": [
@@ -72,7 +72,7 @@ def _fake_get_json(url, timeout=20.0):
     if "eventslast.php?id=11" in url:
         return {"results": [
             {"idEvent": str(300 + i), "dateEvent": f"2026-10-{i:02d}", "strTime": "15:00:00", "strHomeTeam": "Soupeř",
-             "strAwayTeam": "FC Zbrojovka Brno", "intHomeScore": "0", "intAwayScore": "0", "strLeague": "Czech First League", "strSeason": "2026-2027"}
+             "strAwayTeam": "Artis Brno", "intHomeScore": "0", "intAwayScore": "0", "strLeague": "Czech First League", "strSeason": "2026-2027"}
             for i in range(1, 6)
         ]}
     return {}

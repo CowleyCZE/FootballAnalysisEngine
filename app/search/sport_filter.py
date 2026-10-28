@@ -21,6 +21,7 @@ FOOTBALL_KEYWORDS = {
 _BLOCKED_URL_PARTS = (
     "eliteprospects.com", "/hc-", "/hc_", "hokej", "hockey", "/nhl", "/khl",
     "/kategorie:", "/category:", "special:", "/katalog/", "traumatolog",
+    "cycling", "cyklist", "cyklo", "velodrom", "triathlon",
 )
 
 

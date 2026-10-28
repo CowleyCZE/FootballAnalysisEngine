@@ -13,6 +13,7 @@ from app.orchestrator.match_resolver import parse_to_utc
 from app.orchestrator.research_planner import ResearchPlanner
 from app.orchestrator.coverage import CoverageEngine
 from app.orchestrator.models import AnalysisRequest, MatchIdentity, TaskRequirement
+from app.database.team_identity import get_or_create_team
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,8 @@ def get_or_create_match(
     competition: str,
     scheduled_at: datetime,
     venue: Optional[str] = None,
+    kickoff_time_known: bool = False,
+    kickoff_time_source: Optional[str] = None,
 ) -> int:
     """Technická validace a přímé vytvoření/načtení zápasu se stavem RESOLVED."""
     if not home_team or not str(home_team).strip():
@@ -54,33 +57,8 @@ def get_or_create_match(
         conn.execute("PRAGMA foreign_keys = ON")
         cursor = conn.cursor()
 
-        # Get or create home team
-        row = cursor.execute(
-            "SELECT id FROM teams WHERE lower(normalized_name) = ? OR lower(name) = ?",
-            (home_norm, home_norm),
-        ).fetchone()
-        if row:
-            home_id = int(row["id"])
-        else:
-            cursor.execute(
-                "INSERT INTO teams (name, normalized_name) VALUES (?, ?)",
-                (home_clean, home_norm),
-            )
-            home_id = int(cursor.lastrowid)
-
-        # Get or create away team
-        row = cursor.execute(
-            "SELECT id FROM teams WHERE lower(normalized_name) = ? OR lower(name) = ?",
-            (away_norm, away_norm),
-        ).fetchone()
-        if row:
-            away_id = int(row["id"])
-        else:
-            cursor.execute(
-                "INSERT INTO teams (name, normalized_name) VALUES (?, ?)",
-                (away_clean, away_norm),
-            )
-            away_id = int(cursor.lastrowid)
+        home_id = get_or_create_team(conn, home_clean, comp_clean)
+        away_id = get_or_create_team(conn, away_clean, comp_clean)
 
         # Get or create competition
         row = cursor.execute(
@@ -112,16 +90,16 @@ def get_or_create_match(
         if match_row:
             match_id = int(match_row["id"])
             cursor.execute(
-                "UPDATE matches SET status = 'RESOLVED', competition = ?, competition_id = ? WHERE id = ?",
-                (comp_clean, comp_id, match_id),
+                "UPDATE matches SET status = 'RESOLVED', competition = ?, competition_id = ?, venue=COALESCE(?,venue), kickoff_time_known=MAX(kickoff_time_known,?), kickoff_time_source=CASE WHEN ? THEN COALESCE(?,kickoff_time_source) ELSE kickoff_time_source END WHERE id = ?",
+                (comp_clean, comp_id, venue, int(kickoff_time_known), int(kickoff_time_known), kickoff_time_source, match_id),
             )
         else:
             cursor.execute(
                 """
-                INSERT INTO matches (home_team_id, away_team_id, competition_id, competition, scheduled_at, status, venue)
-                VALUES (?, ?, ?, ?, ?, 'RESOLVED', ?)
+                INSERT INTO matches (home_team_id, away_team_id, competition_id, competition, scheduled_at, status, venue, kickoff_time_known, kickoff_time_source)
+                VALUES (?, ?, ?, ?, ?, 'RESOLVED', ?, ?, ?)
             """,
-                (home_id, away_id, comp_id, comp_clean, scheduled_iso, venue),
+                (home_id, away_id, comp_id, comp_clean, scheduled_iso, venue, int(kickoff_time_known), kickoff_time_source if kickoff_time_known else None),
             )
             match_id = int(cursor.lastrowid)
 
@@ -342,6 +320,43 @@ class MasterOrchestrator:
         )
         cutoff_dt = parse_to_utc(request.data_cutoff_at, getattr(request, "timezone", "Europe/Prague")) if request.data_cutoff_at else None
         return self.start_pipeline(match_id, data_cutoff_at=cutoff_dt)
+
+    def start_team_profile_research(self, team_id: int) -> tuple[str, str]:
+        """Queue reusable standalone research for one registered team, without inventing a match."""
+        now = datetime.now(timezone.utc)
+        run_id = f"{now.strftime('%Y%m%d_%H%M%S')}_T{int(team_id)}_{uuid.uuid4().hex[:4]}"
+        task_uuid = f"TEAM-PROFILE-{team_id}-{uuid.uuid4().hex[:8]}"
+        with sqlite3.connect(self.db_path, timeout=30) as conn:
+            conn.row_factory = sqlite3.Row
+            team = conn.execute("SELECT id, name FROM teams WHERE id=?", (int(team_id),)).fetchone()
+            if not team:
+                raise ValueError(f"Tým #{team_id} v databázi neexistuje.")
+            team_name = str(team["name"])
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("INSERT INTO runs(run_id,status,started_at,pipeline_version) VALUES(?,?,?,?)",
+                         (run_id, "RUNNING", now.isoformat(), "team-profile-v1"))
+            run_db_id = int(conn.execute("SELECT id FROM runs WHERE run_id=?", (run_id,)).fetchone()[0])
+            cur = conn.execute("""
+                INSERT INTO research_tasks(run_id,run_db_id,match_id,task_uuid,domain,task_type,description,
+                    required,priority,capabilities_json,data_cutoff_at,home_team,away_team,competition,
+                    scheduled_at,venue,status)
+                VALUES(?,?,NULL,?,'TEAM_PROFILE','NEWS_COLLECTION',?,1,100,'[\"SEARCH\",\"CRAWL\"]',?,?, '', '', ?,NULL,'PLANNED')
+            """, (run_id, run_db_id, task_uuid, f"Vyhledej a ulož ověřený profil týmu {team_name}.",
+                  now.isoformat(), team_name, now.isoformat()))
+            task_id = int(cur.lastrowid)
+            payload = {"team_only": True, "team_name": team_name, "subject_team_id": int(team_id),
+                       "task_id": task_id, "task_uuid": task_uuid, "task_type": "NEWS_COLLECTION",
+                       "domain": "TEAM_PROFILE", "description": f"Vyhledej a ulož ověřený profil týmu {team_name}.",
+                       "required": True, "priority": 100, "run_id": run_id, "run_db_id": run_db_id,
+                       "data_cutoff_at": now.isoformat(), "db_path": self.db_path}
+            job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"football-analysis:{run_id}:{task_uuid}"))
+            fingerprint = self.queue.generate_fingerprint("RESEARCH", None, payload, run_id)
+            self.queue.store.create_job_on_connection(conn, job_id, "RESEARCH", None, run_id, payload,
+                                                      fingerprint, 100, 3)
+            conn.execute("UPDATE research_tasks SET job_id=?,status='QUEUED',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                         (job_id, task_id))
+            conn.commit()
+        return run_id, job_id
 
     def advance_run(self, run_id: str, max_ticks: int = 10) -> str:
         """Opakovaně volá tick(run_id), dokud se stav neposune nebo není dosažen limit max_ticks."""

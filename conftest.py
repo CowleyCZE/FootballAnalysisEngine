@@ -26,6 +26,24 @@ def _isolate_environment(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _default_model_params():
+    """Testy modelu nesmí záviset na `config/model_params.yaml` (TODO 11.22).
+
+    `load_tuned_params()` se spouští při importu; před každým testem se vrátí výchozí parametry
+    a po testu se obnoví předchozí stav (aby test, který parametry mění, nic nezanechal).
+    """
+    from app.statistics.score_predictor import ExactScorePredictor
+
+    saved = {key: getattr(ExactScorePredictor, key) for key in ExactScorePredictor._DEFAULT_PARAMS}
+    saved_tuned = dict(ExactScorePredictor._TUNED)
+    ExactScorePredictor.reset_params()
+    yield
+    for key, value in saved.items():
+        setattr(ExactScorePredictor, key, value)
+    ExactScorePredictor._TUNED = saved_tuned
+
+
 @pytest.fixture(scope="session")
 def _template_db(tmp_path_factory):
     """Jednou za běh sestaví prázdnou DB se skutečným schématem (TODO 6.2)."""

@@ -286,6 +286,29 @@ def add_match() -> None:
         conn.close()
 
 
+def add_team() -> None:
+    """Register a team and queue a standalone, reusable profile research job."""
+    print("\n=== Přidat tým ===")
+    name = input_required("Název týmu: ")
+    conn = get_connection()
+    try:
+        team_id = get_or_create_team(conn.cursor(), name)
+        conn.commit()
+    except sqlite3.Error as exc:
+        conn.rollback()
+        print(f"  ! Tým se nepodařilo uložit: {exc}")
+        return
+    finally:
+        conn.close()
+    try:
+        run_id, _job_id = MasterOrchestrator(db_path=DB_PATH).start_team_profile_research(team_id)
+        print(f"  ✔ Tým #{team_id} uložen: {name}")
+        print(f"  ✔ Vyhledávání týmového profilu zařazeno do fronty. Run ID: {run_id}")
+        print("  Profil se uloží po zpracování úlohy výzkumným workerem.")
+    except Exception as exc:
+        print(f"  ! Tým je uložen, ale vyhledávání se nepodařilo zařadit: {exc}")
+
+
 # ---------------------------------------------------------------------------
 # 2. Spustit analýzu
 # ---------------------------------------------------------------------------
@@ -534,7 +557,7 @@ def show_analysis_results() -> None:
     ).fetchall() if run_db else []
 
     if snapshots:
-        print(f"  {'Tým':<20} {'Metrika':<15} {'Hodnota':<10} {'Sample':<8} {'Coverage':<10} {'Cutoff':<20}")
+        print(f"  {'Tým':<20} {'Metrika':<15} {'Hodnota':<10} {'Sample':<8} {'xG cov.':<10} {'Cutoff':<20}")
         print("  " + "-" * 85)
         for snap in snapshots:
             tname = snap["team_name"] or "Zápas/Celkem"
@@ -750,9 +773,171 @@ def delete_entered_matches() -> None:
     print(f"  ✔ Smazáno zápasů: {deleted}")
 
 
+def show_current_work() -> None:
+    """Show queued/running jobs and active pipeline runs from the local DB."""
+    print("\n=== Na čem aplikace aktuálně pracuje ===")
+    active = ("PENDING", "CLAIMED", "RUNNING", "RETRY", "BLOCKED")
+    marks = ",".join("?" for _ in active)
+    conn = get_connection()
+    try:
+        jobs = conn.execute(f"""
+            SELECT j.job_id, j.job_type, j.status, j.priority, j.worker_id, j.created_at,
+                   j.started_at, j.run_id, j.match_id, j.payload_json,
+                   th.name AS home_team, ta.name AS away_team
+            FROM jobs j
+            LEFT JOIN matches m ON m.id=j.match_id
+            LEFT JOIN teams th ON th.id=m.home_team_id
+            LEFT JOIN teams ta ON ta.id=m.away_team_id
+            WHERE j.status IN ({marks})
+            ORDER BY CASE j.status WHEN 'RUNNING' THEN 0 WHEN 'CLAIMED' THEN 1 ELSE 2 END,
+                     j.priority DESC, j.created_at
+        """, active).fetchall()
+        pipelines = conn.execute("""
+            SELECT p.run_id,p.match_id,p.state,p.started_at,p.updated_at,p.error_text,
+                   th.name AS home_team,ta.name AS away_team
+            FROM pipeline_runs p LEFT JOIN matches m ON m.id=p.match_id
+            LEFT JOIN teams th ON th.id=m.home_team_id LEFT JOIN teams ta ON ta.id=m.away_team_id
+            WHERE p.state NOT IN ('COMPLETED','FAILED','UNRESOLVED','CANCELLED')
+            ORDER BY p.updated_at DESC
+        """).fetchall()
+    finally:
+        conn.close()
+    if not jobs and not pipelines:
+        print("  Aplikace momentálně nemá žádnou čekající ani běžící úlohu.")
+        return
+    if jobs:
+        print(f"\nÚlohy ({len(jobs)}):")
+        for i, row in enumerate(jobs, 1):
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            target = (f"{row['home_team'] or '?'} vs {row['away_team'] or '?'}" if row["match_id"]
+                      else payload.get("team_name") or payload.get("description") or "samostatný úkol")
+            print(f"  {i}. {row['job_type']} — {target} | {row['status']} | run {row['run_id'] or '-'}")
+            if row["worker_id"]:
+                print(f"     Worker: {row['worker_id']}")
+            print(f"     Vytvořeno: {row['created_at'] or '-'}; spuštěno: {row['started_at'] or '-'}")
+    if pipelines:
+        print(f"\nAktivní běhy analýz ({len(pipelines)}):")
+        for row in pipelines:
+            print(f"  {row['run_id']} | {row['home_team'] or '?'} vs {row['away_team'] or '?'} | "
+                  f"{row['state']} | aktualizováno {row['updated_at'] or '-'}")
+            if row["error_text"]:
+                print(f"     Poznámka: {row['error_text']}")
+
+
+def show_team_information() -> None:
+    """List registered teams and display their saved profile facts and match history."""
+    print("\n=== Zobrazení informací týmu ===")
+    conn = get_connection()
+    try:
+        teams = conn.execute("""
+            SELECT t.id,t.name,COUNT(s.id) AS snapshot_count,MAX(s.data_cutoff_at) AS latest_snapshot
+            FROM teams t LEFT JOIN team_profile_snapshots s ON s.team_id=t.id
+            GROUP BY t.id,t.name ORDER BY lower(t.name),t.id
+        """).fetchall()
+    finally:
+        conn.close()
+    if not teams:
+        print("  V databázi zatím není žádný tým.")
+        return
+    print("\nTýmy:")
+    for index, team in enumerate(teams, 1):
+        state = f"profilů {team['snapshot_count']}" if team["snapshot_count"] else "bez uloženého profilu"
+        print(f"  {index}. {team['name']} (ID {team['id']}; {state})")
+    raw = input("Vyberte číslo nebo ID týmu (Enter = zpět): ").strip()
+    if not raw:
+        return
+    selected = None
+    if raw.isdigit():
+        value = int(raw)
+        if 1 <= value <= len(teams):
+            selected = teams[value - 1]
+        else:
+            selected = next((team for team in teams if int(team["id"]) == value), None)
+    if selected is None:
+        print("  ! Neplatná volba týmu.")
+        return
+
+    conn = get_connection()
+    try:
+        snapshots = conn.execute("""
+            SELECT data_cutoff_at,source_run_id,profile_json FROM team_profile_snapshots
+            WHERE team_id=? ORDER BY data_cutoff_at DESC,id DESC
+        """, (int(selected["id"]),)).fetchall()
+        matches = conn.execute("""
+            SELECT m.scheduled_at,m.competition,
+                   CASE WHEN m.home_team_id=? THEN 'D' ELSE 'V' END AS side,
+                   CASE WHEN m.home_team_id=? THEN ta.name ELSE th.name END AS opponent,
+                   CASE WHEN m.home_team_id=? THEN s.home_goals ELSE s.away_goals END AS goals_for,
+                   CASE WHEN m.home_team_id=? THEN s.away_goals ELSE s.home_goals END AS goals_against,
+                   CASE WHEN m.home_team_id=? THEN s.home_xg ELSE s.away_xg END AS xg_for
+            FROM matches m JOIN match_statistics s ON s.match_id=m.id
+            LEFT JOIN teams th ON th.id=m.home_team_id LEFT JOIN teams ta ON ta.id=m.away_team_id
+            WHERE (m.home_team_id=? OR m.away_team_id=?) AND s.home_goals IS NOT NULL AND s.away_goals IS NOT NULL
+            ORDER BY m.scheduled_at DESC LIMIT 20
+        """, (selected["id"],)*5 + (selected["id"],selected["id"])).fetchall()
+    finally:
+        conn.close()
+    print(f"\n=== {selected['name']} (ID {selected['id']}) ===")
+    if not snapshots:
+        print("\n  Zatím nejsou uložené žádné ověřené informace o týmu.")
+    for snap in snapshots:
+        print(f"\nProfil k {snap['data_cutoff_at']} (run {snap['source_run_id']}):")
+        try:
+            profile = json.loads(snap["profile_json"] or "{}")
+        except (TypeError, ValueError):
+            profile = {}
+        facts = profile.get("facts", []) if isinstance(profile, dict) else []
+        if not facts:
+            print("  (Profil neobsahuje uložená tvrzení.)")
+        for fact in facts:
+            if not isinstance(fact, dict):
+                continue
+            subject = fact.get("subject") or selected["name"]
+            predicate = fact.get("predicate") or "informace"
+            value = fact.get("value") or ""
+            confidence = fact.get("confidence")
+            confidence_text = f"; důvěra {float(confidence):.2f}" if isinstance(confidence, (int,float)) else ""
+            print(f"  • {subject} — {predicate}: {value}{confidence_text}")
+            evidence = fact.get("evidence") or []
+            for item in evidence[:3]:
+                if isinstance(item, dict) and item.get("source_url"):
+                    print(f"      Zdroj: {item['source_url']} (publikováno {item.get('published_at') or 'neuvedeno'})")
+    print("\nPosledních uložených výsledků:")
+    if not matches:
+        print("  (Žádné výsledky zápasů.)")
+    for row in matches:
+        xg = f"; xG {row['xg_for']:.2f}" if row["xg_for"] is not None else ""
+        print(f"  {row['scheduled_at'] or '?'} | {row['side']} vs {row['opponent'] or '?'} "
+              f"({row['competition'] or '?'}) | {row['goals_for']}:{row['goals_against']}{xg}")
+
+
 # ---------------------------------------------------------------------------
 # Hlavní smyčka
 # ---------------------------------------------------------------------------
+
+def show_prediction_feedback() -> None:
+    from app.statistics.prediction_feedback import prediction_feedback
+
+    report = prediction_feedback(DB_PATH)
+    print("\n=== Úspěšnost předzápasových predikcí ===")
+    if not report["count"]:
+        print("  Zatím nejsou uložené tipy k již odehraným zápasům.")
+        return
+    print(f"  Vyhodnocené zápasy: {report['count']}")
+    print(f"  Přesnost 1-X-2: {report['accuracy_1x2']:.1%}")
+    print(f"  Brier skóre: {report['brier']:.4f} (nižší je lepší)")
+    print(f"  Přesné skóre: {report['exact_score_hit']:.1%}")
+    print(f"  Průměrná chyba očekávaných gólů: {report['goals_mae']:.2f}")
+    print("\n  Posledních vyhodnocených zápasů:")
+    for item in report["matches"][:20]:
+        predicted = f"{item['predicted'][0]}:{item['predicted'][1]}"
+        actual = f"{item['actual'][0]}:{item['actual'][1]}"
+        mark = "✓" if item["correct_1x2"] else "·"
+        print(f"  {mark} {item['scheduled_at'][:10]} | {item['home']} – {item['away']} | "
+              f"tip {predicted}, výsledek {actual} | {item['model_version']}")
 
 MENU = """
 ========================================
@@ -760,23 +945,31 @@ MENU = """
 ========================================
 Hlavní menu:
   1. Přidat nový zápas
-  2. Spustit analýzu pro zápas
-  3. Zobrazit zápasy s analýzou
-  4. Zobrazit výsledky analýzy
-  5. Zkontrolovat stav analýzy
-  6. Zobrazit všechny zápasy
-  7. Smazat zadané zápasy
-  8. Konec
+  2. Přidat tým
+  3. Spustit analýzu pro zápas
+  4. Zobrazit zápasy s analýzou
+  5. Zobrazit výsledky analýzy
+  6. Zkontrolovat stav analýzy
+  7. Zobrazit všechny zápasy
+  8. Smazat zadané zápasy
+  9. Na čem aplikace aktuálně pracuje
+ 10. Zobrazení informací týmu
+ 11. Úspěšnost predikcí
+ 12. Konec
 """
 
 ACTIONS = {
     "1": ("Přidat nový zápas", add_match),
-    "2": ("Spustit analýzu pro zápas", run_analysis),
-    "3": ("Zobrazit zápasy s analýzou", show_matches_with_analysis),
-    "4": ("Zobrazit výsledky analýzy", show_analysis_results),
-    "5": ("Zkontrolovat stav analýzy", check_analysis_status),
-    "6": ("Zobrazit všechny zápasy", show_all_matches),
-    "7": ("Smazat zadané zápasy", delete_entered_matches),
+    "2": ("Přidat tým", add_team),
+    "3": ("Spustit analýzu pro zápas", run_analysis),
+    "4": ("Zobrazit zápasy s analýzou", show_matches_with_analysis),
+    "5": ("Zobrazit výsledky analýzy", show_analysis_results),
+    "6": ("Zkontrolovat stav analýzy", check_analysis_status),
+    "7": ("Zobrazit všechny zápasy", show_all_matches),
+    "8": ("Smazat zadané zápasy", delete_entered_matches),
+    "9": ("Na čem aplikace aktuálně pracuje", show_current_work),
+    "10": ("Zobrazení informací týmu", show_team_information),
+    "11": ("Úspěšnost predikcí", show_prediction_feedback),
 }
 
 
@@ -784,8 +977,8 @@ def main() -> None:
     _load_local_env()
     while True:
         print(MENU)
-        choice = input("Vyberte volbu (1-8): ").strip()
-        if choice == "8":
+        choice = input("Vyberte volbu (1-12): ").strip()
+        if choice == "12":
             print("Ukončuji. Na shledanou!")
             break
         action = ACTIONS.get(choice)

@@ -1,0 +1,31 @@
+﻿date,time_local,kickoff_local,kickoff_utc,competition,round,home_team,away_team,home_goals,away_goals,status
+2026-09-10,21:00,2026-09-10 21:00,2026-09-10 19:00 UTC,UEFA Champions League,Základní fáze,Slavia Prague,Lens,2,3,Finished
+2026-10-13,18:45,2026-10-13 18:45,2026-10-13 16:45 UTC,UEFA Champions League,Základní fáze,Sabah FK,Slavia Prague,2,0,Finished
+2026-10-20,18:45,2026-10-20 18:45,2026-10-20 16:45 UTC,UEFA Champions League,Základní fáze,Fenerbahçe,Slavia Prague,2,2,Finished
+2026-11-04,21:00,2026-11-04 21:00,2026-11-04 20:00 UTC,UEFA Champions League,Základní fáze,Slavia Prague,Arsenal,0,0,Scheduled
+2026-11-25,18:45,2026-11-25 18:45,2026-11-25 17:45 UTC,UEFA Champions League,Základní fáze,Slavia Prague,Villarreal,0,0,Scheduled
+2026-12-08,21:00,2026-12-08 21:00,2026-12-08 20:00 UTC,UEFA Champions League,Základní fáze,Bayern München,Slavia Prague,0,0,Scheduled
+2027-01-19,21:00,2027-01-19 21:00,2027-01-19 20:00 UTC,UEFA Champions League,Základní fáze,FC Porto,Slavia Prague,0,0,Scheduled
+2027-01-27,21:00,2027-01-27 21:00,2027-01-27 20:00 UTC,UEFA Champions League,Základní fáze,Slavia Prague,Aston Villa,0,0,Scheduled
+2026-09-16,18:45,2026-09-16 18:45,2026-09-16 16:45 UTC,UEFA Europa League,Základní fáze,Ararat Armenia,Sparta Prague,1,4,Finished
+2026-09-17,21:00,2026-09-17 21:00,2026-09-17 19:00 UTC,UEFA Europa League,Základní fáze,Viktoria Plzeň,Union St.Gilloise,0,3,Finished
+2026-10-15,18:45,2026-10-15 18:45,2026-10-15 16:45 UTC,UEFA Europa League,Základní fáze,Sparta Prague,Lillestrøm,1,1,Finished
+2026-10-15,21:00,2026-10-15 21:00,2026-10-15 19:00 UTC,UEFA Europa League,Základní fáze,Ferencváros,Viktoria Plzeň,2,1,Finished
+2026-10-22,21:00,2026-10-22 21:00,2026-10-22 19:00 UTC,UEFA Europa League,Základní fáze,Olympiacos,Sparta Prague,1,0,Finished
+2026-10-22,21:00,2026-10-22 21:00,2026-10-22 19:00 UTC,UEFA Europa League,Základní fáze,Viktoria Plzeň,Levski Sofia,1,2,Finished
+2026-11-05,18:45,2026-11-05 18:45,2026-11-05 17:45 UTC,UEFA Europa League,Základní fáze,Lillestrøm,Viktoria Plzeň,0,0,Scheduled
+2026-11-05,18:45,2026-11-05 18:45,2026-11-05 17:45 UTC,UEFA Europa League,Základní fáze,Sparta Prague,Bournemouth,0,0,Scheduled
+2026-11-26,18:45,2026-11-26 18:45,2026-11-26 17:45 UTC,UEFA Europa League,Základní fáze,Viktoria Plzeň,Benfica,0,0,Scheduled
+2026-11-26,21:00,2026-11-26 21:00,2026-11-26 20:00 UTC,UEFA Europa League,Základní fáze,Sparta Prague,AZ Alkmaar,0,0,Scheduled
+2026-12-10,21:00,2026-12-10 21:00,2026-12-10 20:00 UTC,UEFA Europa League,Základní fáze,Bournemouth,Viktoria Plzeň,0,0,Scheduled
+2026-12-10,21:00,2026-12-10 21:00,2026-12-10 20:00 UTC,UEFA Europa League,Základní fáze,Salzburg,Sparta Prague,0,0,Scheduled
+2027-01-21,18:45,2027-01-21 18:45,2027-01-21 17:45 UTC,UEFA Europa League,Základní fáze,Real Sociedad,Viktoria Plzeň,0,0,Scheduled
+2027-01-21,21:00,2027-01-21 21:00,2027-01-21 20:00 UTC,UEFA Europa League,Základní fáze,Crystal Palace,Sparta Prague,0,0,Scheduled
+2027-01-28,21:00,2027-01-28 21:00,2027-01-28 20:00 UTC,UEFA Europa League,Základní fáze,Sparta Prague,Rennes,0,0,Scheduled
+2027-01-28,21:00,2027-01-28 21:00,2027-01-28 20:00 UTC,UEFA Europa League,Základní fáze,Viktoria Plzeň,Jagiellonia Białystok,0,0,Scheduled
+2026-10-15,21:00,2026-10-15 21:00,2026-10-15 19:00 UTC,UEFA Conference League,Základní fáze,Freiburg,Jablonec,3,2,Finished
+2026-10-22,18:45,2026-10-22 18:45,2026-10-22 16:45 UTC,UEFA Conference League,Základní fáze,Jablonec,Brighton,0,0,Finished
+2026-11-05,21:00,2026-11-05 21:00,2026-11-05 20:00 UTC,UEFA Conference League,Základní fáze,Riga FC,Jablonec,0,0,Scheduled
+2026-11-26,18:45,2026-11-26 18:45,2026-11-26 17:45 UTC,UEFA Conference League,Základní fáze,Jablonec,Lugano,0,0,Scheduled
+2026-12-10,18:45,2026-12-10 18:45,2026-12-10 17:45 UTC,UEFA Conference League,Základní fáze,Trabzonspor,Jablonec,0,0,Scheduled
+2026-12-17,21:00,2026-12-17 21:00,2026-12-17 20:00 UTC,UEFA Conference League,Základní fáze,Jablonec,Iberia 1999,0,0,Scheduled

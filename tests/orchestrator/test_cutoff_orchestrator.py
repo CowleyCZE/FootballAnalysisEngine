@@ -473,16 +473,11 @@ def test_reanalysis_ai_worker_uses_payload_cutoff(orch_db, monkeypatch):
 
         def generate(self, prompt, require_json=True):
             captured_prompt.append(prompt)
+            # Malý výstup AIOutput; faktor odkazuje na existující evidence_id (11.16/11.25).
             return json.dumps({
-                "match_id": 10,
-                "status": "complete",
-                "data_quality": {"score": 1.0, "source_count": 1, "independent_sources": 1, "official_sources": 0, "conflicts": 0, "freshness_score": 1.0, "missing_data": []},
-                "home_team_analysis": None,
-                "away_team_analysis": None,
-                "key_factors": [],
+                "conclusion": "Done",
+                "key_factors": [{"factor": "Dobrá forma Arsenalu", "importance": 0.8, "evidence_ids": [501]}],
                 "uncertainties": [],
-                "conflicts_noted": [],
-                "conclusion": "Done"
             })
 
     monkeypatch.setattr("app.workers.ai_worker.OllamaClient", CapturingOllama)
@@ -497,7 +492,9 @@ def test_reanalysis_ai_worker_uses_payload_cutoff(orch_db, monkeypatch):
         "data_cutoff_at": cutoff_iso,
         "cutoff_datetime": cutoff_iso,
         "cutoff": cutoff_iso,
-        "claims": [{"claim_id": 1, "subject": "Arsenal", "predicate": "form", "object": "good"}],
+        "claims": [{"claim_id": 1, "subject": "Arsenal", "predicate": "form", "object": "good",
+                    "evidence": [{"evidence_id": 501, "source_url": "https://example.com/arsenal",
+                                  "text_fragment": "Arsenal won four in a row."}]}],
         "match": {
             "match_id": 10,
             "home_team": "Arsenal",

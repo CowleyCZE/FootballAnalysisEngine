@@ -232,7 +232,8 @@ class ResearchRepository:
     def save_claims_and_evidence(self, run_id: Any, task_id: int, claims: List[Dict[str, Any]]) -> None:
         with self.get_connection() as conn:
             task_row = conn.execute("SELECT match_id, run_id FROM research_tasks WHERE id=?", (int(task_id),)).fetchone()
-            default_match_id = int(task_row["match_id"]) if task_row else None
+            # Standalone TEAM_PROFILE jobs intentionally have no associated match.
+            default_match_id = int(task_row["match_id"]) if task_row and task_row["match_id"] is not None else None
 
             run_row = None
             if task_row and task_row["run_id"]:

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS research_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
     run_db_id INTEGER,
-    match_id INTEGER NOT NULL,
+    match_id INTEGER,
     task_uuid TEXT NOT NULL,
     domain TEXT NOT NULL,
     task_type TEXT NOT NULL,

@@ -1,0 +1,28 @@
+﻿date,time_local,kickoff_local,kickoff_utc,competition,round,home_team,away_team,home_goals,away_goals,status
+2026-10-02,18:00,2026-10-02 18:00,2026-10-02 16:00 UTC,MOL Cup,3.kolo,FK Dukla Praha,FK Dukla Praha,0.0,1.0,Finished
+2026-08-26,17:30,2026-08-26 17:30,2026-08-26 15:30 UTC,MOL Cup,2.kolo,FK Baník Sokolov 1948,FK Baník Sokolov 1948,0.0,3.0,Finished
+2026-08-26,17:30,2026-08-26 17:30,2026-08-26 15:30 UTC,MOL Cup,2.kolo,FK Baník Most - Souš,FK Baník Most - Souš,1.0,1.0,Finished
+2026-08-26,17:00,2026-08-26 17:00,2026-08-26 15:00 UTC,MOL Cup,2.kolo,FC Sparta Brno,FC Sparta Brno,0.0,9.0,Finished
+2026-08-12,17:00,2026-08-12 17:00,2026-08-12 15:00 UTC,MOL Cup,1.kolo,TJ MILO Olomouc - FK Nové Sady,TJ MILO Olomouc - FK Nové Sady,0.0,6.0,Finished
+2026-08-12,17:00,2026-08-12 17:00,2026-08-12 15:00 UTC,MOL Cup,1.kolo,SK Spartak Příbram,SK Spartak Příbram,2.0,3.0,Finished
+2026-08-12,17:00,2026-08-12 17:00,2026-08-12 15:00 UTC,MOL Cup,1.kolo,Spartak Police nad Metují,Spartak Police nad Metují,2.0,4.0,Finished
+2026-08-12,17:00,2026-08-12 17:00,2026-08-12 15:00 UTC,MOL Cup,1.kolo,FK Baník Sokolov 1948,FK Baník Sokolov 1948,3.0,1.0,Finished
+2026-08-12,17:00,2026-08-12 17:00,2026-08-12 15:00 UTC,MOL Cup,1.kolo,FC Slavia Karlovy Vary,FC Slavia Karlovy Vary,0.0,3.0,Finished
+2026-08-12,17:00,2026-08-12 17:00,2026-08-12 15:00 UTC,MOL Cup,1.kolo,FC Sparta Brno,FC Sparta Brno,2.0,0.0,Finished
+2026-08-02,17:00,2026-08-02 17:00,2026-08-02 15:00 UTC,MOL Cup,Předkolo,FC Slavia Karlovy Vary,FC Slavia Karlovy Vary,1.0,1.0,Finished
+2026-08-01,17:00,2026-08-01 17:00,2026-08-01 15:00 UTC,MOL Cup,Předkolo,SK Slavia České Budějovice,SK Slavia České Budějovice,1.0,5.0,Finished
+2026-08-01,17:00,2026-08-01 17:00,2026-08-01 15:00 UTC,MOL Cup,Předkolo,SK Spartak Příbram,SK Spartak Příbram,2.0,2.0,Finished
+2026-08-01,17:00,2026-08-01 17:00,2026-08-01 15:00 UTC,MOL Cup,Předkolo,FC Spartak Rychnov nad Kněžnou,FC Spartak Rychnov nad Kněžnou,0.0,2.0,Finished
+2026-08-01,17:00,2026-08-01 17:00,2026-08-01 15:00 UTC,MOL Cup,Předkolo,SK Sparta Kolín,SK Sparta Kolín,0.0,3.0,Finished
+2026-08-01,10:15,2026-08-01 10:15,2026-08-01 08:15 UTC,MOL Cup,Předkolo,SK Slavia Vejprnice,SK Slavia Vejprnice,2.0,2.0,Finished
+2026-08-01,10:15,2026-08-01 10:15,2026-08-01 08:15 UTC,MOL Cup,Předkolo,FC Slavia Hradec Králové,FC Slavia Hradec Králové,1.0,2.0,Finished
+2026-08-01,10:15,2026-08-01 10:15,2026-08-01 08:15 UTC,MOL Cup,Předkolo,SK Petřín Plzeň,SK Petřín Plzeň,2.0,3.0,Finished
+2026-07-26,17:00,2026-07-26 17:00,2026-07-26 15:00 UTC,MOL Cup,Předkolo,TJ MILO Olomouc - FK Nové Sady,TJ MILO Olomouc - FK Nové Sady,2.0,1.0,Finished
+2026-07-25,17:00,2026-07-25 17:00,2026-07-25 15:00 UTC,MOL Cup,Předkolo,TJ Spartak Hluk,TJ Spartak Hluk,2.0,3.0,Finished
+2026-07-25,10:30,2026-07-25 10:30,2026-07-25 08:30 UTC,MOL Cup,Předkolo,FC Sparta Brno,FC Sparta Brno,1.0,0.0,Finished
+2026-10-27,17:00,2026-10-27 17:00,2026-10-27 16:00 UTC,MOL Cup,Osmifinále,FC Slovan Liberec,FC Slovan Liberec,,,Scheduled
+2026-10-27,19:00,2026-10-27 19:00,2026-10-27 18:00 UTC,MOL Cup,Osmifinále,SK Slavia Praha,SK Slavia Praha,,,Scheduled
+2026-10-28,14:30,2026-10-28 14:30,2026-10-28 13:30 UTC,MOL Cup,Osmifinále,FK Mladá Boleslav,FK Mladá Boleslav,,,Scheduled
+2026-10-28,16:30,2026-10-28 16:30,2026-10-28 15:30 UTC,MOL Cup,Osmifinále,1.FC Slovácko,1.FC Slovácko,,,Scheduled
+2026-10-28,18:30,2026-10-28 18:30,2026-10-28 17:30 UTC,MOL Cup,Osmifinále,AC Sparta Praha,AC Sparta Praha,,,Scheduled
+2026-11-11,18:00,2026-11-11 18:00,2026-11-11 17:00 UTC,MOL Cup,Osmifinále,SK Artis Brno,SK Artis Brno,,,Scheduled

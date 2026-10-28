@@ -18,6 +18,11 @@ def reg():
     ("https://sport.idnes.cz/clanek", "major_news"),   # subdoména
     ("https://m.sport.cz/x", "major_news"),            # subdoména
     ("https://www.sparta.cz/", "official_club"),
+    ("https://www.fkpardubice.cz/clanek", "official_club"),
+    ("https://fkdukla.cz/tym", "official_club"),
+    ("https://fczbrno.cz/", "official_club"),
+    ("https://sfc.cz/", "official_club"),
+    ("https://fkpribram.cz/", "official_club"),
     ("https://random-blog.example/x", "unknown"),
 ])
 def test_source_type(reg, url, expected):

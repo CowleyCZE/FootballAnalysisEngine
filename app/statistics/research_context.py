@@ -128,8 +128,6 @@ class ResearchContextMapper:
         context: Dict[str, Any] = {}
         if re.search(r"\b(derby|rivalry|rivalita)\b", text):
             context["rivalry"] = 0.5
-        if any(term in text for term in ("storm", "heavy rain", "snow", "strong wind", "bouře", "sníh")):
-            context["weather_severity"] = 0.5
         if any(term in text for term in ("open game", "transition", "counter attack", "high press", "útočný")):
             context["style_goal_factor"] = 1.05
         elif any(term in text for term in ("low block", "defensive", "deep defending", "obranný")):

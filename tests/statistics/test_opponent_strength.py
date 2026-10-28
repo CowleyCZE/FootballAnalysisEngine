@@ -1,4 +1,4 @@
-"""TODO 2.2 – síla soupeřů (model v5): góly se vážou na kvalitu soupeřů, shrinkage k 1,0."""
+"""TODO 2.2 – síla soupeřů (model v7): góly se vážou na kvalitu soupeřů, shrinkage k 1,0."""
 import sqlite3
 
 import pytest
@@ -23,8 +23,8 @@ def _league_rows():
     return rows
 
 
-def test_model_version_is_v5():
-    assert ExactScorePredictor.MODEL_VERSION == "poisson-dc-context-v5"
+def test_model_version_is_v7():
+    assert ExactScorePredictor.MODEL_VERSION == "poisson-dc-context-v7"
 
 
 def test_opponent_ratings_direction_and_bounds():
@@ -107,5 +107,5 @@ def test_engine_reports_opponent_adjustment(tmp_path, monkeypatch):
             "INSERT INTO matches(id, competition, competition_id, home_team_id, away_team_id, scheduled_at) "
             "VALUES (100, 'Liga', 1, 1, 2, '2026-10-15T18:00:00+00:00')")
     report = StatisticalEngine(db_path=db_file).run_match_statistics(100, 1, 1, 2, "2026-10-16T12:00:00+00:00")
-    assert report["prediction"]["model_version"] == "poisson-dc-context-v5"
+    assert report["prediction"]["model_version"] == "poisson-dc-context-v7"
     assert report["prediction"]["factors"]["opponent_adjusted"] is True

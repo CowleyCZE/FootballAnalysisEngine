@@ -109,17 +109,6 @@ class ClaimBuilder:
                     status=ClaimStatus.CANDIDATE
                 ))
 
-            elif domain == "WEATHER":
-                claims.append(Claim(
-                    subject="match_weather",
-                    predicate="weather_condition",
-                    object_value=text,
-                    normalized_value=f"weather:{text[:30]}",
-                    evidence_list=[ev],
-                    source_date=ev.published_at,
-                    status=ClaimStatus.CANDIDATE
-                ))
-
             elif domain == "REFEREE":
                 predicate, subject = "referee_profile", "match_referee"
                 claims.append(Claim(subject=subject, predicate=predicate, object_value=text,

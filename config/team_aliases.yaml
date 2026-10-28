@@ -40,7 +40,8 @@ aliases:
     - "FK Teplice"
   "Zbrojovka Brno":
     - "FC Zbrojovka Brno"
-    - "Artis Brno"
+  "Artis Brno":
+    - "SK Artis Brno"
     - "FC Artis Brno"
   "Pardubice":
     - "FK Pardubice"
@@ -58,3 +59,5 @@ aliases:
     - "SK Slavia Praha B"
   "Sparta Praha B":
     - "AC Sparta Praha B"
+  "Brighton":
+    - "Brighton and Hove Albion"

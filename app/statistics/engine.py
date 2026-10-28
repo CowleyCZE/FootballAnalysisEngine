@@ -8,10 +8,11 @@ from app.statistics.models import MatchStatistics
 from app.statistics.score_predictor import ExactScorePredictor
 from app.statistics.research_context import ResearchContextMapper
 from app.statistics.history_autofill import HistoryAutoFiller
+from app.statistics.team_features import calculate_team_features
 import json
 
 class StatisticalEngine:
-    CALCULATION_VERSION = "1.0.0"
+    CALCULATION_VERSION = "1.1.0"
 
     def __init__(self, db_path: str = "database/football.db"):
         self.repo = StatisticsRepository(db_path)
@@ -100,6 +101,8 @@ class StatisticalEngine:
         home_xg_agg = AggregateEngine.calculate_metric_aggregate(home_xg_list)
         away_xg_list = [m.get("away_xg") if m["away_team_id"] == away_team_id else m.get("home_xg") for m in away_matches]
         away_xg_agg = AggregateEngine.calculate_metric_aggregate(away_xg_list)
+        home_imported_xg = self.repo.get_team_xg_rates(home_team_id, "home", cutoff_datetime, kickoff)
+        away_imported_xg = self.repo.get_team_xg_rates(away_team_id, "away", cutoff_datetime, kickoff)
 
         home_cov = home_xg_agg.get("coverage", 0.0)
         away_cov = away_xg_agg.get("coverage", 0.0)
@@ -112,7 +115,10 @@ class StatisticalEngine:
         total_sample = home_form["sample_size"] + away_form["sample_size"]
         if total_sample == 0:
             status = "INSUFFICIENT_DATA"
-            warnings.append("Historie obou týmů chybí; použita je pouze neutrální ligová priorní predikce s velmi nízkou důvěrou.")
+            if home_imported_xg or away_imported_xg:
+                warnings.append("Výsledková historie chybí; model využil importované xG, ale predikce má kvůli chybějícím výsledkům nízkou důvěru.")
+            else:
+                warnings.append("Historie obou týmů chybí; použita je pouze neutrální ligová priorní predikce s velmi nízkou důvěrou.")
             warnings.append("Importujte historické výsledky příkazem: python scripts/import_history_csv.py --csv SOUBOR.csv --competition 'SOUTĚŽ'.")
         else:
             status = "COMPLETED"
@@ -121,6 +127,11 @@ class StatisticalEngine:
 
         historical = {int(m["match_id"]): m for m in home_matches + away_matches}
         ordered_history = sorted(historical.values(), key=lambda m: str(m.get("scheduled_at") or ""), reverse=True)
+        league_rows = self.repo.get_league_matches(match_id, cutoff_datetime)
+        xg_observations = self.repo.get_league_xg_observations(match_id, cutoff_datetime, kickoff)
+        all_feature_rows = ordered_history + xg_observations
+        home_features = calculate_team_features(home_team_id, all_feature_rows, league_rows + xg_observations)
+        away_features = calculate_team_features(away_team_id, all_feature_rows, league_rows + xg_observations)
         prediction = ExactScorePredictor.predict(
             ordered_history, home_team_id, away_team_id,
             h2h_rows=h2h_matches,
@@ -128,7 +139,10 @@ class StatisticalEngine:
             away_context=merged_away_context,
             match_context=merged_match_context,
             league_stats=self.repo.get_league_goal_stats(match_id, cutoff_datetime),
-            league_rows=self.repo.get_league_matches(match_id, cutoff_datetime),
+            league_rows=league_rows,
+            home_xg_rates=home_imported_xg,
+            away_xg_rates=away_imported_xg,
+            team_features={"home": home_features, "away": away_features},
         )
         if prediction and prediction.get("factors", {}).get("prior_only") and total_sample > 0:
             status = "INSUFFICIENT_DATA"
@@ -149,6 +163,26 @@ class StatisticalEngine:
                 data_cutoff_at=cutoff_datetime,
                 calculation_version=self.CALCULATION_VERSION
             )
+            feature_metrics = (
+                (home_team_id, home_features),
+                (away_team_id, away_features),
+            )
+            for team_id, features in feature_metrics:
+                for metric, size_key in (
+                    ("npxg_for_ewma", "npxg_sample_size"), ("npxg_against_ewma", "npxg_sample_size"),
+                    ("npxgd_ewma", "npxg_sample_size"), ("xgd_ewma", "xg_sample_size"),
+                    ("game_state_adj_xg_for_ewma", "game_state_adj_sample_size"),
+                    ("game_state_adj_xg_against_ewma", "game_state_adj_sample_size"),
+                    ("xg_elo", "xg_elo_sample_size"),
+                ):
+                    value = features.get(metric)
+                    self.repo.save_snapshot(
+                        run_id=run_id, match_id=match_id, team_id=team_id, metric=metric,
+                        value=float(value) if value is not None else None,
+                        sample_size=int(features.get(size_key) or 0),
+                        coverage=min(1.0, int(features.get(size_key) or 0) / 10.0),
+                        data_cutoff_at=cutoff_datetime, calculation_version=self.CALCULATION_VERSION,
+                    )
             self.repo.save_snapshot(
                 run_id=run_id,
                 match_id=match_id,
@@ -196,8 +230,8 @@ class StatisticalEngine:
             "status": status,
             "sample_size": total_sample,
             "coverage": min(home_cov, away_cov),
-            "home_team": {"id": home_team_id, "form": home_form, "xg_aggregate": home_xg_agg},
-            "away_team": {"id": away_team_id, "form": away_form, "xg_aggregate": away_xg_agg},
+            "home_team": {"id": home_team_id, "form": home_form, "xg_aggregate": home_xg_agg, "imported_xg_rates": home_imported_xg, "features": home_features},
+            "away_team": {"id": away_team_id, "form": away_form, "xg_aggregate": away_xg_agg, "imported_xg_rates": away_imported_xg, "features": away_features},
             "head_to_head": {"sample_size": len(h2h_matches)},
             "research_context": {
                 "home": merged_home_context,

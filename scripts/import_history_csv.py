@@ -11,6 +11,7 @@ import argparse
 import csv
 import sqlite3
 import sys
+import re
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -20,7 +21,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from app.database.schema import initialize_database
-from app.statistics.history_autofill import resolve_team_key
+from app.database.team_identity import get_or_create_team
 
 
 def value(row: dict[str, str], *names: str) -> str:
@@ -80,6 +81,7 @@ def import_csv(csv_path: Path, db_path: Path, competition: str, timezone_name: s
                 print(f"Přeskakuji řádek {line}: chybí týmy, datum nebo konečný výsledek.")
                 continue
             scheduled_at = parse_date(date, timezone_name)
+            kickoff_known = bool(re.search(r"\b\d{1,2}:\d{2}\b", date))
             home_xg = number(value(row, "home_xg", "xg_home", "hxg"))
             away_xg = number(value(row, "away_xg", "xg_away", "axg"))
             home_xga = number(value(row, "home_xga", "xga_home", "hxga"))
@@ -88,24 +90,20 @@ def import_csv(csv_path: Path, db_path: Path, competition: str, timezone_name: s
                 missing_xg += 1
 
             def team_id(name: str) -> int:
-                norm = " ".join(name.lower().split())
-                # Shoda přes kanonický klíč + aliasy (stejně jako history_autofill), ať nevznikají duplicity týmů.
-                key = resolve_team_key(name)
-                if key:
-                    for ident, existing in conn.execute("SELECT id, name FROM teams ORDER BY id").fetchall():
-                        if resolve_team_key(existing) == key:
-                            return int(ident)
-                row_team = conn.execute("SELECT id FROM teams WHERE normalized_name=?", (norm,)).fetchone()
-                if row_team:
-                    return int(row_team[0])
-                cur = conn.execute("INSERT INTO teams(name, normalized_name) VALUES (?, ?)", (name, norm))
-                return int(cur.lastrowid)
+                return get_or_create_team(conn, name, competition)
 
             home_id, away_id = team_id(home), team_id(away)
             comp = conn.execute("SELECT id FROM competitions WHERE lower(name)=lower(?)", (competition,)).fetchone()
             comp_id = int(comp[0]) if comp else int(conn.execute("INSERT INTO competitions(name) VALUES (?)", (competition,)).lastrowid)
             existing = conn.execute("SELECT id FROM matches WHERE home_team_id=? AND away_team_id=? AND scheduled_at=?", (home_id, away_id, scheduled_at)).fetchone()
-            match_id = int(existing[0]) if existing else int(conn.execute("INSERT INTO matches(home_team_id, away_team_id, competition_id, competition, scheduled_at, status) VALUES (?,?,?,?,?,'RESOLVED')", (home_id, away_id, comp_id, competition, scheduled_at)).lastrowid)
+            if existing:
+                match_id = int(existing[0])
+                if kickoff_known:
+                    conn.execute("UPDATE matches SET kickoff_time_known=1,kickoff_time_source=? WHERE id=?",(csv_path.name,match_id))
+            else:
+                match_id = int(conn.execute("""INSERT INTO matches(home_team_id,away_team_id,competition_id,competition,scheduled_at,
+                    kickoff_time_known,kickoff_time_source,status) VALUES(?,?,?,?,?,?,?,'RESOLVED')""",
+                    (home_id,away_id,comp_id,competition,scheduled_at,int(kickoff_known),csv_path.name if kickoff_known else None)).lastrowid)
             conn.execute("""INSERT INTO match_statistics(match_id, home_goals, away_goals, home_xg, away_xg, home_xga, away_xga)
                 VALUES (?,?,?,?,?,?,?) ON CONFLICT(match_id) DO UPDATE SET home_goals=excluded.home_goals, away_goals=excluded.away_goals,
                 home_xg=excluded.home_xg, away_xg=excluded.away_xg, home_xga=excluded.home_xga, away_xga=excluded.away_xga""",

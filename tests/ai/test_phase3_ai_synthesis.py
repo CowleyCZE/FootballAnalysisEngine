@@ -102,4 +102,7 @@ def test_ai_worker_executes_with_valid_claims_mock(phase3_db, monkeypatch):
     assert res["status"] == "complete"
     assert res["match_id"] == 88
     assert res["key_factors"][0]["factor"] == "Saka injury"
-    assert res["home_team_analysis"]["weaknesses"] == ["Saka absent"]
+    assert res["key_factors"][0]["evidence_ids"] == [100]
+    # TODO 11.16: týmové analýzy AI negeneruje, data_quality je z kontextu
+    assert res["home_team_analysis"] is None
+    assert res["data_quality"]["score"] != 0.9
