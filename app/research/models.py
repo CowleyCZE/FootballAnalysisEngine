@@ -72,3 +72,4 @@ class Claim:
     source_date: Optional[datetime] = None
     conflict_group_id: Optional[str] = None
     claim_id: Optional[int] = None
+    date_source: Optional[str] = None

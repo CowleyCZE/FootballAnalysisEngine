@@ -1,6 +1,7 @@
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from typing import List, Dict, Any
 from app.research.source_registry import SourceRegistry
+from app.search.sport_filter import is_noise_domain
 
 # Obsah pro dospělé nikdy nesmí do research pipeline (reálný běh M589: crawler stahoval
 # porno weby z výsledků vyhledávání). Kontroluje se doména, URL i titulek/úryvek.
@@ -21,6 +22,8 @@ NON_FOOTBALL_PARTS = ("cycling", "cyklist", "cyklo", "bikeshop", "velodrom", "tr
 
 def is_blocked_source(url: str, title: str = "", snippet: str = "") -> bool:
     host = (urlparse(url).netloc or "").lower()
+    if is_noise_domain(url):
+        return True
     if any(part in host for part in BLOCKED_DOMAIN_PARTS):
         return True
     if any(part in host or part in f"{url} {title}".lower() for part in NON_FOOTBALL_PARTS):

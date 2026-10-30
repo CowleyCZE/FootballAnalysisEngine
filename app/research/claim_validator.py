@@ -16,6 +16,37 @@ TIME_SENSITIVE_PREDICATES = {
 UNDATED_REJECT_EXTRA_PREDICATES = {"motivation_context", "fatigue_context"}
 UNDATED_EXEMPT_PREDICATES = set()
 
+# TODO 11.20-d: u encyklopedií (Wikipedie) je `datePublished` datum vzniku článku, ne aktuálnosti obsahu
+# (stránka se průběžně přepisuje) – pro časově citlivá tvrzení se jejich datum nepovažuje za ověřené.
+ENCYCLOPEDIC_DOMAINS = ("wikipedia.org", "wikidata.org", "wikimedia.org", "wiktionary.org")
+
+
+def is_encyclopedic_source(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    host = (urlparse(url or "").hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in ENCYCLOPEDIC_DOMAINS)
+
+
+# TODO 11.20-c (rozhodnuto: asistent, 29. 10. 2026): bezdatový časově citlivý důkaz z registrovaného statistického /
+# agregátorského / oficiálního zdroje se přijme s `date_source=retrieved_at`, pokud byl stažen ≤ cutoff a
+# nejvýše N dní před ním (výchozí 7, FAE_RETRIEVED_MAX_AGE_DAYS); důvěra ×0,5. Vypnutí FAE_RETRIEVED_AT_FALLBACK=0.
+# Zpravodajství bez data, neznámé zdroje a encyklopedie se nepovolujou. Model tipu (absenční multiplikátor v
+# research_context.py) zůstává přísný – bezdatová fakta do číselného tipu nevstupují.
+RETRIEVED_AT_SOURCE_TYPES = {"statistical_provider", "aggregator", "official_club", "official_league"}
+RETRIEVED_AT_CONFIDENCE = 0.5
+
+
+def retrieved_at_fallback_enabled() -> bool:
+    return os.getenv("FAE_RETRIEVED_AT_FALLBACK", "1").strip() != "0"
+
+
+def retrieved_max_age_days() -> float:
+    try:
+        return max(0.0, float(os.getenv("FAE_RETRIEVED_MAX_AGE_DAYS", "7")))
+    except ValueError:
+        return 7.0
+
 
 def undated_policy() -> str:
     """`reject` (výchozí) nebo `allow` (staré chování, jen pro diagnostiku): FAE_UNDATED_POLICY."""
@@ -33,6 +64,27 @@ def source_weight(authority: float) -> float:
 
 
 class ClaimValidator:
+    @staticmethod
+    def _retrieved_at_fallback_ok(ev, cutoff_at, registry=None) -> bool:
+        """Bezdatový důkaz smí projít jen z registrovaného statistického/agregátorského/oficiálního zdroje,
+        pokud byl skutečně stažen nejvýše RETRIEVED_MAX_AGE_DAYS před cutoffem a ne po něm.
+        Datum publikace se nikdy nedomyslí; neznámé zdroje a encyklopedie se nepovolujou."""
+        if not retrieved_at_fallback_enabled():
+            return False
+        url = getattr(ev, "source_url", "") or ""
+        if is_encyclopedic_source(url):
+            return False
+        retrieved = CutoffFilter._to_utc_naive(getattr(ev, "retrieved_at", None))
+        cutoff = CutoffFilter._to_utc_naive(cutoff_at)
+        if retrieved is None or cutoff is None or retrieved > cutoff:
+            return False
+        if (cutoff - retrieved).total_seconds() > retrieved_max_age_days() * 86400:
+            return False
+        if registry is None:
+            from app.search.source_registry import SearchSourceRegistry
+            registry = SearchSourceRegistry()
+        return registry.get_source_type(url) in RETRIEVED_AT_SOURCE_TYPES
+
     def apply_source_weights(self, claims: List[Claim], registry=None) -> List[Claim]:
         """Zvýší váhu oficiálních/datovaných zdrojů (klub, liga, statistický provider) proti agregátorům –
         důvěryhodnost se násobí váhou nejlepšího zdroje mezi důkazy tvrzení (TODO 11.10, bod 3)."""
@@ -48,7 +100,7 @@ class ClaimValidator:
             claim.confidence = round(float(claim.confidence or 0.0) * source_weight(best), 4)
         return claims
 
-    def validate_claims(self, claims: List[Claim], cutoff_at: datetime) -> List[Claim]:
+    def validate_claims(self, claims: List[Claim], cutoff_at: datetime, registry=None) -> List[Claim]:
         validated = []
         for claim in claims:
             if not claim.evidence_list:
@@ -80,12 +132,21 @@ class ClaimValidator:
             )
             valid_ev = True
             for ev in claim.evidence_list:
+                if reject_undated and is_encyclopedic_source(getattr(ev, "source_url", "") or ""):
+                    valid_ev = False
+                    break
                 passed, reason = CutoffFilter.validate(ev.published_at, cutoff_at, policy="unverified_date")
                 if not passed:
                     valid_ev = False
                     break
                 if reason == "UNVERIFIED_DATE":
                     if reject_undated:
+                        if self._retrieved_at_fallback_ok(ev, cutoff_at, registry):
+                            # TODO 11.20-c: skutečný čas stažení (≤ cutoff) je horní mez stáří obsahu.
+                            if getattr(claim, "date_source", None) != "retrieved_at":
+                                claim.date_source = "retrieved_at"
+                                claim.confidence = max(0.0, float(claim.confidence or 0.0) * RETRIEVED_AT_CONFIDENCE)
+                            continue
                         valid_ev = False
                         break
                     # Keep otherwise relevant official pages usable, but make

@@ -135,3 +135,16 @@ domains:
     type: aggregator
   footballdatabase.eu:
     type: aggregator
+  # TODO 11.20-c: statistické/živé portály bez data publikace (fallback na retrieved_at); konzervativně aggregator (authority 0.5)
+  footystats.org:
+    type: aggregator
+  flashscore.com:
+    type: aggregator
+  livescore.com:
+    type: aggregator
+  statz.ai:
+    type: aggregator
+  playerstats.football:
+    type: aggregator
+  fotbalstat.cz:
+    type: aggregator

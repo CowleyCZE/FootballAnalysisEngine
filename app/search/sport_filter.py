@@ -25,8 +25,38 @@ _BLOCKED_URL_PARTS = (
 )
 
 
+# TODO 11.20-a: šumové domény z měření produkční DB (vstupenky, fanshopy, streamy,
+# Football Manager blog, obsahové farmy bez data publikace). Shoda na celou doménu/subdoménu.
+NOISE_DOMAINS = (
+    "livefootballtickets.com", "kooralivefree.com", "footballmanagerstory.com",
+    "sportsdunia.com", "footballuser.com", "futbor.com", "skorjet.net",
+)
+# Štítky hostitele (první část domény) typické pro e-shopy a prodej vstupenek.
+NOISE_HOST_LABEL_PREFIXES = ("fanshop", "eshop", "e-shop", "shop", "tickets", "ticket", "vstupenky")
+# Podřetězce hostitele pro prodej vstupenek (např. livefootballtickets.com).
+NOISE_HOST_PARTS = ("tickets", "vstupenky")
+
+
+def is_noise_domain(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    raw = (url or "").strip()
+    host = (urlparse(raw if "//" in raw else "//" + raw).hostname or "").lower()
+    if not host:
+        return False
+    if any(host == d or host.endswith("." + d) for d in NOISE_DOMAINS):
+        return True
+    if any(part in host for part in NOISE_HOST_PARTS):
+        return True
+    labels = host.split(".")
+    # Jen subdoménové štítky (fanshop.slavia.cz); samotný „shop“ jako registrovaná doména se neřeší.
+    return any(label.startswith(NOISE_HOST_LABEL_PREFIXES) for label in labels[:-2])
+
+
 def is_blocked_url(url: str) -> bool:
     lowered = (url or "").lower()
+    if is_noise_domain(lowered):
+        return True
     return any(part in lowered for part in _BLOCKED_URL_PARTS)
 
 

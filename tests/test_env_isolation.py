@@ -32,7 +32,7 @@ def test_menu_main_loads_env_without_overriding(monkeypatch, tmp_path):
     monkeypatch.setenv("FAE_MENU_TEST_KEEP", "puvodni")
     monkeypatch.delenv("FAE_MENU_TEST_NEW", raising=False)
 
-    monkeypatch.setattr("builtins.input", lambda *a, **k: "11")  # 11 = Konec
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "12")  # 12 = Konec
     menu.main()
 
     assert os.environ["FAE_MENU_TEST_NEW"] == "abc"

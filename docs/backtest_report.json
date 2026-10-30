@@ -1,107 +1,130 @@
 {
-  "generated_at": "2026-10-24T20:59:55+00:00",
-  "model_version": "poisson-dc-context-v5",
+  "generated_at": "2026-10-30T02:16:21+00:00",
+  "model_version": "poisson-dc-context-v7",
   "competition": "Chance Liga",
-  "matches_evaluated": 528,
+  "matches_evaluated": 609,
   "default_params": {
-    "n": 528,
-    "accuracy_1x2": 0.517,
-    "baseline_accuracy_home_always": 0.4678,
-    "brier": 0.60065,
-    "baseline_brier": 0.63782,
-    "brier_skill": 0.05827,
-    "log_loss": 1.0059,
-    "exact_score_hit": 0.1098,
-    "goals_mae": 0.9449,
+    "n": 609,
+    "accuracy_1x2": 0.509,
+    "baseline_accuracy_home_always": 0.4614,
+    "brier": 0.60452,
+    "baseline_brier": 0.64011,
+    "brier_skill": 0.05561,
+    "log_loss": 1.01102,
+    "exact_score_hit": 0.1117,
+    "goals_mae": 0.9466,
     "outcome_frequencies": {
-      "home": 0.4678,
-      "draw": 0.2367,
-      "away": 0.2955
+      "home": 0.4614,
+      "draw": 0.2381,
+      "away": 0.3005
     }
   },
+  "live_feedback": {
+    "count": 0,
+    "accuracy_1x2": null,
+    "brier": null,
+    "exact_score_hit": null,
+    "goals_mae": null
+  },
+  "retune_hint": {
+    "recommended": false,
+    "tuned_on": 609,
+    "new_matches": 0,
+    "note": "0 nových zápasů od posledního ladnění (limit 50)."
+  },
   "tuning": {
-    "n_train": 369,
-    "n_holdout": 159,
+    "n_train": 426,
+    "n_holdout": 183,
     "default_params": {
       "DC_RHO": -0.08,
       "PRIOR_WEIGHT": 1.5,
       "FORM_DECAY": 0.14,
+      "XG_WEIGHT": 0.35,
       "HOME_ADV_SPLIT": 1.03,
-      "HOME_ADV_NO_SPLIT": 1.08
+      "HOME_ADV_NO_SPLIT": 1.08,
+      "RATING_SHRINK": 5.0,
+      "RATING_MIN": 0.6,
+      "RATING_MAX": 1.6
     },
     "default_train": {
-      "n": 369,
-      "accuracy_1x2": 0.5176,
-      "baseline_accuracy_home_always": 0.4986,
-      "brier": 0.59695,
-      "baseline_brier": 0.62338,
-      "brier_skill": 0.04239,
-      "log_loss": 1.00126,
-      "exact_score_hit": 0.1057,
-      "goals_mae": 0.9492,
+      "n": 426,
+      "accuracy_1x2": 0.5164,
+      "baseline_accuracy_home_always": 0.4883,
+      "brier": 0.59919,
+      "baseline_brier": 0.6285,
+      "brier_skill": 0.04664,
+      "log_loss": 1.00437,
+      "exact_score_hit": 0.108,
+      "goals_mae": 0.9455,
       "outcome_frequencies": {
-        "home": 0.4986,
-        "draw": 0.2168,
-        "away": 0.2846
+        "home": 0.4883,
+        "draw": 0.223,
+        "away": 0.2887
       }
     },
     "default_holdout": {
-      "n": 159,
-      "accuracy_1x2": 0.5157,
-      "baseline_accuracy_home_always": 0.3962,
-      "brier": 0.60924,
-      "baseline_brier": 0.66002,
-      "brier_skill": 0.07694,
-      "log_loss": 1.01667,
-      "exact_score_hit": 0.1195,
-      "goals_mae": 0.9348,
+      "n": 183,
+      "accuracy_1x2": 0.4918,
+      "baseline_accuracy_home_always": 0.3989,
+      "brier": 0.61694,
+      "baseline_brier": 0.65872,
+      "brier_skill": 0.06344,
+      "log_loss": 1.0265,
+      "exact_score_hit": 0.1202,
+      "goals_mae": 0.9492,
       "outcome_frequencies": {
-        "home": 0.3962,
-        "draw": 0.283,
-        "away": 0.3208
+        "home": 0.3989,
+        "draw": 0.2732,
+        "away": 0.3279
       }
     },
-    "recommended": true,
+    "recommended": false,
     "best_params": {
-      "DC_RHO": 0.0,
-      "PRIOR_WEIGHT": 1.0,
-      "FORM_DECAY": 0.08,
-      "HOME_ADV_SPLIT": 1.06,
-      "HOME_ADV_NO_SPLIT": 1.04
+      "DC_RHO": 0.03,
+      "PRIOR_WEIGHT": 0.5,
+      "FORM_DECAY": 0.04,
+      "XG_WEIGHT": 0.35,
+      "HOME_ADV_SPLIT": 1.09,
+      "HOME_ADV_NO_SPLIT": 1.0,
+      "RATING_SHRINK": 2.0,
+      "RATING_MIN": 0.6,
+      "RATING_MAX": 1.4
     },
+    "extended": true,
     "tuned_train": {
-      "n": 369,
-      "accuracy_1x2": 0.5149,
-      "baseline_accuracy_home_always": 0.4986,
-      "brier": 0.59015,
-      "baseline_brier": 0.62338,
-      "brier_skill": 0.05331,
-      "log_loss": 0.99187,
-      "exact_score_hit": 0.1084,
-      "goals_mae": 0.949,
+      "n": 426,
+      "accuracy_1x2": 0.5164,
+      "baseline_accuracy_home_always": 0.4883,
+      "brier": 0.58922,
+      "baseline_brier": 0.6285,
+      "brier_skill": 0.0625,
+      "log_loss": 0.99091,
+      "exact_score_hit": 0.1009,
+      "goals_mae": 0.9501,
       "outcome_frequencies": {
-        "home": 0.4986,
-        "draw": 0.2168,
-        "away": 0.2846
+        "home": 0.4883,
+        "draw": 0.223,
+        "away": 0.2887
       }
     },
     "tuned_holdout": {
-      "n": 159,
-      "accuracy_1x2": 0.522,
-      "baseline_accuracy_home_always": 0.3962,
-      "brier": 0.60603,
-      "baseline_brier": 0.66002,
-      "brier_skill": 0.0818,
-      "log_loss": 1.01349,
-      "exact_score_hit": 0.1195,
-      "goals_mae": 0.9338,
+      "n": 183,
+      "accuracy_1x2": 0.4863,
+      "baseline_accuracy_home_always": 0.3989,
+      "brier": 0.6168,
+      "baseline_brier": 0.65872,
+      "brier_skill": 0.06365,
+      "log_loss": 1.02773,
+      "exact_score_hit": 0.0929,
+      "goals_mae": 0.9534,
       "outcome_frequencies": {
-        "home": 0.3962,
-        "draw": 0.283,
-        "away": 0.3208
+        "home": 0.3989,
+        "draw": 0.2732,
+        "away": 0.3279
       }
     },
-    "holdout_brier_gain": 0.00321
+    "holdout_brier_gain": 0.00014,
+    "note": "Ladění nezlepšilo holdout – výchozí parametry zůstávají."
   },
-  "config_written": true
+  "config_written": false
 }

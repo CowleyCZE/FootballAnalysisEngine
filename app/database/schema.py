@@ -55,6 +55,13 @@ def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
         _ensure_column(conn, "research_tasks", column, definition)
     for column, definition in (("worker_name", "TEXT"), ("worker_version", "TEXT"), ("worker_type", "TEXT"), ("status", "TEXT"), ("capabilities_json", "TEXT"), ("last_heartbeat", "TEXT"), ("last_seen", "TEXT"), ("updated_at", "TEXT"), ("current_job_id", "TEXT"), ("metadata_json", "TEXT"), ("registered_at", "TEXT")):
         _ensure_column(conn, "workers", column, definition)
+    # Starý stůl teams (jen id, name) – doplnit sloupce, které vyžaduje team_identity.
+    for column, definition in (("normalized_name", "TEXT"), ("country", "TEXT"), ("competition", "TEXT"),
+                               ("external_ids_json", "TEXT"), ("created_at", "TEXT"), ("updated_at", "TEXT")):
+        _ensure_column(conn, "teams", column, definition)
+    if _table_exists(conn, "teams"):
+        # Prozatímní klíč; kanonický název nastaví consolidate_legacy_team_ids.
+        conn.execute("UPDATE teams SET normalized_name=lower(trim(name)) WHERE normalized_name IS NULL")
     _ensure_column(conn, "match_predictions", "factors_json", "TEXT")
     for column in ("home_npxg", "away_npxg", "home_gs_adj_xg", "away_gs_adj_xg"):
         _ensure_column(conn, "match_statistics", column, "REAL")

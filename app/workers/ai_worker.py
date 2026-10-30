@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 from app.ai.client import OllamaClient
 from app.ai.context_builder import ContextBuilder
+from app.ai.remote_client import DEFAULT_BASE_URL, DEFAULT_MODEL, RemoteLLMClient
 from app.ai.schemas import AIOutput, AnalysisResult, DataQuality, KeyFactor
 from app.ai.validator import AIValidator
 
@@ -214,21 +215,44 @@ class AIWorker:
         )
         client.json_schema = AIOutput.model_json_schema()
 
-        try:
-            raw = client.generate(prompt, require_json=True)
-            validated, error = AIWorker._compose_result(raw, match_id, context)
-            if validated is None:
-                return AIWorker._insufficient_data_result(
-                    match_id,
-                    f"AI výstup nebyl validní: {error}",
-                    prompt,
-                )
-        except (RuntimeError, ValueError) as exc:
-            return AIWorker._insufficient_data_result(
-                match_id,
-                f"Lokální AI služba neposkytla použitelný výstup: {exc}",
-                prompt,
-            )
+        # TODO 11.17: řetěz lokální Ollama -> volitelný vzdálený poskytovatel (jen záloha) -> insufficient_data.
+        attempts = [("ollama", client)]
+        remote_note = None
+        if os.getenv("FAE_LLM_PROVIDER", "ollama").strip().lower() == "groq":
+            api_key = os.getenv("GROQ_API_KEY", "").strip()
+            if api_key:
+                attempts.append(("groq", RemoteLLMClient(
+                    api_key=api_key,
+                    base_url=os.getenv("FAE_REMOTE_LLM_URL", DEFAULT_BASE_URL),
+                    model=os.getenv("FAE_REMOTE_LLM_MODEL", DEFAULT_MODEL),
+                    timeout=float(os.getenv("FAE_REMOTE_LLM_TIMEOUT", "60")),
+                    max_retries=max(1, int(os.getenv("FAE_REMOTE_LLM_RETRIES", "2"))),
+                )))
+            else:
+                remote_note = "Vzdálená AI záloha je zapnutá, ale chybí GROQ_API_KEY."
+
+        validated = None
+        raw = ""
+        used_provider, used_model = "ollama", None
+        errors = []
+        for provider, llm in attempts:
+            prefix = "" if provider == "ollama" else "Vzdálená AI záloha: "
+            try:
+                raw = llm.generate(prompt, require_json=True)
+                validated, error = AIWorker._compose_result(raw, match_id, context)
+                if validated is not None:
+                    used_provider, used_model = provider, getattr(llm, "model", None)
+                    break
+                errors.append(f"{prefix}AI výstup nebyl validní: {error}")
+            except (RuntimeError, ValueError) as exc:
+                if provider == "ollama":
+                    errors.append(f"Lokální AI služba neposkytla použitelný výstup: {exc}")
+                else:
+                    errors.append(f"{prefix}{exc}")
+        if validated is None:
+            if remote_note:
+                errors.append(remote_note)
+            return AIWorker._insufficient_data_result(match_id, " | ".join(errors), prompt)
 
         # Check if cutoff was missing or invalid: AIWorker cannot produce usable result without valid cutoff
         cutoff_valid = False
@@ -250,4 +274,6 @@ class AIWorker:
         result = validated.model_dump(by_alias=True)
         result["input_hash"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         result["output_hash"] = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        result["llm_provider"] = used_provider
+        result["llm_model"] = used_model
         return result

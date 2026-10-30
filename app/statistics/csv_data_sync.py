@@ -391,6 +391,15 @@ def _is_stale(conn: sqlite3.Connection, key: str, ttl: timedelta, now: datetime)
     return False
 
 
+def _find_feed_script(name: str) -> Path:
+    """Najde downloader v kořeni projektu nebo v `database/data_csv/` (kde skutečně leží)."""
+    for base in (ROOT, DEFAULT_DATA_DIR):
+        candidate = base / name
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(f"Downloader {name} nenalezen v {ROOT} ani {DEFAULT_DATA_DIR}")
+
+
 def refresh_stale(db_path: str | Path, *, force: bool = False) -> dict[str, Any]:
     if os.getenv("FAE_AUTO_CSV_SYNC", "1").lower() in {"0","false","no","off"} and not force:
         return {"status":"disabled","refreshed":[]}
@@ -406,8 +415,8 @@ def refresh_stale(db_path: str | Path, *, force: bool = False) -> dict[str, Any]
             conn.commit()
         with tempfile.TemporaryDirectory(prefix=f"fae_{key}_") as temp:
             outdir=Path(temp)
-            script=ROOT/feed["script"]
             try:
+                script=_find_feed_script(feed["script"])
                 proc=subprocess.run([sys.executable,str(script)],cwd=outdir,env={**os.environ,"PYTHONPATH":str(ROOT)},capture_output=True,text=True,timeout=360)
                 outputs=[outdir/name for name in feed["outputs"] if (outdir/name).is_file()]
                 if proc.returncode != 0 or not outputs:

@@ -42,6 +42,24 @@ DEFAULT_GRID: Dict[str, Sequence[float]] = {
     "HOME_ADV_NO_SPLIT": (1.04, 1.08, 1.12),
 }
 
+# TODO 11.19: rozšířené ladnění síly soupeřů. Úplná mřížka by byla příliš velká, proto se prochází po jednom
+# parametru (coordinate descent) z nejlepších základních hodnot a změna se přijme jen při zlepšení na tréninku.
+# Váhy kontextových multiplikátorů (únava, motivace, rivalita, absence) se neladí: backtest nemá k historickým
+# zápasům bezpečně datovaný kontext (jinak by unikala budoucnost) – vyžaduje živé predikce z `match_predictions`.
+EXTENDED_GRID: Dict[str, Sequence[float]] = {
+    "RATING_SHRINK": (2.0, 5.0, 8.0, 12.0),
+    "RATING_MIN": (0.5, 0.6, 0.7),
+    "RATING_MAX": (1.4, 1.6, 1.8),
+    # Hodnoty za okraji základní mřížky (běh 30. 10. 2026: 5 ze 6 parametrů skončilo na okraji mřížky).
+    "DC_RHO": (-0.04, 0.0, 0.03),
+    "PRIOR_WEIGHT": (0.5, 0.75, 1.0),
+    "FORM_DECAY": (0.04, 0.06, 0.08),
+    "HOME_ADV_SPLIT": (1.06, 1.09),
+    "HOME_ADV_NO_SPLIT": (1.00, 1.02, 1.04),
+}
+MIN_REFINE_GAIN = 0.00005  # minimální zlepšení Brier na tréninku pro přijetí změny jednoho parametru
+RETUNE_EVERY_MATCHES = 50  # po tolika nových zápasech doporučit nové ladnění
+
 
 # --- Čisté metriky -----------------------------------------------------------------------------
 
@@ -165,8 +183,35 @@ def evaluate(inputs: Sequence[Mapping[str, Any]], params: Optional[Mapping[str, 
 
 # --- Ladění s holdoutem -----------------------------------------------------------------------
 
+def refine_extended(train: Sequence[Mapping[str, Any]], start: Mapping[str, float],
+                    extended_grid: Optional[Mapping[str, Sequence[float]]] = None) -> Dict[str, float]:
+    """Jeden průchod coordinate descent přes rozšířené parametry; mění se jen při zlepšení tréninkového Brier."""
+    grid = dict(extended_grid if extended_grid is not None else EXTENDED_GRID)
+    defaults = dict(ExactScorePredictor._DEFAULT_PARAMS)
+    current = dict(start)
+    for key, values in grid.items():
+        current.setdefault(key, defaults[key])
+    best_brier = evaluate(train, current).get("brier", float("inf"))
+    for key, values in grid.items():
+        best_value = current[key]
+        for value in values:
+            if value == current[key]:
+                continue
+            candidate = dict(current)
+            candidate[key] = value
+            # RATING_MIN musí zůstat pod 1,0 a RATING_MAX nad 1,0 (jinak by se mezí ztratil smysl).
+            if candidate.get("RATING_MIN", 0.6) >= 1.0 or candidate.get("RATING_MAX", 1.6) <= 1.0:
+                continue
+            brier = evaluate(train, candidate).get("brier", float("inf"))
+            if brier < best_brier - MIN_REFINE_GAIN:
+                best_brier, best_value = brier, value
+        current[key] = best_value
+    return current
+
+
 def tune(inputs: Sequence[Mapping[str, Any]], grid: Optional[Mapping[str, Sequence[float]]] = None,
-         train_fraction: float = TRAIN_FRACTION) -> Dict[str, Any]:
+         train_fraction: float = TRAIN_FRACTION, extended: bool = False,
+         extended_grid: Optional[Mapping[str, Sequence[float]]] = None) -> Dict[str, Any]:
     grid = dict(grid or DEFAULT_GRID)
     ordered = sorted(inputs, key=lambda i: (str(i["scheduled_at"]), int(i["match_id"])))
     split = int(len(ordered) * train_fraction)
@@ -195,13 +240,16 @@ def tune(inputs: Sequence[Mapping[str, Any]], grid: Optional[Mapping[str, Sequen
         key = (round(summary.get("brier", float("inf")), 6), distance)
         if key < best_key:
             best_params, best_key = params, key
+    if extended and best_params is not None:
+        best_params = refine_extended(train, best_params, extended_grid)
+        result["extended"] = True
     tuned_train = evaluate(train, best_params)
     tuned_holdout = evaluate(holdout, best_params)
     result.update({"best_params": best_params, "tuned_train": tuned_train, "tuned_holdout": tuned_holdout})
     if holdout and tuned_holdout.get("n", 0) >= MIN_HOLDOUT:
         gain = default_holdout["brier"] - tuned_holdout["brier"]
         result["holdout_brier_gain"] = round(gain, 5)
-        result["recommended"] = bool(gain >= MIN_IMPROVEMENT and best_params != defaults)
+        result["recommended"] = bool(gain >= MIN_IMPROVEMENT and {**defaults, **best_params} != defaults)
         if not result["recommended"]:
             result["note"] = "Ladění nezlepšilo holdout – výchozí parametry zůstávají."
     else:
@@ -228,12 +276,43 @@ def write_config(path: str, tuning: Mapping[str, Any], competition: Optional[str
     return True
 
 
+def live_feedback_summary(db_path: str) -> Dict[str, Any]:
+    """Souhrn ostrých předzápasových predikcí proti skutečným výsledkům (bez seznamu zápasů; read-only)."""
+    from app.statistics.prediction_feedback import prediction_feedback
+    try:
+        data = prediction_feedback(db_path)
+    except Exception as exc:  # chybějící tabulka/DB nesmí shodit backtest
+        return {"count": 0, "error": type(exc).__name__}
+    return {key: data.get(key) for key in ("count", "accuracy_1x2", "brier", "exact_score_hit", "goals_mae")}
+
+
+def retune_hint(matches_now: int, config_path: str = "config/model_params.yaml",
+                every: int = RETUNE_EVERY_MATCHES) -> Dict[str, Any]:
+    """Doporučí nové ladnění po `every` nových zápasech od posledního zápisu `model_params.yaml`."""
+    tuned_on = None
+    try:
+        import yaml
+        with open(config_path, "r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+        tuned_on = int(data.get("n_train", 0)) + int(data.get("n_holdout", 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        tuned_on = None
+    if not tuned_on:
+        return {"recommended": False, "tuned_on": None, "new_matches": None,
+                "note": "Konfigurace ladnění neexistuje – není s čím porovnávat."}
+    new = max(0, int(matches_now) - tuned_on)
+    return {"recommended": new >= every, "tuned_on": tuned_on, "new_matches": new,
+            "note": f"{new} nových zápasů od posledního ladnění (limit {every})."}
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Backtest a kalibrace modelu přesného skóre")
     parser.add_argument("--db", default="database/football.db")
     parser.add_argument("--competition", default=None, help="Název soutěže (výchozí: všechny)")
     parser.add_argument("--min-history", type=int, default=5, help="Min. předchozích zápasů obou týmů")
     parser.add_argument("--tune", action="store_true", help="Prohledat mřížku parametrů (holdout 30 %%)")
+    parser.add_argument("--tune-extended", action="store_true",
+                        help="Po základní mřížce doladí RATING_SHRINK/RATING_MIN/RATING_MAX (implikuje --tune)")
     parser.add_argument("--write-config", action="store_true", help="Zapsat config/model_params.yaml (jen při zlepšení)")
     parser.add_argument("--report", default="docs/backtest_report.json")
     parser.add_argument("--config-path", default="config/model_params.yaml")
@@ -248,13 +327,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "default_params": evaluate(inputs),
     }
     print(f"Backtest {ExactScorePredictor.MODEL_VERSION}: {len(inputs)} zápasů")
+    report["live_feedback"] = live_feedback_summary(args.db)
+    report["retune_hint"] = retune_hint(len(inputs), args.config_path)
+    if report["retune_hint"]["recommended"]:
+        print(f"  Doporučené nové ladnění: {report['retune_hint']['note']}")
+    live = report["live_feedback"]
+    if live.get("count"):
+        print(f"  Živé predikce: {live['count']} vyhodnocených, 1-X-2 {live['accuracy_1x2']*100:.1f} %, Brier {live['brier']:.4f}")
     base = report["default_params"]
     if base.get("n"):
         print(f"  1-X-2: {base['accuracy_1x2']*100:.1f} % (vždy domácí: {base['baseline_accuracy_home_always']*100:.1f} %) | "
               f"Brier {base['brier']} (klimatologie {base['baseline_brier']}, skill {base['brier_skill']}) | "
               f"přesné skóre {base['exact_score_hit']*100:.1f} % | MAE gólů {base['goals_mae']}")
-    if args.tune:
-        tuning = tune(inputs)
+    if args.tune or args.tune_extended:
+        tuning = tune(inputs, extended=args.tune_extended)
         report["tuning"] = tuning
         print(f"  Ladění: train {tuning['n_train']} / holdout {tuning['n_holdout']}, "
               f"doporučeno: {tuning['recommended']} {tuning.get('note', '')}")
@@ -264,6 +350,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             written = write_config(args.config_path, tuning, args.competition)
             report["config_written"] = written
             print(f"  Konfigurace {'zapsána: ' + args.config_path if written else 'nezapsána (bez potvrzeného zlepšení)'}")
+            if written:
+                # Report i doporučení musí odpovídat právě zapsanému configu (dřív zůstalo „81 nových zápasů“).
+                report["retune_hint"] = retune_hint(len(inputs), args.config_path)
+                print(f"  Stav ladnění po zápisu: {report['retune_hint']['note']}")
     os.makedirs(os.path.dirname(args.report) or ".", exist_ok=True)
     with open(args.report, "w", encoding="utf-8") as handle:
         json.dump(report, handle, ensure_ascii=False, indent=2)

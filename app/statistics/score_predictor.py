@@ -23,7 +23,9 @@ class ExactScorePredictor:
     MIN_LEAGUE_MATCHES = 5  # minimální počet zápasů soutěže pro použití ligového průměru
     RATING_ITERATIONS = 3  # kroky iterativní normalizace síly soupeřů
     RATING_SHRINK = 5.0  # pseudo-zápasy shrinkage k 1,0
-    RATING_BOUNDS = (0.6, 1.6)
+    RATING_MIN = 0.6  # dolní mez relativní síly útoku/obrany (TODO 11.19: laditelné)
+    RATING_MAX = 1.6  # horní mez
+    RATING_BOUNDS = (RATING_MIN, RATING_MAX)  # zachováno kvůli zpětné kompatibilitě; používá se RATING_MIN/MAX
     FORM_DECAY = 0.14  # exponenciální úbytek váhy starších zápasů (váha = exp(-FORM_DECAY * pořadí))
     HOME_ADV_SPLIT = 1.03  # domácí výhoda, když už je zahrnutá v domácích/venkovních rozděleních
     HOME_ADV_NO_SPLIT = 1.08  # domácí výhoda bez rozdělení domácí/venku
@@ -36,10 +38,14 @@ class ExactScorePredictor:
         "XG_WEIGHT": (0.0, 0.70),
         "HOME_ADV_SPLIT": (0.95, 1.15),
         "HOME_ADV_NO_SPLIT": (1.00, 1.20),
+        "RATING_SHRINK": (1.0, 15.0),
+        "RATING_MIN": (0.40, 0.90),
+        "RATING_MAX": (1.20, 2.00),
     }
     _DEFAULT_PARAMS = {
         "DC_RHO": -0.08, "PRIOR_WEIGHT": 1.5, "FORM_DECAY": 0.14, "XG_WEIGHT": 0.35,
         "HOME_ADV_SPLIT": 1.03, "HOME_ADV_NO_SPLIT": 1.08,
+        "RATING_SHRINK": 5.0, "RATING_MIN": 0.6, "RATING_MAX": 1.6,
     }
     _TUNED: Dict[str, float] = {}
 
@@ -83,7 +89,7 @@ class ExactScorePredictor:
             games.setdefault(a, []).append((h, ag, hg))
         if not games or league_mean <= 0:
             return {}
-        lo, hi = cls.RATING_BOUNDS
+        lo, hi = cls.RATING_MIN, cls.RATING_MAX
         atk = {t: 1.0 for t in games}
         dfn = {t: 1.0 for t in games}
         for _ in range(cls.RATING_ITERATIONS):

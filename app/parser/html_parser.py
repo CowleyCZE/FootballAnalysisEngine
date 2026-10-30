@@ -76,7 +76,25 @@ _PUBLISHED_META = (
     {"name": "DC.date.issued"},
     {"name": "DC.date"},
     {"name": "dcterms.created"},
+    {"name": "dcterms.issued"},
+    {"name": "DC.date.created"},
+    {"property": "og:published_time"},
+    {"property": "article:published"},
+    {"name": "parsely-pub-date"},
+    {"name": "sailthru.date"},
 )
+
+# TODO 11.20: měsíce v češtině (2. pád i 1. pád) a angličtině; rozpoznává se jen výslovně uvedené datum.
+_MONTHS = {
+    "leden": 1, "ledna": 1, "únor": 2, "února": 2, "březen": 3, "března": 3, "duben": 4, "dubna": 4,
+    "květen": 5, "května": 5, "červen": 6, "června": 6, "červenec": 7, "července": 7, "srpen": 8, "srpna": 8,
+    "září": 9, "říjen": 10, "října": 10, "listopad": 11, "listopadu": 11, "prosinec": 12, "prosince": 12,
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7, "august": 8,
+    "september": 9, "october": 10, "november": 11, "december": 12,
+}
+_MONTH_RE = "|".join(sorted(_MONTHS, key=len, reverse=True))
+_DAY_MONTH_NAME = re.compile(rf"^(\d{{1,2}})\.?\s+({_MONTH_RE})\s+(\d{{4}})(?:\s*,?\s*(\d{{1,2}}):(\d{{2}}))?$", re.I)
+_MONTH_NAME_DAY = re.compile(rf"^({_MONTH_RE})\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})$", re.I)
 
 
 def _normalize_date(value) -> str | None:
@@ -96,7 +114,20 @@ def _normalize_date(value) -> str | None:
             return datetime(int(year), int(month), int(day), int(hour or 0), int(minute or 0)).isoformat()
         except ValueError:
             return None
-    return None
+    m = _DAY_MONTH_NAME.match(text)
+    if m:
+        day, name, year, hour, minute = m.groups()
+        month = _MONTHS[name.lower()]
+    else:
+        m = _MONTH_NAME_DAY.match(text)
+        if not m:
+            return None
+        name, day, year = m.groups()
+        month, hour, minute = _MONTHS[name.lower()], None, None
+    try:
+        return datetime(int(year), month, int(day), int(hour or 0), int(minute or 0)).isoformat()
+    except ValueError:
+        return None
 
 
 def _jsonld_dates(soup: BeautifulSoup):
@@ -133,6 +164,7 @@ def extract_published_at(soup: BeautifulSoup) -> str | None:
         if date:
             return date
     for tag in soup.find_all("time"):
+        # Jen atribut datetime; text <time> se nepoužívá (může být datum události/zápasu, ne publikace).
         date = _normalize_date(tag.get("datetime"))
         if date:
             return date
