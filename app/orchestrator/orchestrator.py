@@ -24,6 +24,12 @@ _TASK_TYPE_TO_JOB_TYPE = {
 }
 
 
+# Bloky výsledku STATISTICS, jejichž vlastní `sample_size`/pokrytí je volitelné.
+_OPTIONAL_SAMPLE_BLOCKS = frozenset({
+    "head_to_head", "xg_aggregate", "imported_xg_rates", "features", "research_context",
+})
+
+
 def get_or_create_match(
     db_path: str,
     home_team: str,
@@ -407,7 +413,13 @@ class MasterOrchestrator:
             # `coverage` currently describes optional xG coverage, not whether
             # the result/goal history itself exists. Zero xG coverage alone
             # must not suppress a valid goals-only forecast.
-            for v in data.values():
+            # Vnořené bloky s volitelným vzorkem (H2H, xG agregace, importované xG,
+            # rysy, výzkumný kontext) mohou mít legitimně `sample_size == 0`
+            # (např. nově postoupivší klub bez vzájemných zápasů) – o dostatku dat
+            # rozhoduje celkový `sample_size`, `status` a `prior_only`, ne ony.
+            for k, v in data.items():
+                if k in _OPTIONAL_SAMPLE_BLOCKS:
+                    continue
                 if isinstance(v, dict):
                     if not _is_dict_ok(v):
                         return False

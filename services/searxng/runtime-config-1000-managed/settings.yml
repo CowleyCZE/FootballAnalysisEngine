@@ -1,10 +1,10 @@
 use_default_settings:
   engines:
     keep_only:
-    - bing
-    - seznam
-    - yep
     - yahoo
+    - duckduckgo
+    - bing
+    - mojeek
 general:
   instance_name: Football Analysis Engine Search
 search:
@@ -18,11 +18,14 @@ server:
   image_proxy: false
   secret_key: managed-by-SEARXNG_SECRET-environment
 engines:
-- name: bing
-  disabled: false
-- name: seznam
-  disabled: false
-- name: yep
-  disabled: false
 - name: yahoo
   disabled: false
+- name: duckduckgo
+  disabled: false
+- name: bing
+  disabled: false
+- name: mojeek
+  disabled: false
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 10.0

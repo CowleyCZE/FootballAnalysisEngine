@@ -120,15 +120,15 @@ def _consolidate_unique_table(conn: sqlite3.Connection, table: str, team_map: di
 def consolidate_legacy_team_ids(conn: sqlite3.Connection) -> dict[str, int]:
     """Merge rows that resolve to the same alias key and remap all team FKs."""
     conn.row_factory = sqlite3.Row
-    marker = conn.execute("SELECT value FROM system_info WHERE key='team_identity_migration_v2'").fetchone()
-    if marker:
-        return {"merged": 0, "teams": int(conn.execute("SELECT COUNT(*) FROM teams").fetchone()[0])}
-
+    # Opakovatelné (TODO 11.28): menu dříve zakládalo týmy bez aliasů („Zlín“ vedle „FC FASTAV Zlin“), takže se
+    # jednorázový marker nesmí používat k přeskočení. Slučuje se jen tehdy, když duplicity skutečně existují.
     raw = conn.execute("SELECT id,name FROM teams ORDER BY id").fetchall()
     groups: dict[str, list[tuple[int, str]]] = defaultdict(list)
-    for ident, name in raw:
+    for ident, name in ((r[0], r[1]) for r in raw):
         key = resolve_team_key(str(name)) or canonical_team_key(str(name))
         groups[key].append((int(ident), str(name)))
+    if all(len(members) < 2 for members in groups.values()):
+        return {"merged": 0, "teams": len(raw)}
 
     team_map: dict[int, int] = {}
     aliases: list[tuple[int, str]] = []
@@ -188,7 +188,7 @@ def consolidate_legacy_team_ids(conn: sqlite3.Connection) -> dict[str, int]:
         conn.execute("UPDATE teams SET normalized_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (key, keeper))
     for team_id, alias in aliases:
         register_alias(conn, team_id, alias, "legacy-deduplication")
-    conn.execute("INSERT INTO system_info(key,value) VALUES('team_identity_migration_v2','done')")
+    conn.execute("INSERT OR REPLACE INTO system_info(key,value) VALUES('team_identity_migration_v2','done')")
     remaining = int(conn.execute("SELECT COUNT(*) FROM teams").fetchone()[0])
     return {"merged": len(duplicate_ids), "teams": remaining}
 

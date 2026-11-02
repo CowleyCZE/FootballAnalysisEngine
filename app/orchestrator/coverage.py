@@ -43,11 +43,17 @@ class CoverageEngine:
                 blocking_reasons=["Žádné tasky nenalezeny."]
             )
 
+        def _done(t) -> bool:
+            status = str(t["status"]).upper()
+            return status in SUCCESS_STATUSES or (
+                status == "NO_RESULT" and t["domain"] in ResearchPolicy.NO_RESULT_ACCEPTED_DOMAINS
+            )
+
         total_tasks = len(tasks)
-        completed_tasks = sum(1 for t in tasks if str(t["status"]).upper() in SUCCESS_STATUSES)
+        completed_tasks = sum(1 for t in tasks if _done(t))
 
         required_tasks = [t for t in tasks if t["required"] == 1]
-        required_completed = sum(1 for t in required_tasks if str(t["status"]).upper() in SUCCESS_STATUSES)
+        required_completed = sum(1 for t in required_tasks if _done(t))
 
         all_required_done = (len(required_tasks) == required_completed)
         req_coverage = round(required_completed / len(required_tasks), 2) if required_tasks else 1.0
@@ -58,7 +64,7 @@ class CoverageEngine:
 
         blocking_reasons = []
         if not all_required_done:
-            missing = [t["domain"] for t in required_tasks if str(t["status"]).upper() not in SUCCESS_STATUSES]
+            missing = [t["domain"] for t in required_tasks if not _done(t)]
             blocking_reasons.append(f"Chybí dokončení povinných domén: {', '.join(missing)}")
 
         if critical_conflicts > 0:

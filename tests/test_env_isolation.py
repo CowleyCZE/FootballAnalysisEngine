@@ -11,6 +11,7 @@ def test_env_is_isolated_by_autouse_fixture():
     assert sorted(k for k in os.environ if k.startswith("FAE_")) == [
         "FAE_AUTO_HISTORY",
         "FAE_ONLINE_HISTORY",
+        "FAE_REQUIRE_TEAM_MENTION",
     ]
 
 

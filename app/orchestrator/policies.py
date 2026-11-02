@@ -6,6 +6,12 @@ class ResearchPolicy:
     MIN_COVERAGE_SCORE = 0.80
     MAX_RETRIES = 3
 
+    # Běh M976_e7ab: ABSENCES_HOME skončila `NO_RESULT` (po filtrech nezbyla žádná ověřená zpráva o absencích) a
+    # povinná doména tak 3 cykly blokovala coverage -> UNRESOLVED, přestože tip a AI byly hotové. Absence bez nalezených
+    # údajů nemění model (bez claimů = beze změny; nic se nedomýšlí), proto se `NO_RESULT` u nich bere jako dokončené
+    # (údaj „neověřeno“, ne „selhání“). Jiné povinné domény (profily týmů, statistiky) zůstávají přísné.
+    NO_RESULT_ACCEPTED_DOMAINS = frozenset({"ABSENCES_HOME", "ABSENCES_AWAY"})
+
     REQUIRED_DOMAINS = [
         "TEAM_PROFILE_HOME",
         "TEAM_PROFILE_AWAY",

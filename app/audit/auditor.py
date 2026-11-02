@@ -40,6 +40,18 @@ class AdversarialAuditor:
         run_id = str(uuid.uuid4())  # identifikátor tohoto auditu (audit_id)
         issues = []
 
+        if ai_analysis.get("composition") == "deterministic_statistical":
+            # TODO 11.29: závěr složen deterministicky z tipu a statistik; AI výstup chybí – jen varování (neovlivňuje skóre).
+            reasons = " | ".join(str(r) for r in (ai_analysis.get("ai_failure_reasons") or []))[:500]
+            issues.append({
+                "type": "ai_analysis_unavailable",
+                "severity": "WARNING",
+                "description": "AI analytická vrstva neposkytla použitelný výstup; závěr je složen deterministicky ze statistického modelu."
+                               + (f" {reasons}" if reasons else ""),
+                "evidence_ids": [],
+                "requires_research": False,
+            })
+
         if ai_analysis.get("status") == "insufficient_data":
             reason = "AI analytická vrstva neposkytla použitelný výstup."
             missing_data = ai_analysis.get("data_quality", {}).get("missing_data") or []

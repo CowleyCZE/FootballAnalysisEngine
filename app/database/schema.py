@@ -63,6 +63,8 @@ def _migrate_legacy_schema(conn: sqlite3.Connection) -> None:
         # Prozatímní klíč; kanonický název nastaví consolidate_legacy_team_ids.
         conn.execute("UPDATE teams SET normalized_name=lower(trim(name)) WHERE normalized_name IS NULL")
     _ensure_column(conn, "match_predictions", "factors_json", "TEXT")
+    # TODO 11.20: odkud pochází datum časově citlivého claimu (None = datum publikace, "retrieved_at" = záložní horní mez).
+    _ensure_column(conn, "claims", "date_source", "TEXT")
     for column in ("home_npxg", "away_npxg", "home_gs_adj_xg", "away_gs_adj_xg"):
         _ensure_column(conn, "match_statistics", column, "REAL")
         _ensure_column(conn, "match_xg_observations", column, "REAL")

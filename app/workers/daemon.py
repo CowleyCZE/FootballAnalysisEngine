@@ -6,6 +6,7 @@ from typing import Callable, Dict, Any
 
 from app.jobs.queue import JobQueue
 from app.jobs.models import JobStatus
+from app.orchestrator.policies import ResearchPolicy
 from app.workers.ai_worker import AIWorker
 from app.workers.audit_worker import AuditWorker
 from app.workers.crawler_worker import CrawlerWorker
@@ -98,7 +99,22 @@ class WorkerDaemon:
             # finalization continue so users still receive the prediction.
             if res_status == "INSUFFICIENT_DATA" and job["job_type"] == "AI_ANALYSIS":
                 stored_result = {**result, "job_outcome": "COMPLETED_WITHOUT_AI"}
-            if res_status in ("SUCCESS", "COMPLETED", "COMPLETE", "RESOLVED", "AUDIT_COMPLETE", "RESEARCH_REQUIRED", "UNRESOLVED", "CONFLICTED") or (
+            # Běh M976_c93f: doména, která po správném filtrování nenašla nic (NO_RESULT/PARTIAL), není selhání jobu.
+            # Volitelný (nepovinný) research job se uzavře jako SUCCESS a výsledek zachová `status` i `job_outcome`;
+            # povinný job (`required`) zůstává FAILED. `FAE_RESEARCH_NO_RESULT_IS_FAILURE=1` vrátí staré chování.
+            research_empty_ok = (
+                job["job_type"] == "RESEARCH"
+                and res_status in ("NO_RESULT", "PARTIAL")
+                and (
+                    not bool((job.get("payload") or {}).get("required"))
+                    or (res_status == "NO_RESULT" and str((job.get("payload") or {}).get("domain") or "")
+                        in ResearchPolicy.NO_RESULT_ACCEPTED_DOMAINS)
+                )
+                and os.getenv("FAE_RESEARCH_NO_RESULT_IS_FAILURE", "0").strip() != "1"
+            )
+            if research_empty_ok:
+                stored_result = {**result, "job_outcome": f"ACCEPTED_{res_status}"}
+            if research_empty_ok or res_status in ("SUCCESS", "COMPLETED", "COMPLETE", "RESOLVED", "AUDIT_COMPLETE", "RESEARCH_REQUIRED", "UNRESOLVED", "CONFLICTED") or (
                 res_status == "INSUFFICIENT_DATA" and prior_prediction
             ) or (res_status == "INSUFFICIENT_DATA" and job["job_type"] == "AI_ANALYSIS"):
                 self.queue.update_job_status(job_id, JobStatus.SUCCESS, result=stored_result, worker_id=self.worker_id)

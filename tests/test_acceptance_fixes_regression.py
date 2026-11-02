@@ -205,7 +205,8 @@ def test_daemon_handles_no_result_and_insufficient_data_as_fatal(fix_db):
 
     daemon = WorkerDaemon(worker_id="test-daemon", capabilities=["RESEARCH"], db_path=fix_db)
 
-    job_id_1 = daemon.queue.create_job("RESEARCH", 10, {"test": 1}, run_id="RUN-D1")
+    # Povinný job (`required`) s NO_RESULT je dál fatální; nepovinný RESEARCH NO_RESULT je SUCCESS (běh M976_c93f).
+    job_id_1 = daemon.queue.create_job("RESEARCH", 10, {"test": 1, "required": True}, run_id="RUN-D1")
     job_id_2 = daemon.queue.create_job("RESEARCH", 10, {"test": 2}, run_id="RUN-D2")
 
     # Mock HANDLERS to return NO_RESULT and INSUFFICIENT_DATA

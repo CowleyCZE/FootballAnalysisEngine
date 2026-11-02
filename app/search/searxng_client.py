@@ -9,6 +9,22 @@ from typing import Any
 import asyncio
 import httpx
 
+# Domény, které nikdy nejsou zdrojem fotbalových dat (SearXNG je občas vrátí jako šum).
+BLOCKED_DOMAIN_MARKERS = (
+    "lewdspot", "freeones", "pornhub", "xvideos", "xnxx", "xhamster", "redtube", "youporn", "onlyfans",
+    "four-elements-trainer",
+)
+
+
+def filter_blocked_results(results: list) -> list:
+    kept = []
+    for item in results:
+        url = str(item.get("url") or "").lower() if isinstance(item, dict) else ""
+        if any(marker in url for marker in BLOCKED_DOMAIN_MARKERS):
+            continue
+        kept.append(item)
+    return kept
+
 class SearXNGClient:
     def __init__(self, base_url: str | None = None, timeout: float = 30.0):
         # Keep direct ResearchEngine usage consistent with API/worker clients.
@@ -90,6 +106,8 @@ class SearXNGClient:
                     ) from exc
                 if not isinstance(payload, dict) or not isinstance(payload.get("results", []), list):
                     raise RuntimeError("SearXNG returned an unexpected JSON response")
+                # Běh M976_510b: crawlery navštívily nesportovní (dospělé) domény – vyřadit hned u zdroje.
+                payload["results"] = filter_blocked_results(payload["results"])
                 return payload
         finally:
             await asyncio.to_thread(self._release_global_slot, lock_file)

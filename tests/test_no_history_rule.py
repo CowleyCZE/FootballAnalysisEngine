@@ -73,3 +73,30 @@ def test_full_history_still_passes(db):
     state, ai_jobs = _tick_with_stats(db, result)
     assert state == MatchState.ANALYZING
     assert ai_jobs == 1
+
+
+def test_zero_h2h_and_zero_xg_blocks_do_not_block_valid_prediction(db):
+    """Regrese M979 (Artis Brno – Bohemians): nově postoupivší klub nemá H2H (sample_size 0),
+    npxG metriky mají vzorek 0, přesto má oba týmy historii a predikce je platná."""
+    result = {
+        "status": "COMPLETED", "sample_size": 34, "coverage": 0.6,
+        "home_team": {"form": {"sample_size": 5}, "xg_aggregate": {"sample_size": 0, "coverage": 0.0},
+                      "imported_xg_rates": {"sample_size": 0}, "features": {"npxg_sample_size": 0, "sample_size": 0}},
+        "away_team": {"form": {"sample_size": 5}, "xg_aggregate": {"sample_size": 0}},
+        "head_to_head": {"sample_size": 0},
+        "prediction": {"factors": {"prior_only": False}, "sample_size": 34},
+    }
+    state, ai_jobs = _tick_with_stats(db, result)
+    assert state == MatchState.ANALYZING
+    assert ai_jobs == 1
+
+
+def test_zero_form_sample_still_blocks(db):
+    """Nulový vzorek formy (historie) se dál považuje za nedostatečný."""
+    result = {
+        "status": "COMPLETED", "sample_size": 5,
+        "home_team": {"form": {"sample_size": 5}}, "away_team": {"form": {"sample_size": 0}},
+        "prediction": {"factors": {"prior_only": False}},
+    }
+    state, _ = _tick_with_stats(db, result)
+    assert state == MatchState.UNRESOLVED

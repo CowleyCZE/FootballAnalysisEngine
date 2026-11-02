@@ -1,6 +1,17 @@
+import re
 from datetime import datetime
 from typing import Optional, List
 from urllib.parse import urlparse
+
+
+def mentions_reserve_team(text: str, *teams: Optional[str]) -> bool:
+    """Bý tým po jménu klubu: „1. FC Slovácko B vs FC Zlín B“ (běžná forma na Sofascore/Flashscore)."""
+    low = str(text or "").lower()
+    for team in teams:
+        name = str(team or "").lower().strip()
+        if name and re.search(rf"{re.escape(name)}\s+b(?![\w.])", low):
+            return True
+    return False
 
 YOUTH_RESERVE_KEYWORDS = {
     "u15", "u16", "u17", "u18", "u19", "u21", "u23",
@@ -26,7 +37,7 @@ def calculate_identity_confidence(
     text = f"{title} {content}".lower()
 
     # If result is explicitly youth/reserve, severely penalize identity confidence unless requested team is youth/reserve
-    if any(kw in text for kw in YOUTH_RESERVE_KEYWORDS):
+    if any(kw in text for kw in YOUTH_RESERVE_KEYWORDS) or mentions_reserve_team(text, home_team, away_team):
         ht_req_youth = home_team and any(kw in home_team.lower() for kw in YOUTH_RESERVE_KEYWORDS)
         at_req_youth = away_team and any(kw in away_team.lower() for kw in YOUTH_RESERVE_KEYWORDS)
         if not ht_req_youth and not at_req_youth:
@@ -132,7 +143,7 @@ def calculate_relevance(
         score += 25.0
 
     # Youth / reserve penalty
-    if any(kw in text for kw in YOUTH_RESERVE_KEYWORDS):
+    if any(kw in text for kw in YOUTH_RESERVE_KEYWORDS) or mentions_reserve_team(text, target_team, away_team):
         score -= 80.0
 
     # Ambiguity penalty for video/social platforms or generic content

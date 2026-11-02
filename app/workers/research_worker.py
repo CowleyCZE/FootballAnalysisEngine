@@ -260,7 +260,9 @@ class ResearchWorker:
             }
 
         except Exception as err:
-            err_msg = str(err)
+            import logging
+            logging.getLogger(__name__).exception("RESEARCH job selhal před/po engine (domain=%s)", payload.get("domain"))
+            err_msg = f"{type(err).__name__}: {err}".rstrip(": ")
             if task_id:
                 try:
                     self.repository.mark_task_failed(int(task_id), err_msg)

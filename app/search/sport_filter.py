@@ -30,6 +30,8 @@ _BLOCKED_URL_PARTS = (
 NOISE_DOMAINS = (
     "livefootballtickets.com", "kooralivefree.com", "footballmanagerstory.com",
     "sportsdunia.com", "footballuser.com", "futbor.com", "skorjet.net",
+    # Běh M976_c93f (1. 11. 2026): hry, čínské diskusní fórum, cheaty/mody (nefotbalové weby v logách crawleru).
+    "poki.com", "zhihu.com", "wemod.com", "wemod.fun", "wemod.store",
 )
 # Štítky hostitele (první část domény) typické pro e-shopy a prodej vstupenek.
 NOISE_HOST_LABEL_PREFIXES = ("fanshop", "eshop", "e-shop", "shop", "tickets", "ticket", "vstupenky")

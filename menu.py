@@ -85,16 +85,10 @@ def normalize_name(name: str) -> str:
 
 
 def get_or_create_team(cursor: sqlite3.Cursor, name: str) -> int:
-    norm = normalize_name(name)
-    row = cursor.execute(
-        "SELECT id FROM teams WHERE normalized_name = ? OR lower(name) = ?", (norm, norm)
-    ).fetchone()
-    if row:
-        return int(row["id"])
-    cursor.execute(
-        "INSERT INTO teams (name, normalized_name) VALUES (?, ?)", (name.strip(), norm)
-    )
-    return int(cursor.lastrowid)
+    """TODO 11.28: jednotná identita týmů (aliasy, kanonický klíč). Dřívější vlastní varianta zakládala duplicity
+    („Zlín“ vedle „FC FASTAV Zlin“), takže zápas neměl historii ani xG."""
+    from app.database.team_identity import get_or_create_team as canonical_get_or_create_team
+    return canonical_get_or_create_team(cursor.connection, name)
 
 
 def get_or_create_competition(cursor: sqlite3.Cursor, name: str) -> int:

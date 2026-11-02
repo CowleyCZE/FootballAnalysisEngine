@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 class EvidenceItem(BaseModel):
     evidence_id: Optional[int] = None
@@ -21,6 +21,20 @@ class KeyFactor(BaseModel):
     factor: str
     importance: float = Field(ge=0.0, le=1.0)
     evidence_ids: List[int] = Field(default_factory=list)
+
+    @field_validator("importance", mode="before")
+    @classmethod
+    def _normalize_importance(cls, value):
+        """Běh M976_9599: model 3b vrátil `importance` 3 a 2 (pořadí/stupnice) a celý výstup spadl na Pydantic chybě.
+        Je to jen váha faktoru (není to tvrzení ani důkaz): 1 < x ≤ 10 → x/10, 10 < x ≤ 100 → x/100; větší, záporné
+        nebo nenumerické hodnoty se dál odmítají (fail-closed). Hodnoty v [0, 1] se nemění."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return value
+        if 1 < value <= 10:
+            return value / 10.0
+        if 10 < value <= 100:
+            return value / 100.0
+        return value
 
 class DataQuality(BaseModel):
     score: float = Field(ge=0.0, le=1.0)

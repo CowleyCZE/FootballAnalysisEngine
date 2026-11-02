@@ -476,7 +476,7 @@ def test_reanalysis_ai_worker_uses_payload_cutoff(orch_db, monkeypatch):
             # Malý výstup AIOutput; faktor odkazuje na existující evidence_id (11.16/11.25).
             return json.dumps({
                 "conclusion": "Done",
-                "key_factors": [{"factor": "Dobrá forma Arsenalu", "importance": 0.8, "evidence_ids": [501]}],
+                "key_factors": [{"factor": "Arsenal good form, won four in a row", "importance": 0.8, "evidence_ids": [501]}],
                 "uncertainties": [],
             })
 

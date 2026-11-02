@@ -7,6 +7,8 @@ from app.research.topic_terms import get_topic_terms
 from app.statistics.history_autofill import ALIASES_FILE, _load_aliases, canonical_team_key, resolve_team_key
 
 MAX_EVIDENCE_PER_DOCUMENT = 40
+# Domény o dvojici týmů: dokument se bere jen tehdy, když zmiňuje oba týmy.
+PAIR_DOMAINS = frozenset({"RIVALRY", "HEAD_TO_HEAD"})
 
 
 def _fold(value: str) -> str:
@@ -97,7 +99,13 @@ class EvidenceExtractor:
         forms = entity_forms(entities or [])
         if forms:
             haystack = _fold(f"{doc.get('title', '')} {text}")
-            if not document_mentions_entity(haystack, forms):
+            teams = [str(e) for e in (entities or []) if e]
+            if str(domain).upper() in PAIR_DOMAINS and len(teams) >= 2:
+                # Běh M976_f6a9: do RIVALRY prošel článek o derby Slovan Bratislava – Spartak Trnava. Vzájemné domény
+                # (derby, H2H) jsou jen o dvojici z úkolu: dokument musí zmiňovat OBA týmy.
+                if not all(document_mentions_entity(haystack, entity_forms([team])) for team in teams):
+                    return []
+            elif not document_mentions_entity(haystack, forms):
                 return []  # dokument se netká týmů z úkolu (obecný text o klimatu, starověká Sparta apod.)
 
         evidence_list = []
@@ -147,8 +155,11 @@ class EvidenceExtractor:
             else:
                 evidence_list = evidence_list[:max_items]
 
-        if not evidence_list and sentences and not strict_sentences:
-            first_fragment = " ".join(sentences[:3])
+        # Záložní fragment (běh M944): dřív bral první 3 věty bez filtru, takže cookie lišta, odkazy na sociální sítě a
+        # menu šly do claimů s vysokou důvěryhodností. Nyní jen z vět, které prošly `sentence_is_relevant`.
+        relevant_sentences = [s for s in sentences if sentence_is_relevant(s)]
+        if not evidence_list and relevant_sentences and not strict_sentences:
+            first_fragment = " ".join(relevant_sentences[:3])
             evidence_list.append(Evidence(
                 source_url=url,
                 text_fragment=first_fragment[:500],

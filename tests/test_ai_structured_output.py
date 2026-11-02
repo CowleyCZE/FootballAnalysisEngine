@@ -9,7 +9,8 @@ from app.workers.ai_worker import AIWorker
 
 CTX = {
     "data_quality": {"score": 0.5, "source_count": 3},
-    "claims": [{"claim_id": 1, "evidence": [{"evidence_id": 100}, {"evidence_id": 101}]}],
+    "claims": [{"claim_id": 1, "subject": "Sparta", "predicate": "form", "object": "dobrý",
+                 "evidence": [{"evidence_id": 100}, {"evidence_id": 101}]}],
     "conflicts": [{"subject": "Sparta", "predicate": "form", "detail": "rozpor"}],
 }
 
@@ -21,7 +22,7 @@ def _compose(payload, ctx=CTX):
 
 def test_compose_uses_system_fields_not_ai_fields():
     res, err = _compose({"match_id": 1, "status": "complete", "conclusion": "Shrnutí zápasu.",
-                         "key_factors": [{"factor": "f", "importance": 0.5, "evidence_ids": [100]}],
+                         "key_factors": [{"factor": "forma týmu", "importance": 0.5, "evidence_ids": [100]}],
                          "data_quality": {"score": 0.99}, "home_team_analysis": {"strengths": ["x"]}})
     assert res is not None, err
     assert res.match_id == 593

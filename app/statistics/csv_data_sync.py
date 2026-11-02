@@ -423,7 +423,11 @@ def refresh_stale(db_path: str | Path, *, force: bool = False) -> dict[str, Any]
                     raise RuntimeError((proc.stderr or proc.stdout or f"Downloader ended with {proc.returncode}")[-4000:])
                 imported=import_csv_files(outputs,db_path)
                 if imported["errors"] or imported["matches"] < 1:
-                    raise RuntimeError("Stažené CSV neobsahuje importovatelná utkání: "+"; ".join(imported["errors"][:3]))
+                    # Běh M976: zpráva končila prázdným dvojtečkou – přidán počet řádků CSV a konec výstupu downloaderu.
+                    rows_in_csv = sum(len(_read_csv(p)[0]) for p in outputs)
+                    tail = ((proc.stdout or "") + " " + (proc.stderr or "")).strip()[-600:]
+                    raise RuntimeError(f"Stažené CSV neobsahuje importovatelná utkání (řádků v CSV: {rows_in_csv}, "
+                                       f"chyby: {'; '.join(imported['errors'][:3]) or 'žádné'}). Výstup downloaderu: {tail or '(prázdný)'}")
                 with sqlite3.connect(db_path) as conn:
                     if key == "european_cups":
                         through=conn.execute("SELECT MAX(substr(m.scheduled_at,1,10)) FROM matches m JOIN match_statistics s ON s.match_id=m.id WHERE m.competition LIKE 'UEFA %' AND s.home_goals IS NOT NULL").fetchone()[0]

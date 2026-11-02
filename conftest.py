@@ -23,6 +23,8 @@ def _isolate_environment(monkeypatch):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("FAE_AUTO_HISTORY", "0")
     monkeypatch.setenv("FAE_ONLINE_HISTORY", "0")
+    # Předfiltr zmínky týmu (app/research/team_mention.py) je v produkci zapnutý; staré testy používají obecné výsledky.
+    monkeypatch.setenv("FAE_REQUIRE_TEAM_MENTION", "0")
     yield
 
 

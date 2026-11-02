@@ -1,4 +1,5 @@
 import uuid
+import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +16,7 @@ from app.research.search_adapter import SearchAdapter
 from app.search.models import SearchResult
 from app.research.document_processor import DocumentProcessor
 from app.research.evidence_extractor import EvidenceExtractor
+from app.research.team_mention import filter_by_team_mention
 from app.research.claim_builder import ClaimBuilder
 from app.research.claim_validator import ClaimValidator
 from app.research.conflict_detector import ConflictDetector
@@ -125,6 +127,13 @@ class ResearchEngine:
             return [], exc, None
         res = res if res is not None else []
         diag = getattr(res, "diagnostics", None) or getattr(self.search_adapter, "last_diagnostics", None)
+        if not team_name and not h2h_query:
+            # Zápasová doména bez týmového subjektu (GENERAL, EXPECTED_LINEUPS, RIVALRY, ...): SearchEngine zde identitu
+            # neověřuje, proto se před stahováním vyžaduje zmínka domácího nebo hostujícího týmu (běh M976_e7ab).
+            try:
+                res = filter_by_team_mention(res, task.domain, task.home_team, task.away_team)
+            except Exception:
+                logging.getLogger(__name__).exception("Předfiltr zmínky týmu selhal (doména %s)", task.domain)
         return res, None, diag
 
     def _search_parallel(self, task: ResearchTask, planned: List[Dict[str, Any]]) -> List[tuple]:
@@ -173,6 +182,9 @@ class ResearchEngine:
             search_results = []
             diag_warnings: List[str] = []
 
+            first_search_error: Optional[Exception] = None
+            failed_queries = 0
+
             for q, (res, search_err, diag) in zip(planned_queries, self._search_parallel(task, planned_queries)):
                 if diag and hasattr(diag, "drop_reasons") and diag.drop_reasons:
                     diag_warnings.extend(diag.drop_reasons)
@@ -183,9 +195,17 @@ class ResearchEngine:
                     pass
 
                 if search_err is not None:
-                    raise search_err
+                    # Jeden vypršelý dotaz nesmí shodit celou doménu (běh M976: ReadTimeout → 8× FAILED).
+                    failed_queries += 1
+                    first_search_error = first_search_error or search_err
+                    diag_warnings.append(f"Dotaz selhal ({type(search_err).__name__}): {q['query'][:80]}")
+                    continue
 
                 search_results.extend(res)
+
+            if first_search_error is not None and not search_results:
+                # všechny dotazy selhaly (SearXNG nedostupný) → skutečné FAILED se jménem výjimky
+                raise first_search_error
 
             metrics.search_results_count = len(search_results)
             if not search_results:
@@ -289,6 +309,7 @@ class ResearchEngine:
                     "object": c.object_value,
                     "normalized_value": c.normalized_value,
                     "source_date": c.source_date.isoformat() if c.source_date else None,
+                    "date_source": getattr(c, "date_source", None),
                     "confidence": c.confidence,
                     "status": c.status.value,
                     "evidence_list": [
@@ -308,6 +329,9 @@ class ResearchEngine:
             return ResearchResult(task_id=task.task_id, execution_id=exec_uuid, status=status, claims=claims, sources_count=metrics.sources_selected, documents_count=metrics.documents_parsed, evidence_count=len(all_evidence), conflicts_count=len(conflicted_claims), metrics=metrics)
 
         except Exception as e:
-            self.repository.complete_execution(exec_id, "FAILED", str(e))
+            # Běh M976: 8× FAILED s prázdnou chybou (výjimka s prázdným `str(e)`, nic v logu) → vždy typ výjimky + traceback.
+            logging.getLogger(__name__).exception("Research %s (task %s) selhal", task.domain, task.task_id)
+            detail = f"{type(e).__name__}: {e}".rstrip(": ")
+            self.repository.complete_execution(exec_id, "FAILED", detail)
             metrics.duration_ms = int((time.time() - start_time) * 1000)
-            return ResearchResult(task_id=task.task_id, execution_id=exec_uuid, status=ResearchStatus.FAILED, warnings=[str(e)], metrics=metrics)
+            return ResearchResult(task_id=task.task_id, execution_id=exec_uuid, status=ResearchStatus.FAILED, warnings=[detail], metrics=metrics)

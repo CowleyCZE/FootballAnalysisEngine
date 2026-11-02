@@ -18,7 +18,7 @@ TARGET = (
     else ROOT / f"services/searxng/runtime-config-{os.getuid()}/settings.yml"
 )
 TEMPLATE = ROOT / "services/searxng/core-config/settings.yml"
-SEARCH_ENGINES = ("bing", "seznam", "yep", "yahoo")
+SEARCH_ENGINES = ("yahoo", "duckduckgo", "bing", "mojeek")  # seznam/yep: timeouty/403 z Dockeru, brave: 429 (1. 11. 2026)
 
 
 def main() -> None:
@@ -52,6 +52,8 @@ def main() -> None:
 
     # These were each verified against the running local SearXNG instance.
     config["engines"] = [{"name": name, "disabled": False} for name in SEARCH_ENGINES]
+    # Krátké timeouty: jeden mrtvý engine nesmí zdržet celý dotaz.
+    config["outgoing"] = {"request_timeout": 6.0, "max_request_timeout": 10.0}
 
     fd, temp_name = tempfile.mkstemp(prefix=".settings-", dir=str(TARGET.parent))
     try:

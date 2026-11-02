@@ -143,6 +143,7 @@ class ContextBuilder:
                         "normalized_value": c_row["normalized_claim"],
                         "confidence": c_row["confidence"] or 0.5,
                         "status": c_row["status"] or "VALID",
+                        "date_source": c_row["date_source"] if "date_source" in c_row.keys() else None,
                         "evidence": evidence_list
                     })
         except Exception as err:
@@ -337,6 +338,57 @@ class ContextBuilder:
         return round(sum(scores) / len(scores), 2)
 
     @staticmethod
+    def _drop_stale_evidence(claims: List[Dict[str, Any]], max_age_days: int,
+                             now: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """Běh M975: AI postavila faktor „Slovácko má letos 1 výhru, 7 proher“ na důkazu starém ~14 let (audit
+        `stale_evidence` 125 086 h). Dle `published_at` starší důkaz než `max_age_days` se do kontextu AI nedostane;
+        claim, který tak přijde o veškerou evidenci, se vyřadí. Důkaz bez data se nemění (audit ho označí zvlášť).
+        Stejně se vyřadí evidence, jejíž text je UI/cookie šum (`sentence_is_relevant`) – stará evidence se při dalších
+        bězích znovu připojuje a nový filtr extraktoru ji neovlivní."""
+        from app.research.relevance_filter import sentence_is_relevant, is_table_noise
+        if max_age_days <= 0:
+            max_age_days = 10 ** 9
+        now = now or datetime.now(timezone.utc)
+        kept: List[Dict[str, Any]] = []
+        for claim in claims:
+            # Běh M976_1b8d: claim „Slovácko:profile:…StatisticsPldWDLGFGAGDPPGLast…“ měl šum v textu claimu; kontroluje se i on.
+            claim_text = f"{claim.get('subject') or ''} {claim.get('object') or claim.get('normalized_value') or ''}"
+            if is_table_noise(claim_text):
+                continue
+            evidence = claim.get("evidence") or []
+            fresh = []
+            for ev in evidence:
+                value = ev.get("published_at")
+                stale = False
+                if value:
+                    try:
+                        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        stale = (now - dt).days > max_age_days
+                    except (TypeError, ValueError):
+                        stale = False
+                if not stale:
+                    text = ev.get("text_fragment") or ev.get("excerpt") or ""
+                    if text and not sentence_is_relevant(str(text)):
+                        stale = True
+                if not stale:
+                    fresh.append(ev)
+            if evidence and not fresh:
+                continue
+            kept.append({**claim, "evidence": fresh} if len(fresh) != len(evidence) else claim)
+        return kept
+
+    # Nejvyšší počet claimů jednoho predikátu v AI kontextu, když je třeba výběr zkracovat (0 = bez limitu).
+    PREDICATE_CAPS: Dict[str, int] = {"rivalry_context": 5}
+
+    @staticmethod
+    def _newest_evidence_date(claim: Dict[str, Any]) -> str:
+        """Nejnovější `published_at` z důkazů claimu (ISO řetězec); bez data prázdný řetězec = nejnižší priorita."""
+        dates = [str(ev.get("published_at")) for ev in (claim.get("evidence") or []) if ev.get("published_at")]
+        return max(dates) if dates else ""
+
+    @staticmethod
     def _select_balanced_claims(claims: List[Dict[str, Any]], max_claims: int) -> List[Dict[str, Any]]:
         """Vybere až `max_claims` tvrzení vyváženě podle `predicate` (round-robin, uvnitř skupiny
         podle důvěryhodnosti). Čisté řazení podle důvěryhodnosti nechalo několik hlučných typů
@@ -348,6 +400,19 @@ class ContextBuilder:
         groups: Dict[str, List[Dict[str, Any]]] = {}
         for claim in by_conf:
             groups.setdefault(str(claim.get("predicate") or ""), []).append(claim)
+        # Běh 9ae1: ~15 historických rekordů hráčů v derby (důvěryhodnost 1,00) zabralo polovinu kontextu RIVALRY.
+        # U predikátů s limitem se preferují novější důkazy (published_at), pak důvěryhodnost, a vezme se nejvýše N.
+        for predicate, default_cap in ContextBuilder.PREDICATE_CAPS.items():
+            queue = groups.get(predicate)
+            if not queue:
+                continue
+            try:
+                cap = int(os.getenv("FAE_AI_RIVALRY_MAX_CLAIMS", str(default_cap))) if predicate == "rivalry_context" else default_cap
+            except ValueError:
+                cap = default_cap
+            if cap > 0 and len(queue) > cap:
+                queue.sort(key=lambda c: (ContextBuilder._newest_evidence_date(c), c.get("confidence", 0.0)), reverse=True)
+                groups[predicate] = queue[:cap]
         selected: List[Dict[str, Any]] = []
         queues = list(groups.values())
         while len(selected) < max_claims and any(queues):
@@ -397,6 +462,9 @@ class ContextBuilder:
 
         if conflicts is None:
             conflicts = []
+
+        claims = self._drop_stale_evidence(
+            claims, int(os.getenv("FAE_AI_MAX_EVIDENCE_AGE_DAYS", "730")))
 
         sorted_claims = self._select_balanced_claims(claims, max_claims)
 

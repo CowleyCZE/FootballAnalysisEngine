@@ -55,6 +55,12 @@ class OllamaClient:
                     resp = client.post(url, json=payload)
                     resp.raise_for_status()
                     data = resp.json()
+                    # Běh M1_53d1: „Unterminated string“ = výstup ořezaný limitem `num_predict` (nebo zacyklený model).
+                    # Ořezaná odpověď je vždy neplatný JSON, proto se hlásí s příčinou a zkusí se znovu.
+                    if require_json and str(data.get("done_reason") or "").lower() == "length":
+                        raise RuntimeError(
+                            f"Odpověď Ollamy byla ořezána limitem délky (done_reason=length, num_predict={options.get('num_predict')}, "
+                            f"vráceno {len(str(data.get('response') or ''))} znaků)")
                     return data.get("response", "")
             except Exception as e:
                 logger.warning(f"Ollama call attempt {attempt}/{self.max_retries} failed: {e}")

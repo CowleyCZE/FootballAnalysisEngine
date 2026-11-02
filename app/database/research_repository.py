@@ -255,7 +255,7 @@ class ResearchRepository:
                 normalized = str(claim.get("normalized_value", object_value))
                 status = str(claim.get("status", "UNVERIFIED"))
                 claim_text = f"{subject} {predicate} {object_value}".strip()
-                cur = conn.execute("INSERT INTO claims(run_id, match_id, claim_text, claim_type, normalized_claim, status, confidence, valid_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (run_db_id, claim.get("match_id", default_match_id), claim_text, predicate or None, normalized, status, float(claim.get("confidence", 1.0)), claim.get("source_date")))
+                cur = conn.execute("INSERT INTO claims(run_id, match_id, claim_text, claim_type, normalized_claim, status, confidence, valid_from, date_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (run_db_id, claim.get("match_id", default_match_id), claim_text, predicate or None, normalized, status, float(claim.get("confidence", 1.0)), claim.get("source_date"), claim.get("date_source")))
                 claim_id = int(cur.lastrowid)
                 for ev in claim.get("evidence_list", []):
                     url = str(ev.get("source_url", ""))
