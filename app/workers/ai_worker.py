@@ -46,6 +46,20 @@ def _stems(value: Any) -> set:
 
 _CAP_WORD = re.compile(r"[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]{3,}")
 
+_NATIONAL_TEAM_RE = re.compile(
+    r"\b(reprezentac\w*|narodn\w*\s+(tym\w*|muzstv\w*|vyber\w*)|national\s+(team|squad|side))")
+_INTERNATIONAL_COMPETITION_MARKERS = (
+    "reprezent", "world cup", "mistrovstvi", "euro 20", "uefa euro", "nations league", "liga narodu",
+    "kvalifikace", "qualif", "pratelsk", "friendly", "national",
+)
+
+
+def _national_team_mentions(text: Any, competition: Any) -> list:
+    comp = _fold_text(competition)
+    if any(marker in comp for marker in _INTERNATIONAL_COMPETITION_MARKERS):
+        return []
+    return [m.group(0) for m in _NATIONAL_TEAM_RE.finditer(_fold_text(text))]
+
 
 def _unknown_names(text: str, known_folded: str) -> list:
     """Běh M976_a388: AI napsala „Lzejka Líška byl povolán…“ – jméno, které není nikde v kontextu. Velká slova uprostřed věty
@@ -358,6 +372,12 @@ class AIWorker:
         conclusion = parsed.conclusion.strip()
         if not conclusion:
             return None, "AI nevrátila žádný závěr (conclusion)"
+        national = _national_team_mentions(
+            " ".join([conclusion] + [f.factor for f in parsed.key_factors] + [str(u) for u in parsed.uncertainties]),
+            (context.get("match") or {}).get("competition"))
+        if national:
+            return None, (f"Halucinace národních týmů: AI zmínila {sorted(set(national))[:3]} v klubovém zápase; "
+                          "výstup zamítnut.")
 
         try:
             data_quality = DataQuality.model_validate(context.get("data_quality") or {})
