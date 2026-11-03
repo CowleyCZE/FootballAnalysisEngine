@@ -6,6 +6,21 @@ from typing import Any, Dict, Iterable, Mapping, Optional
 
 PENALTY_XG_ESTIMATE = 0.79
 
+# TODO 11.34: metriky, které vyžadují data, jež feed ligy nemusí poskytovat (střelecké souřadnice,
+# penalty, game-state). Bez jediného pozorování se nezobrazují jako „N/A“, ale jako nepodporované feedem.
+FEED_DEPENDENT_METRICS = frozenset({
+    "npxg_for_ewma", "npxg_against_ewma", "npxgd_ewma",
+    "game_state_adj_xg_for_ewma", "game_state_adj_xg_against_ewma",
+})
+UNSUPPORTED_BY_FEED_LABEL = "nepodporováno feedem ligy"
+
+
+def metric_availability(metric: str, value: Optional[float], sample_size: Optional[int]) -> Optional[str]:
+    """Vrátí "UNSUPPORTED_BY_FEED", pokud metrika závislá na datech feedu nemá hodnotu ani jediný vzorek."""
+    if metric in FEED_DEPENDENT_METRICS and value is None and not sample_size:
+        return "UNSUPPORTED_BY_FEED"
+    return None
+
 
 def derive_npxg(total_xg: Optional[float], penalty_attempts: Optional[int],
                 penalty_xg: Optional[float] = None) -> Optional[float]:

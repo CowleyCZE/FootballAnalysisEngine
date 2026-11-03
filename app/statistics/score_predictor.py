@@ -29,6 +29,7 @@ class ExactScorePredictor:
     FORM_DECAY = 0.14  # exponenciální úbytek váhy starších zápasů (váha = exp(-FORM_DECAY * pořadí))
     HOME_ADV_SPLIT = 1.03  # domácí výhoda, když už je zahrnutá v domácích/venkovních rozděleních
     HOME_ADV_NO_SPLIT = 1.08  # domácí výhoda bez rozdělení domácí/venku
+    OUTCOME_CONSISTENT_TIP = True  # tip skóre leží uvnitř nejpravděpodobnějšího výsledku 1-X-2 (TODO 11.32)
 
     # Laditelné parametry (backtest, TODO 11.10 bod 2): rozsahy chrání model před absurdními hodnotami.
     TUNABLE_BOUNDS = {
@@ -376,15 +377,30 @@ class ExactScorePredictor:
         grid[(1, 1)] *= 1.0 - rho
         norm = sum(grid.values())
         grid = {key: value / norm for key, value in grid.items()}
-        best = max(grid, key=grid.get)
+        modal = max(grid, key=grid.get)
+        p_home = sum(p for (h, a), p in grid.items() if h > a)
+        p_draw = sum(p for (h, a), p in grid.items() if h == a)
+        p_away = sum(p for (h, a), p in grid.items() if h < a)
+        # Tip skóre musí souhlasit s nejpravděpodobnějším výsledkem 1-X-2 (TODO 11.32): samotný modus mřížky vychází
+        # při λ≈1,3–1,7 téměř vždy 1:1, i když je favoritem jeden z týmů. Vybere se nejpravděpodobnější skóre uvnitř favorizovaného výsledku.
+        favoured = max(("home", p_home), ("draw", p_draw), ("away", p_away), key=lambda item: item[1])[0]
+        if cls.OUTCOME_CONSISTENT_TIP:
+            in_outcome = {k: v for k, v in grid.items()
+                          if (k[0] > k[1] if favoured == "home" else k[0] == k[1] if favoured == "draw" else k[0] < k[1])}
+            best = max(in_outcome, key=in_outcome.get)
+        else:
+            best = modal
+        factors["tip_outcome"] = favoured
+        factors["modal_score"] = f"{modal[0]}-{modal[1]}"
+        factors["tip_is_modal_score"] = best == modal
         return {
             # Přípona "+tuned" = použity parametry z backtestu (config/model_params.yaml) → predikce je dohledatelná.
             "model_version": cls.MODEL_VERSION + ("+tuned" if cls._TUNED else ""),
             "expected_home_goals": round(lam_home, 3), "expected_away_goals": round(lam_away, 3),
             "predicted_home_goals": best[0], "predicted_away_goals": best[1],
-            "home_win_probability": round(sum(p for (h, a), p in grid.items() if h > a), 6),
-            "draw_probability": round(sum(p for (h, a), p in grid.items() if h == a), 6),
-            "away_win_probability": round(sum(p for (h, a), p in grid.items() if h < a), 6),
+            "home_win_probability": round(p_home, 6),
+            "draw_probability": round(p_draw, 6),
+            "away_win_probability": round(p_away, 6),
             "score_probabilities": {f"{h}-{a}": round(p, 8) for (h, a), p in sorted(grid.items(), key=lambda item: item[1], reverse=True)[:10]},
             "sample_size": home_n + away_n,
             "factors": factors,

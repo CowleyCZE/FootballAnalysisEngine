@@ -553,12 +553,20 @@ def show_analysis_results() -> None:
     if snapshots:
         print(f"  {'Tým':<20} {'Metrika':<15} {'Hodnota':<10} {'Sample':<8} {'xG cov.':<10} {'Cutoff':<20}")
         print("  " + "-" * 85)
+        unsupported_seen = False
         for snap in snapshots:
+            from app.statistics.team_features import metric_availability, UNSUPPORTED_BY_FEED_LABEL
             tname = snap["team_name"] or "Zápas/Celkem"
-            val = f"{snap['value']:.2f}" if snap["value"] is not None else "N/A"
+            if metric_availability(snap["metric"], snap["value"], snap["sample_size"]):
+                val = "nepodpor."
+                unsupported_seen = True
+            else:
+                val = f"{snap['value']:.2f}" if snap["value"] is not None else "N/A"
             cov = f"{snap['coverage'] * 100:.0f}%" if snap["coverage"] is not None else "?"
             cutoff_val = snap["data_cutoff_at"][:19] if snap["data_cutoff_at"] else "?"
             print(f"  {tname:<20} {snap['metric']:<15} {val:<10} {snap['sample_size']:<8} {cov:<10} {cutoff_val:<20}")
+        if unsupported_seen:
+            print(f"  * nepodpor. = {UNSUPPORTED_BY_FEED_LABEL} (zdroj neobsahuje střelecké souřadnice/penalty/game-state data).")
     else:
         stats = conn.execute(
             "SELECT * FROM match_statistics WHERE match_id = ?", (match_id,)

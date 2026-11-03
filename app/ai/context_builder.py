@@ -8,6 +8,9 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+from app.statistics.team_features import metric_availability
+from app.research.staleness import max_age_days_for, TIME_SENSITIVE_MAX_AGE_DAYS
+
 
 class ContextBuilder:
     def __init__(self, repository=None, db_path: str = "database/football.db"):
@@ -288,7 +291,7 @@ class ContextBuilder:
                     if key in seen:
                         continue
                     seen.add(key)
-                    snapshots.append({
+                    snapshot = {
                         "team": sides.get(r["team_id"]),
                         "metric": r["metric"],
                         "value": r["value"],
@@ -296,7 +299,12 @@ class ContextBuilder:
                         "coverage": r["coverage"],
                         "data_cutoff_at": r["data_cutoff_at"],
                         "calculation_version": r["calculation_version"],
-                    })
+                    }
+                    # TODO 11.34: metrika bez dat feedu je označen jako nepodporovaná, ne jako chybějící hodnota.
+                    availability = metric_availability(r["metric"], r["value"], r["sample_size"])
+                    if availability:
+                        snapshot["availability"] = availability
+                    snapshots.append(snapshot)
                 return snapshots
         except Exception as err:
             logger.warning(f"Failed to load statistical snapshots from DB: {err}")
@@ -356,6 +364,11 @@ class ContextBuilder:
             if is_table_noise(claim_text):
                 continue
             evidence = claim.get("evidence") or []
+            # TODO 11.35: limit podle domény (365 dní časově senzitivní, 10 let H2H/rivalita), jinak max_age_days.
+            domain_limit = max_age_days_for(claim.get("predicate"))
+            claim_limit = max_age_days if domain_limit is None else (
+                domain_limit if max_age_days >= 10 ** 9 else (
+                    min(max_age_days, domain_limit) if domain_limit == TIME_SENSITIVE_MAX_AGE_DAYS else domain_limit))
             fresh = []
             for ev in evidence:
                 value = ev.get("published_at")
@@ -365,7 +378,7 @@ class ContextBuilder:
                         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
                         if dt.tzinfo is None:
                             dt = dt.replace(tzinfo=timezone.utc)
-                        stale = (now - dt).days > max_age_days
+                        stale = (now - dt).days > claim_limit
                     except (TypeError, ValueError):
                         stale = False
                 if not stale:

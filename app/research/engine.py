@@ -19,6 +19,7 @@ from app.research.evidence_extractor import EvidenceExtractor
 from app.research.team_mention import filter_by_team_mention
 from app.research.claim_builder import ClaimBuilder
 from app.research.claim_validator import ClaimValidator
+from app.research.rivalry_guard import rivalry_rejection_reason
 from app.research.conflict_detector import ConflictDetector
 from app.database.research_repository import ResearchRepository
 
@@ -285,13 +286,24 @@ class ResearchEngine:
             subject_team = self.subject_team_name(task)
             entities = [subject_team] if subject_team else [task.home_team, task.away_team]
             for doc in crawled_docs:
-                all_evidence.extend(self.evidence_extractor.extract_evidence(
-                    doc, task.domain, entities=entities))
+                try:
+                    extracted = self.evidence_extractor.extract_evidence(
+                        doc, task.domain, entities=entities, competition=task.competition)
+                except TypeError:  # vstřiknutý/legacy extraktor bez parametru `competition`
+                    extracted = self.evidence_extractor.extract_evidence(doc, task.domain, entities=entities)
+                all_evidence.extend(extracted)
 
             team_name = self.subject_team_name(task)
             claims = self.claim_builder.build_claims_from_evidence(all_evidence, team_name)
             metrics.claims_count = len(claims)
             claims = self.claim_validator.validate_claims(claims, task.data_cutoff_at)
+            # TODO 12.3: tvrzení o derby/rivalitě musí v kontextu zmiňovat OBA soupeře z úkolu (jinak zamítnuto).
+            for claim in claims:
+                if claim.predicate == "rivalry_context" and claim.status == ClaimStatus.VALID:
+                    reason = rivalry_rejection_reason(str(claim.object_value), task.home_team, task.away_team)
+                    if reason:
+                        claim.status = ClaimStatus.REJECTED
+                        claim.reject_reason = reason
             if hasattr(self.claim_validator, "apply_source_weights"):
                 claims = self.claim_validator.apply_source_weights(claims, self.source_registry)
             claims = self.conflict_detector.detect_and_resolve(claims)

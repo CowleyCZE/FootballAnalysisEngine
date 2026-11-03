@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from app.research.models import Claim, ClaimStatus
 from app.research.cutoff_filter import CutoffFilter
+from app.research.staleness import STALE_REJECTED, is_stale
 
 TIME_SENSITIVE_PREDICATES = {
     "availability_status", "absence_report", "match_identity", "team_form",
@@ -138,6 +139,11 @@ class ClaimValidator:
                 passed, reason = CutoffFilter.validate(ev.published_at, cutoff_at, policy="unverified_date")
                 if not passed:
                     valid_ev = False
+                    break
+                # TODO 11.35: absolutní horní mez stáří (365 dní časově senzitivné, 10 let statické).
+                if is_stale(ev.published_at, cutoff_at, claim.predicate):
+                    valid_ev = False
+                    claim.reject_reason = STALE_REJECTED
                     break
                 if reason == "UNVERIFIED_DATE":
                     if reject_undated:

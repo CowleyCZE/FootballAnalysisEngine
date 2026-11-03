@@ -84,7 +84,8 @@ def keywords_for_domain(domain: str) -> List[str]:
 class EvidenceExtractor:
     def extract_evidence(self, doc: Dict[str, Any], domain: str,
                          entities: Optional[Iterable[str]] = None,
-                         max_items: int = MAX_EVIDENCE_PER_DOCUMENT) -> List[Evidence]:
+                         max_items: int = MAX_EVIDENCE_PER_DOCUMENT,
+                         competition: Optional[str] = None) -> List[Evidence]:
         text = doc.get("text", "")
         url = doc.get("url", "")
         pub_at = doc.get("published_at")
@@ -119,7 +120,7 @@ class EvidenceExtractor:
 
         for sent in sentences:
             sent_lower = sent.lower()
-            if not sentence_is_relevant(sent):
+            if not sentence_is_relevant(sent, competition):
                 continue  # UI/metadata (YouTube, cookies…) a starověká historie nejsou důkaz
             if strict_sentences and not any(form in _fold(sent) for form in forms):
                 continue
@@ -157,7 +158,7 @@ class EvidenceExtractor:
 
         # Záložní fragment (běh M944): dřív bral první 3 věty bez filtru, takže cookie lišta, odkazy na sociální sítě a
         # menu šly do claimů s vysokou důvěryhodností. Nyní jen z vět, které prošly `sentence_is_relevant`.
-        relevant_sentences = [s for s in sentences if sentence_is_relevant(s)]
+        relevant_sentences = [s for s in sentences if sentence_is_relevant(s, competition)]
         if not evidence_list and relevant_sentences and not strict_sentences:
             first_fragment = " ".join(relevant_sentences[:3])
             evidence_list.append(Evidence(

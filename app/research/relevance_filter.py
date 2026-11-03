@@ -85,6 +85,11 @@ BOILERPLATE_MARKERS = (
     "bosna a hercegovina", "dominikánská republika", "dominikanska republika", "free.follow",
     # Běh M976_6f8d (RIVALRY): reklama premium předplatného tipsterů (REJECTED, ale pro jistotu i jako šum).
     "unblurs", "verified win rate", "upgrade to premium",
+    # Běh M979 (12.2): právní/hazardní varování (fr/es/nl/cs/en). Pozor: samotné „hazard“ se nefiltruje (Eden Hazard).
+    "jeux d’argent", "jeux d'argent", "jeu excessif", "juego responsable", "juego puede", "juegos de azar",
+    "speel verantwoord", "gokken kan", "kansspel", "gamble responsibly", "gambling can be addictive",
+    "play responsibly", "begambleaware", "hazardní hr", "hazardních hr", "může způsobit závislost", "může být návykov",
+    "hraní hazardních", "zakazeno osobám mladším 18", "zakázáno osobám mladším 18",
 )
 
 # Slovník šablonových nadpisů statistických portálů („Scoring Consistency“, „Recent Form Home/Away“…).
@@ -190,10 +195,84 @@ def _is_stats_heading(sentence: str) -> bool:
     return len(words) >= 2 and all(w in _STATS_HEADING_WORDS for w in words)
 
 
+# TODO 12.1: komunální politika, magistrátní zprávy, dopravní uzavírky a městské zakázky (název klubu
+# obsahuje město – „Artis Brno“ → články z brněnského magistrátu). Porovnává se bez diakritiky.
+MUNICIPAL_MARKERS = (
+    "magistrat", "primator", "zastupitelstv", "radnic", "rada mesta", "rady mesta", "komunalni", "zastupitel",
+    "starosta", "starosty", "starostovi", "starostu", "starostou", "starostka", "mestska cast", "mestske casti",
+    "verejna zakazk", "verejne zakazk", "verejnou zakazk", "mestske zakazk", "mestskou zakazk", "vyberove rizeni",
+    "uzavirk", "dopravni omezeni", "dopravni obsluznost", "dpmb", "mhd", "komunikace s obcany",
+    "rozpocet mesta", "rozpoctu mesta", "koalicn", "opozicn",
+)
+# Fotbalový kontext věty (navíc k FOOTBALL_CONTEXT): věta o fotbalu zmiňující starostu nebo radnici není šum.
+_MUNICIPAL_FOOTBALL_EXEMPT = ("hrac", "klub", "fotbalist", "sestav", "liga", "ligov", "gol ", "branka", "branky")
+
+
+def is_municipal_noise(sentence: str) -> bool:
+    """Věta o komunální politice / magistrátu / dopravních uzavírkách / městských zakázkách bez fotbalového kontextu."""
+    folded = _fold(sentence)
+    if not any(marker in f" {folded} " or marker in folded for marker in MUNICIPAL_MARKERS):
+        return False
+    return not (has_football_context(folded) or any(word in f" {folded} " for word in _MUNICIPAL_FOOTBALL_EXEMPT))
+
+
+# TODO 12.2: detekce francouzských/španělských/nizozemských odstavců (právní a sázkový balašt). Heuristika podle
+# počtu různých typických funkčních slov (bez diakritiky); musí převládat nad češtinou i angličtinou.
+_FOREIGN_STOPWORDS = {
+    "fr": frozenset({"les", "des", "une", "est", "sont", "peuvent", "etre", "pour", "dans", "avec", "que", "qui",
+                     "sur", "pas", "aux", "du", "au", "vous", "nous", "cette", "ces", "jeux", "argent", "hasard"}),
+    "es": frozenset({"los", "las", "del", "una", "es", "son", "pueden", "ser", "para", "con", "por", "que", "se",
+                     "su", "sus", "juego", "juegos", "azar", "puede", "como", "mas"}),
+    "nl": frozenset({"het", "een", "van", "zijn", "kunnen", "voor", "dat", "met", "niet", "je", "ook", "maar",
+                     "naar", "worden", "wordt", "gokken", "spelen", "verslavend", "kan"}),
+}
+_COMMON_STOPWORDS = {
+    "en": frozenset({"the", "and", "of", "to", "in", "is", "are", "for", "with", "on", "that", "this", "will",
+                     "have", "has", "was", "were", "from", "by", "at", "as", "be"}),
+    "cs": frozenset({"je", "se", "na", "v", "ve", "z", "do", "pro", "ze", "jsou", "byl", "byla", "bude", "ale",
+                     "jako", "po", "od", "to", "si", "nebo", "tym", "zapas", "hrac", "klub"}),
+}
+
+
+def detect_foreign_language(sentence: str) -> str | None:
+    """Vrátí 'fr' / 'es' / 'nl', pokud věta (≥ 5 slov) jasně není česky ani anglicky; jinak None."""
+    folded = _fold(sentence)
+    if re.search(r"[ěščřžýů]", str(sentence or "").lower()):
+        return None  # česká diakritika
+    tokens = re.findall(r"[a-z]+", folded)
+    if len(tokens) < 5:
+        return None
+    known = set(tokens)
+    base = max(len(known & _COMMON_STOPWORDS["en"]), len(known & _COMMON_STOPWORDS["cs"]))
+    best_lang, best = None, 0
+    for lang, words in _FOREIGN_STOPWORDS.items():
+        hits = len(known & words)
+        if hits > best:
+            best_lang, best = lang, hits
+    return best_lang if best >= 3 and best > base else None
+
+
+INTERNATIONAL_COMPETITION_MARKERS = ("uefa", "liga mistr", "champions", "europa", "conference", "evropsk",
+                                     "european", "pohar", "cup")
+
+
+def is_international_competition(competition: str | None) -> bool:
+    folded = _fold(competition or "")
+    return any(marker in folded for marker in INTERNATIONAL_COMPETITION_MARKERS)
+
+
+def is_foreign_language_noise(sentence: str, competition: str | None = None) -> bool:
+    """Věta ve francouzštině/španělštině/nizozemštině u domací ligy (ne u mezinárodního poháru)."""
+    if is_international_competition(competition):
+        return False
+    return detect_foreign_language(sentence) is not None
+
+
 def is_boilerplate_sentence(sentence: str) -> bool:
     low = f" {str(sentence or '').lower()} "
     return (_is_social_link_list(low) or _is_fixture_label(sentence) or is_table_noise(sentence)
             or _is_stats_heading(sentence) or _is_country_list(sentence)
+            or is_municipal_noise(sentence)
             or any(marker in low for marker in BOILERPLATE_MARKERS))
 
 
@@ -202,6 +281,7 @@ def is_ancient_history_sentence(sentence: str) -> bool:
     return any(marker in low for marker in STRONG_ANCIENT_MARKERS)
 
 
-def sentence_is_relevant(sentence: str) -> bool:
-    """Věta není UI šum ani starověká historie."""
-    return not (is_boilerplate_sentence(sentence) or is_ancient_history_sentence(sentence))
+def sentence_is_relevant(sentence: str, competition: str | None = None) -> bool:
+    """Věta není UI šum, starověká historie ani cizojazyčný balašt (u domací ligy)."""
+    return not (is_boilerplate_sentence(sentence) or is_ancient_history_sentence(sentence)
+                or is_foreign_language_noise(sentence, competition))

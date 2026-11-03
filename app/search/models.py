@@ -37,6 +37,7 @@ class SearchDiagnostics:
     engine_errors: list[str] | None = None
     engines_used: list[str] | None = None
     unverified_date_count: int = 0
+    identity_dropped_samples: list[str] | None = None
 
     @property
     def drop_reasons(self) -> list[str]:
@@ -62,4 +63,6 @@ class SearchDiagnostics:
                 reasons.append(f"{self.unverified_date_count} výsledků prošlo s neověřeným datem publikace a sníženou důvěrou.")
             if self.final_count < self.cutoff_filtered_count:
                 reasons.append(f"Identitní/relevanční filtr vyřadil {self.cutoff_filtered_count - self.final_count} výsledků (nedostatečná shoda týmu/soutěže).")
+                if self.identity_dropped_samples:
+                    reasons.append("Příklady vyřazených výsledků: " + " | ".join(self.identity_dropped_samples[:3]))
         return reasons

@@ -49,11 +49,18 @@ class CoverageEngine:
                 status == "NO_RESULT" and t["domain"] in ResearchPolicy.NO_RESULT_ACCEPTED_DOMAINS
             )
 
+        # Doména je dokončená, pokud je dokončený aspoň jeden její task: opravný task (cyklus `REPAIR-COVERAGE`)
+        # tak nahradí dřívější selhání/NO_RESULT téže domény (běh M979_3ef7: TEAM_PROFILE_HOME).
+        done_domains = {t["domain"] for t in tasks if _done(t)}
+
+        def _done_eff(t) -> bool:
+            return _done(t) or t["domain"] in done_domains
+
         total_tasks = len(tasks)
-        completed_tasks = sum(1 for t in tasks if _done(t))
+        completed_tasks = sum(1 for t in tasks if _done_eff(t))
 
         required_tasks = [t for t in tasks if t["required"] == 1]
-        required_completed = sum(1 for t in required_tasks if _done(t))
+        required_completed = sum(1 for t in required_tasks if _done_eff(t))
 
         all_required_done = (len(required_tasks) == required_completed)
         req_coverage = round(required_completed / len(required_tasks), 2) if required_tasks else 1.0
@@ -63,9 +70,12 @@ class CoverageEngine:
         critical_conflicts = sum(1 for c in conflicts if c["severity"] in ["HIGH", "CRITICAL"])
 
         blocking_reasons = []
+        missing_domains: List[str] = []
         if not all_required_done:
-            missing = [t["domain"] for t in required_tasks if not _done(t)]
-            blocking_reasons.append(f"Chybí dokončení povinných domén: {', '.join(missing)}")
+            for t in required_tasks:
+                if not _done_eff(t) and t["domain"] not in missing_domains:
+                    missing_domains.append(t["domain"])
+            blocking_reasons.append(f"Chybí dokončení povinných domén: {', '.join(missing_domains)}")
 
         if critical_conflicts > 0:
             blocking_reasons.append(f"Nalezeno {critical_conflicts} nevyřešených kritických konfliktů v datech.")
@@ -80,5 +90,6 @@ class CoverageEngine:
             required_complete=all_required_done,
             coverage_score=coverage_score,
             critical_conflicts=critical_conflicts,
-            blocking_reasons=blocking_reasons
+            blocking_reasons=blocking_reasons,
+            missing_domains=missing_domains,
         )

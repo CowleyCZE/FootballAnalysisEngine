@@ -103,6 +103,7 @@ class SearchEngine:
         terms = topic_terms or []
 
         validated_results = []
+        dropped_samples: list[str] = []
         for result in cutoff_filtered:
             info = self.source_registry.get_info(result.url)
             result.source_type = info["source_type"]
@@ -122,10 +123,12 @@ class SearchEngine:
             if (home_team or away_team) and not (home_team and away_team):
                 effective_identity_threshold = min(0.30, min_identity_confidence)
             if (home_team or away_team) and effective_identity_threshold > 0 and confidence < effective_identity_threshold:
+                dropped_samples.append(f"{(result.title or '')[:60]} <{result.url[:80]}>")
                 continue
             # Dotaz na profil jednoho týmu (`team` bez home/away): dříve se identita neoveróvala
             # vůbec a do research pronikly ne-fotbalové weby (běh M589). Zmínka týmu je povinná.
             if team and not (home_team or away_team) and not self._mentions_team(result, team):
+                dropped_samples.append(f"{(result.title or '')[:60]} <{result.url[:80]}>")
                 continue
 
             result.relevance = calculate_relevance(
@@ -163,6 +166,7 @@ class SearchEngine:
             engine_errors=engine_errors,
             engines_used=engines_used,
             unverified_date_count=unverified_date_count,
+            identity_dropped_samples=dropped_samples,
         )
         self.last_diagnostics = diag
         return validated_results

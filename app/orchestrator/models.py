@@ -58,3 +58,4 @@ class ResearchReadiness(BaseModel):
     critical_conflicts: int
     warnings: List[str] = Field(default_factory=list)
     blocking_reasons: List[str] = Field(default_factory=list)
+    missing_domains: List[str] = Field(default_factory=list)

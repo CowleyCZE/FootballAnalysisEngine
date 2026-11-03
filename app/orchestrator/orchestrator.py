@@ -649,17 +649,7 @@ class MasterOrchestrator:
                             self.state_machine.transition_to(run_id, MatchState.RESEARCHING, f"Coverage check failed ({reasons}) - cycle {cycle}")
                             match_ident = self._get_match_identity_from_id(match_id, data_cutoff_at=run_cutoff_dt)
                             if match_ident:
-                                task_reqs = [
-                                    TaskRequirement(
-                                        task_uuid=f"REPAIR-COVERAGE-{run_id}-{cycle}-{uuid.uuid4().hex[:6]}",
-                                        domain="GENERAL",
-                                        task_type="FACT_COLLECTION",
-                                        description=f"Repair research for missing coverage: {reasons}",
-                                        priority=80,
-                                        required=False,
-                                        capabilities_required=["RESEARCH"],
-                                    )
-                                ]
+                                task_reqs = self._coverage_repair_tasks(run_id, cycle, reasons, readiness.missing_domains, match_ident)
                                 self._dispatch_research_tasks(task_reqs, match_id, run_id, match_ident)
                         else:
                             self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Coverage check failed and max cycles reached: {reasons}")
@@ -769,6 +759,39 @@ class MasterOrchestrator:
                     self.state_machine.transition_to(run_id, MatchState.COMPLETED, "All jobs completed and coverage passed")
                 else:
                     self.state_machine.transition_to(run_id, MatchState.UNRESOLVED, f"Finalizing failed coverage check: {', '.join(readiness.blocking_reasons)}")
+
+    @staticmethod
+    def _coverage_repair_tasks(run_id: str, cycle: int, reasons: str, missing_domains: List[str],
+                               match_ident: MatchIdentity) -> List[TaskRequirement]:
+        """Opravné tasky při neúspěné coverage: znovu se spustí každá chybějící povinná doména (běh M979_3ef7:
+        TEAM_PROFILE_HOME skončil NO_RESULT a dřívější opravný task GENERAL ho nikdy nemohl doplnět) + obecný GENERAL."""
+        tasks: List[TaskRequirement] = []
+        for domain in missing_domains or []:
+            if domain in ("STATISTICS", "GENERAL"):
+                continue
+            task_type = "NEWS_COLLECTION" if domain.startswith(("TEAM_PROFILE", "ABSENCES_")) else "FACT_COLLECTION"
+            subject = (match_ident.home_team_id if domain.endswith("_HOME")
+                       else match_ident.away_team_id if domain.endswith("_AWAY") else None)
+            tasks.append(TaskRequirement(
+                task_uuid=f"REPAIR-COVERAGE-{run_id}-{cycle}-{uuid.uuid4().hex[:6]}",
+                domain=domain,
+                task_type=task_type,
+                description=f"Opakuj research domény {domain} (chybějící coverage): {reasons}",
+                priority=90,
+                required=False,
+                capabilities_required=["SEARCH", "CRAWL"],
+                subject_team_id=subject,
+            ))
+        tasks.append(TaskRequirement(
+            task_uuid=f"REPAIR-COVERAGE-{run_id}-{cycle}-{uuid.uuid4().hex[:6]}",
+            domain="GENERAL",
+            task_type="FACT_COLLECTION",
+            description=f"Repair research for missing coverage: {reasons}",
+            priority=80,
+            required=False,
+            capabilities_required=["RESEARCH"],
+        ))
+        return tasks
 
     @staticmethod
     def _is_repair_job(job, run_id: str, cycle: int) -> bool:

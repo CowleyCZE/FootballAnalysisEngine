@@ -13,6 +13,7 @@ import logging
 import math
 import os
 import re
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -35,10 +36,14 @@ LOG = logging.getLogger(__name__)
 
 # TTL follows how quickly the feed changes, with a six-hour retry delay after
 # failures so a broken upstream does not stall every prediction.
+# Limit běhu downloaderu (s). Scrapery procházejí stovky detailů zápasů (~2 s/zápas),
+# proto je xG feed delší; po vypršení se zabije celá skupina procesů (včetně Chromia).
+DEFAULT_DOWNLOADER_TIMEOUT = 360
+
 FEEDS = {
-    "chance_liga": {"competition": "Chance Liga", "ttl": timedelta(hours=24),
+    "chance_liga": {"competition": "Chance Liga", "ttl": timedelta(hours=24), "timeout": 900,
                     "script": "stahni_chanceliga.py", "outputs": ["chance_liga_dataset.csv"]},
-    "chance_liga_xg": {"competition": "Chance Liga", "ttl": timedelta(days=7),
+    "chance_liga_xg": {"competition": "Chance Liga", "ttl": timedelta(days=7), "timeout": 1200,
                        "script": "stahni_xg_oficialni.py", "outputs": ["czech_league_xg_dataset.csv"]},
     "european_cups": {"competition": "European Cups", "ttl": timedelta(hours=24),
                        "script": "stahni_evropske_pohary.py", "outputs": ["evropske_pohary_dataset.csv"]},
@@ -236,6 +241,38 @@ def _snapshot_rows(conn: sqlite3.Connection, team_ids: dict[str, int], rows: lis
     return count
 
 
+def backfill_xg_from_observations(conn: sqlite3.Connection) -> int:
+    """TODO 11.34: doplní chybějící xG odehraných zápasů z `match_xg_observations`.
+
+    Pouze zápasy s uloženým výsledkem a bez jakéhokoli xG (nikdy se nepřepisuje existující hodnota, nic
+    se nedomýšlí). Párování podle identity domácího/hostujícího týmu a data (±1 den, časové pásmo).
+    Vrací počet doplněných zápasů.
+    """
+    rows = conn.execute("""
+        SELECT ms.match_id, o.home_xg, o.away_xg, o.source_file,
+               ABS(julianday(o.match_date)-julianday(date(m.scheduled_at))) AS gap
+        FROM match_statistics ms
+        JOIN matches m ON m.id=ms.match_id
+        JOIN match_xg_observations o ON o.home_team_id=m.home_team_id AND o.away_team_id=m.away_team_id
+             AND ABS(julianday(o.match_date)-julianday(date(m.scheduled_at)))<=1
+        WHERE ms.home_goals IS NOT NULL AND ms.away_goals IS NOT NULL
+          AND ms.home_xg IS NULL AND ms.away_xg IS NULL
+          AND o.home_xg IS NOT NULL AND o.away_xg IS NOT NULL
+        ORDER BY ms.match_id, gap, o.rowid
+    """).fetchall()
+    seen: set[int] = set()
+    filled = 0
+    for match_id, hxg, axg, source_file, _gap in rows:
+        if match_id in seen:
+            continue
+        seen.add(match_id)
+        conn.execute("""UPDATE match_statistics SET home_xg=?,away_xg=?,home_xga=COALESCE(home_xga,?),away_xga=COALESCE(away_xga,?),
+            xg_metric_definition=COALESCE(xg_metric_definition,?),updated_at=CURRENT_TIMESTAMP WHERE match_id=?""",
+            (hxg, axg, axg, hxg, f"xG observation: {source_file}", match_id))
+        filled += 1
+    return filled
+
+
 def import_csv_files(paths: list[Path], db_path: str | Path) -> dict[str, Any]:
     initialize_database(str(db_path))
     result = {"files": 0, "matches": 0, "snapshots": 0, "xg_rows": 0, "errors": []}
@@ -327,6 +364,7 @@ def import_csv_files(paths: list[Path], db_path: str | Path) -> dict[str, Any]:
     # statistics are authoritative evidence that the fixture is resolved.
     with sqlite3.connect(db_path) as conn:
         conn.execute("UPDATE matches SET status='RESOLVED' WHERE status='SCHEDULED' AND id IN (SELECT match_id FROM match_statistics WHERE home_goals IS NOT NULL AND away_goals IS NOT NULL)")
+        result["xg_backfilled"] = backfill_xg_from_observations(conn)
         conn.commit()
     return result
 
@@ -391,6 +429,79 @@ def _is_stale(conn: sqlite3.Connection, key: str, ttl: timedelta, now: datetime)
     return False
 
 
+class FeedTimeout(RuntimeError):
+    """Downloader překročil časový limit; nese dosud zachycený výstup procesu."""
+
+    def __init__(self, timeout: float, stdout: str, stderr: str):
+        super().__init__(f"Downloader překročil časový limit {timeout:.0f} s")
+        self.timeout, self.stdout, self.stderr = timeout, stdout, stderr
+
+
+def _tail(text: str | None, limit: int = 800) -> str:
+    value = (text or "").strip()
+    return value[-limit:] if value else "(prázdný)"
+
+
+def _diagnostics(stdout: str | None, stderr: str | None) -> str:
+    return f"stderr: {_tail(stderr)} | stdout: {_tail(stdout)}"
+
+
+def validate_feed_csv(path: Path) -> int:
+    """Ověří integritu staženého CSV před importem; vrací počet použitelných řádků.
+
+    Vyhazuje ValueError s konkrétním důvodem (prázdný soubor, chybějící sloupce,
+    žádný řádek s datem a oběma týmy).
+    """
+    if not path.is_file() or path.stat().st_size == 0:
+        raise ValueError(f"{path.name}: soubor chybí nebo je prázdný")
+    rows, headers = _read_csv(path)
+    cols = set(headers)
+    matchish = ({"date", "home_team", "away_team"} <= cols or {"date", "home", "away"} <= cols
+                or {"date", "home", "score", "away"} <= cols)
+    if not matchish:
+        raise ValueError(f"{path.name}: chybí povinné sloupce date/home/away (nalezeno: {sorted(cols)[:12] or 'žádné'})")
+    if not rows:
+        raise ValueError(f"{path.name}: CSV neobsahuje žádný datový řádek")
+    usable = sum(1 for r in rows
+                 if _pick(r, "home_team", "home", "squad") and _pick(r, "away_team", "away")
+                 and re.match(r"\d{4}-\d{2}-\d{2}", _pick(r, "date", "match_date", "scheduled_at", "kickoff_local")))
+    if usable == 0:
+        raise ValueError(f"{path.name}: žádný z {len(rows)} řádků nemá platné datum a oba týmy")
+    return usable
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _run_downloader(script: Path, outdir: Path, timeout: float) -> tuple[int, str, str]:
+    """Spustí downloader s časovým limitem; vrací (returncode, stdout, stderr).
+
+    Při vypršení limitu zabije celou skupinu procesů a vyhodí FeedTimeout s
+    dosud zachyceným výstupem (stdout je nebufferovaný kvůli diagnostice).
+    """
+    kwargs = {"start_new_session": True} if os.name == "posix" else {}
+    proc = subprocess.Popen([sys.executable, str(script)], cwd=outdir,
+                            env={**os.environ, "PYTHONPATH": str(ROOT), "PYTHONUNBUFFERED": "1"},
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **kwargs)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "", ""
+        raise FeedTimeout(timeout, stdout or "", stderr or "") from None
+    return proc.returncode, stdout or "", stderr or ""
+
+
 def _find_feed_script(name: str) -> Path:
     """Najde downloader v kořeni projektu nebo v `database/data_csv/` (kde skutečně leží)."""
     for base in (ROOT, DEFAULT_DATA_DIR):
@@ -417,15 +528,29 @@ def refresh_stale(db_path: str | Path, *, force: bool = False) -> dict[str, Any]
             outdir=Path(temp)
             try:
                 script=_find_feed_script(feed["script"])
-                proc=subprocess.run([sys.executable,str(script)],cwd=outdir,env={**os.environ,"PYTHONPATH":str(ROOT)},capture_output=True,text=True,timeout=360)
+                timed_out: FeedTimeout | None = None
+                try:
+                    rc,out,err=_run_downloader(script,outdir,feed.get("timeout",DEFAULT_DOWNLOADER_TIMEOUT))
+                except FeedTimeout as exc_timeout:
+                    timed_out,rc,out,err=exc_timeout,None,exc_timeout.stdout,exc_timeout.stderr
                 outputs=[outdir/name for name in feed["outputs"] if (outdir/name).is_file()]
-                if proc.returncode != 0 or not outputs:
-                    raise RuntimeError((proc.stderr or proc.stdout or f"Downloader ended with {proc.returncode}")[-4000:])
+                if timed_out is None and rc != 0:
+                    raise RuntimeError(f"Downloader {script.name} skončil s návratovým kódem {rc}. {_diagnostics(out,err)}"[-4000:])
+                if not outputs:
+                    reason = str(timed_out) + " a nevytvořil žádné CSV" if timed_out else "Downloader neskončil chybou, ale nevytvořil výstupní CSV"
+                    raise RuntimeError(f"{reason}. {_diagnostics(out,err)}"[-4000:])
+                try:
+                    for output in outputs:
+                        validate_feed_csv(output)
+                except ValueError as exc_invalid:
+                    # Nevalidní CSV se nikdy neimportuje; původní data zůstávají nedotčena.
+                    prefix = f"{timed_out}; " if timed_out else ""
+                    raise RuntimeError(f"{prefix}Stažené CSV je nevalidní, import přeskočen: {exc_invalid}. {_diagnostics(out,err)}"[-4000:]) from exc_invalid
                 imported=import_csv_files(outputs,db_path)
                 if imported["errors"] or imported["matches"] < 1:
                     # Běh M976: zpráva končila prázdným dvojtečkou – přidán počet řádků CSV a konec výstupu downloaderu.
                     rows_in_csv = sum(len(_read_csv(p)[0]) for p in outputs)
-                    tail = ((proc.stdout or "") + " " + (proc.stderr or "")).strip()[-600:]
+                    tail = ((out or "") + " " + (err or "")).strip()[-600:]
                     raise RuntimeError(f"Stažené CSV neobsahuje importovatelná utkání (řádků v CSV: {rows_in_csv}, "
                                        f"chyby: {'; '.join(imported['errors'][:3]) or 'žádné'}). Výstup downloaderu: {tail or '(prázdný)'}")
                 with sqlite3.connect(db_path) as conn:
@@ -433,12 +558,16 @@ def refresh_stale(db_path: str | Path, *, force: bool = False) -> dict[str, Any]
                         through=conn.execute("SELECT MAX(substr(m.scheduled_at,1,10)) FROM matches m JOIN match_statistics s ON s.match_id=m.id WHERE m.competition LIKE 'UEFA %' AND s.home_goals IS NOT NULL").fetchone()[0]
                     else:
                         through=conn.execute("SELECT MAX(substr(m.scheduled_at,1,10)) FROM matches m JOIN match_statistics s ON s.match_id=m.id WHERE m.competition=? AND s.home_goals IS NOT NULL",(feed["competition"],)).fetchone()[0]
-                    conn.execute("""UPDATE competition_data_status SET last_success_at=?,status='OK',source=?,rows_imported=?,data_through=?,error=NULL,updated_at=CURRENT_TIMESTAMP WHERE dataset_key=?""",
-                                 (datetime.now(timezone.utc).isoformat(),feed["script"],imported["matches"],through,key))
+                    # PARTIAL = limit vypršel, ale dosud uložené validní řádky se naimportovaly;
+                    # last_success_at se nemění, takže se po 6 h zkusí plné stažení znovu.
+                    final_status = "PARTIAL" if timed_out else "OK"
+                    conn.execute("""UPDATE competition_data_status SET last_success_at=CASE WHEN ?='OK' THEN ? ELSE last_success_at END,status=?,source=?,rows_imported=?,data_through=?,error=?,updated_at=CURRENT_TIMESTAMP WHERE dataset_key=?""",
+                                 (final_status,datetime.now(timezone.utc).isoformat(),final_status,feed["script"],imported["matches"],through,
+                                  f"{timed_out}; naimportován pouze částečný výstup. {_diagnostics(out,err)}"[-4000:] if timed_out else None,key))
                     conn.commit()
-                refreshed.append({"dataset":key,"status":"OK","matches":imported["matches"]})
+                refreshed.append({"dataset":key,"status":final_status,"matches":imported["matches"]})
             except Exception as exc:
-                LOG.warning("CSV feed refresh %s failed: %s",key,exc)
+                LOG.warning("CSV feed refresh %s failed: %s",key,exc,exc_info=True)
                 with sqlite3.connect(db_path) as conn:
                     conn.execute("UPDATE competition_data_status SET status='ERROR',error=?,updated_at=CURRENT_TIMESTAMP WHERE dataset_key=?",(str(exc)[:4000],key))
                     conn.commit()

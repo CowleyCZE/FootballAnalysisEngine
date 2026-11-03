@@ -1,4 +1,5 @@
 import re
+import sys
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -13,7 +14,8 @@ def parse_match(page, url):
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=25000)
         page.wait_for_timeout(400)
-    except Exception:
+    except Exception as exc:
+        print(f"CHYBA: načtení {url} selhalo: {exc!r}", file=sys.stderr)
         return None
 
     body = page.inner_text("body")
@@ -127,6 +129,11 @@ def main():
                 seen.add(m.group(1))
                 urls.append(f"{BASE_URL}{clean}")
 
+        if not urls:
+            browser.close()
+            print(f"CHYBA: na {ROZPIS_URL} nebyl nalezen žádný odkaz na zápas (změna webu / blokace?).", file=sys.stderr)
+            sys.exit(2)
+
         print(f"Nalezeno {len(urls)} zápasů. Stahuji detaily...")
         for idx, u in enumerate(urls):
             row = parse_match(page, u)
@@ -139,6 +146,10 @@ def main():
             time.sleep(0.3)
 
         browser.close()
+
+    if not records:
+        print(f"CHYBA: nepodařilo se zpracovat žádný z {len(urls)} zápasů; CSV se nezapisuje.", file=sys.stderr)
+        sys.exit(3)
 
     df = pd.DataFrame(records)
     df.to_csv("chance_liga_dataset.csv", index=False, encoding="utf-8-sig")
