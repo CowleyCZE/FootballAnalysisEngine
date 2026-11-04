@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 import pytest
 from unittest.mock import MagicMock
 
@@ -76,6 +77,9 @@ def test_context_builder_does_not_implicitly_load_database(tmp_path):
 
 
 def test_context_builder_counts_independent_publishers_and_real_freshness():
+    now = datetime.now(timezone.utc)
+    recent = (now - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    older = (now - timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
     builder = ContextBuilder()
     context = builder.build_context(
         {"match_id": 1, "home": "Arsenal", "away": "Chelsea"},
@@ -90,13 +94,13 @@ def test_context_builder_counts_independent_publishers_and_real_freshness():
                     {
                         "id": 10,
                         "url": "https://arsenal.com/news/1",
-                        "published_at": "2026-10-05T10:00:00Z",
+                        "published_at": recent,
                         "source_type": "official_club",
                     },
                     {
                         "id": 11,
                         "url": "https://www.bbc.com/sport/football/1",
-                        "published_at": "2026-10-04T10:00:00Z",
+                        "published_at": older,
                         "source_type": "major_news",
                     },
                 ],
