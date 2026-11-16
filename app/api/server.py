@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime, timezone
 import hmac
 import json
@@ -25,10 +24,19 @@ app = FastAPI(
 )
 
 
-DB_PATH = "database/football.db"
+DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "database", "football.db"))
 
 # Výchozí token ze šablony; server ho nikdy nepřijme (bod 11.1).
 PLACEHOLDER_TOKEN = "change-this-secure-token-in-production"
+
+
+def _connect_db(row_factory: Any = None) -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode = WAL")
+    if row_factory is not None:
+        conn.row_factory = row_factory
+    return conn
 
 
 def now() -> str:
@@ -139,7 +147,7 @@ def notebook_worker_heartbeat():
 
 
 @app.post("/api/internal/search", dependencies=[Depends(verify_api_auth)])
-def internal_search(req: SearchInternalRequest):
+async def internal_search(req: SearchInternalRequest):
     """Interní vyhledávací proxy endpoint pro odlehčené Note 9 workery."""
     client = SearXNGClient(
         base_url=os.getenv("SEARXNG_URL") or None,
@@ -154,13 +162,11 @@ def internal_search(req: SearchInternalRequest):
         reason=req.reason,
     )
     cutoff = datetime.fromisoformat(req.data_cutoff_at.replace("Z", "+00:00")) if req.data_cutoff_at else None
-    results = asyncio.run(
-        engine.search(
-            query=spec,
-            team=req.team,
-            topic_terms=req.topic_terms,
-            data_cutoff_at=cutoff,
-        )
+    results = await engine.search(
+        query=spec,
+        team=req.team,
+        topic_terms=req.topic_terms,
+        data_cutoff_at=cutoff,
     )
     serialized = [
         {
@@ -255,8 +261,7 @@ def start_analysis(req: AnalysisStartRequest):
 
 @app.get("/api/analysis/{run_id}", dependencies=[Depends(verify_api_auth)])
 def get_analysis_status(run_id: str):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = _connect_db(sqlite3.Row)
     try:
         run = conn.execute("SELECT * FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
         if not run:
@@ -296,8 +301,7 @@ def get_analysis_result(run_id: str, include_historical: bool = False):
     Standardně filtruje výhradně podle c.run_id = ?. Pokud je include_historical=True, přimíchává i
     historické claims ze stejného match_id označené s příznakem archived=True.
     """
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = _connect_db(sqlite3.Row)
     try:
         run = conn.execute("SELECT * FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchone()
         if not run:
@@ -448,13 +452,16 @@ def claim_job(data: JobClaimRequest):
 @app.post("/api/jobs/{job_id}/result", dependencies=[Depends(verify_api_auth)])
 def job_result(job_id: str, data: JobResult):
     queue = JobQueue(db_path=DB_PATH)
-    with sqlite3.connect(DB_PATH) as conn:
+    conn = _connect_db()
+    try:
         job_row = conn.execute("SELECT worker_id, status FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
         if not job_row:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         assigned_worker = job_row[0]
         if assigned_worker is not None and assigned_worker != data.worker_id:
             raise HTTPException(status_code=403, detail=f"Job {job_id} was assigned to worker {assigned_worker}, not {data.worker_id}")
+    finally:
+        conn.close()
 
     status_mapped = data.status.upper()
     res_data = data.result if data.result is not None else data.result_json
