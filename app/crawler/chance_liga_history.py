@@ -97,6 +97,10 @@ def _slugify(value: str) -> str:
 
 
 def _team_code(name: str) -> str | None:
+    code_match = re.search(r"\b([A-Z]{3})\b$", name.strip())
+    if code_match and code_match.group(1) in TEAM_CODES:
+        return code_match.group(1)
+
     slug = _slugify(name)
     if not slug:
         return None
@@ -160,13 +164,13 @@ def _parse_schedule_table(soup: BeautifulSoup, season: str) -> list[dict[str, ob
             current_round = round_match.group(1)
             continue
 
-        if len(cells) < 4:
+        if len(cells) < 7:
             continue
 
         date = _parse_czech_date(cells[0])
-        home = cells[1]
-        score_cell = cells[2]
-        away = cells[3]
+        home = cells[2]
+        score_cell = cells[4]
+        away = cells[6]
         if not date or not home or not away:
             continue
 

@@ -6,6 +6,8 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from app.crawler.chance_liga_history import _fetch_with_playwright
+
 
 def statistics_url(match_url: str) -> str:
     """Z detailu zápasu vytvoří adresu stránky se statistikami."""
@@ -60,10 +62,18 @@ def extract_xg_from_html(html: str) -> tuple[float, float] | None:
 async def fetch_match_xg(match_url: str, client: httpx.AsyncClient) -> tuple[float, float] | None:
     """Stáhne oficiální statistiky zápasu a pokusí se přečíst xG."""
     url = statistics_url(match_url)
-    response = await client.get(url)
-    if response.status_code != 200:
+    try:
+        response = await client.get(url)
+        response.raise_for_status()
+        return extract_xg_from_html(response.text)
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code not in {403, 429}:
+            return None
+
+    html = await _fetch_with_playwright(url)
+    if not html:
         return None
-    return extract_xg_from_html(response.text)
+    return extract_xg_from_html(html)
 
 
 async def enrich_records_with_xg(
