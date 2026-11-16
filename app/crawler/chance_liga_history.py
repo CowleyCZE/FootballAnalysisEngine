@@ -160,21 +160,65 @@ def _parse_schedule_text(soup: BeautifulSoup, season: str) -> list[dict[str, obj
     return records
 
 
+def _associate_match_links(records: list[dict[str, object]], soup: BeautifulSoup) -> int:
+    """Doplní URL detailů zápasů podle dvojic odkazů na domácí a hosté."""
+    anchors = [
+        anchor
+        for anchor in soup.select("a[href*='/zapas/']")
+        if re.search(r"/zapas/\d+-", anchor.get("href", ""))
+    ]
+
+    assigned = 0
+    anchor_index = 0
+
+    for record in records:
+        if record.get("match_url"):
+            continue
+
+        home_name = str(record["home_team"]).strip()
+        away_name = str(record["away_team"]).strip()
+
+        while anchor_index + 1 < len(anchors):
+            home_anchor = anchors[anchor_index]
+            away_anchor = anchors[anchor_index + 1]
+
+            if (
+                home_anchor.get_text(strip=True) == home_name
+                and away_anchor.get_text(strip=True) == away_name
+            ):
+                record["match_url"] = urljoin(BASE_URL, home_anchor["href"])
+                assigned += 1
+                anchor_index += 2
+                break
+
+            anchor_index += 1
+
+    return assigned
+
+
 def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
     """Parsuje rozpis Chance Ligy; nejprve tabulku, poté textový fallback."""
     soup = BeautifulSoup(html or "", "html.parser")
     records = _parse_schedule_table(soup, season)
-    if records:
-        return records
-    return _parse_schedule_text(soup, season)
+    if not records:
+        records = _parse_schedule_text(soup, season)
+
+    _associate_match_links(records, soup)
+    return records
 
 
 def diagnose_schedule_html(html: str) -> dict[str, int]:
     """Vrátí diagnostiku struktury stažené stránky."""
     soup = BeautifulSoup(html or "", "html.parser")
+    match_links = [
+        anchor
+        for anchor in soup.select("a[href*='/zapas/']")
+        if re.search(r"/zapas/\d+-", anchor.get("href", ""))
+    ]
+
     return {
         "table_rows": len(soup.select("tr")),
-        "match_links": len(soup.select("a[href*='/zapas/']")),
+        "match_links": len(match_links),
         "text_lines": len([line for line in soup.get_text("\n", strip=True).splitlines() if line.strip()]),
     }
 
