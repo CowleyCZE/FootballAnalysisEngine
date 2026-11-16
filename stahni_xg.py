@@ -57,6 +57,30 @@ def find_xg_candidates(obj, results, path="$"):
         for i, item in enumerate(obj):
             find_xg_candidates(item, results, f"{path}[{i}]")
 
+def dismiss_cookie_consent(page):
+    """Pokusí se zavřít cookie consent banner kliknutím na přijímací tlačítko."""
+    consent_patterns = [
+        r"přijmout\s+vše",
+        r"accept\s+all",
+        r"allow\s+all",
+        r"souhlasím",
+        r"agree",
+    ]
+
+    for pattern in consent_patterns:
+        try:
+            button = page.get_by_role("button", name=re.compile(pattern, re.IGNORECASE)).first
+            if button.count() > 0:
+                button.click(timeout=3000)
+                page.wait_for_timeout(2000)
+                print("DEBUG cookie consent dismissed")
+                return True
+        except Exception:
+            continue
+
+    print("DEBUG cookie consent button not found")
+    return False
+
 def run_scraper(max_matches=30):
     records = []
     
@@ -138,14 +162,14 @@ def run_scraper(max_matches=30):
             xg_in_html = bool(re.search(r"\bxG\b|expected\s*goals", html, re.IGNORECASE))
             print(f"DEBUG xG in HTML ({m_id}): {xg_in_html}")
 
+            # RYCHLÁ DIAGNOSTIKA: zavření cookie banneru
+            dismiss_cookie_consent(page)
+
             # RYCHLÁ DIAGNOSTIKA: pokus o otevření záložky Stats
             try:
-                stats_tab = page.get_by_role("tab", name=re.compile("stats", re.IGNORECASE)).first
-                if stats_tab.count() == 0:
-                    stats_tab = page.get_by_text(re.compile("^stats$", re.IGNORECASE)).first
-
+                stats_tab = page.locator("#match-facts-tab-stats")
                 if stats_tab.count() > 0:
-                    stats_tab.click(timeout=5000)
+                    stats_tab.click(timeout=5000, force=True)
                     page.wait_for_timeout(5000)
                     print(f"DEBUG clicked Stats tab ({m_id})")
                 else:
