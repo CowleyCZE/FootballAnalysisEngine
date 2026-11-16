@@ -370,11 +370,18 @@ class ExactScorePredictor:
         probs_h = [math.exp(-lam_home) * lam_home ** g / math.factorial(g) for g in range(cls.MAX_GOALS + 1)]
         probs_a = [math.exp(-lam_away) * lam_away ** g / math.factorial(g) for g in range(cls.MAX_GOALS + 1)]
         grid = {(h, a): probs_h[h] * probs_a[a] for h in range(cls.MAX_GOALS + 1) for a in range(cls.MAX_GOALS + 1)}
+        # Dixon-Coles (1997) requires all four tau factors to stay non-negative:
+        # for rho < 0: 1 + max(lam_home, lam_away) * rho >= 0
+        # for rho > 0: 1 - lam_home * lam_away * rho >= 0 and 1 - rho >= 0
         rho = cls.DC_RHO
-        grid[(0, 0)] *= 1.0 - lam_home * lam_away * rho
-        grid[(0, 1)] *= 1.0 + lam_home * rho
-        grid[(1, 0)] *= 1.0 + lam_away * rho
-        grid[(1, 1)] *= 1.0 - rho
+        if rho < 0:
+            rho = max(rho, -1.0 / max(lam_home, lam_away, 1.0))
+        elif rho > 0:
+            rho = min(rho, 1.0, 1.0 / max(lam_home * lam_away, 1e-9))
+        grid[(0, 0)] *= max(0.0, 1.0 - lam_home * lam_away * rho)
+        grid[(0, 1)] *= max(0.0, 1.0 + lam_home * rho)
+        grid[(1, 0)] *= max(0.0, 1.0 + lam_away * rho)
+        grid[(1, 1)] *= max(0.0, 1.0 - rho)
         norm = sum(grid.values())
         grid = {key: value / norm for key, value in grid.items()}
         modal = max(grid, key=grid.get)
