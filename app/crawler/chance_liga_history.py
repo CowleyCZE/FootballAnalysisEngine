@@ -9,9 +9,21 @@ from zoneinfo import ZoneInfo
 import httpx
 from bs4 import BeautifulSoup
 
+try:
+    from playwright.async_api import async_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+
 PRAGUE_TZ = ZoneInfo("Europe/Prague")
 BASE_URL = "https://www.chanceliga.cz"
 SCHEDULE_PATH = "/rozpis-zapasu/{year}?type=2"
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "cs-CZ,cs;q=0.9,en;q=0.8",
+    "Referer": "https://www.chanceliga.cz/",
+}
 
 
 def schedule_url(year: int) -> str:
@@ -40,11 +52,7 @@ def _parse_czech_date(value: str) -> str | None:
 
 
 def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
-    """Parsuje veřejný rozpis Chance Ligy do normalizovaných záznamů.
-
-    xG v rozpisu není k dispozici; záznam může obsahovat odkaz na detail zápasu,
-    ze kterého lze xG následně ověřit a doplnit.
-    """
+    """Parsuje veřejný rozpis Chance Ligy do normalizovaných záznamů."""
     soup = BeautifulSoup(html or "", "html.parser")
     records: list[dict[str, object]] = []
     current_round = ""
@@ -108,14 +116,51 @@ def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
     return records
 
 
+async def _fetch_with_playwright(url: str) -> str | None:
+    if not PLAYWRIGHT_AVAILABLE:
+        return None
+
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(headless=True)
+        try:
+            context = await browser.new_context(
+                user_agent=BROWSER_HEADERS["User-Agent"],
+                locale="cs-CZ",
+            )
+            page = await context.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await page.wait_for_timeout(2000)
+            return await page.content()
+        finally:
+            await browser.close()
+
+
 async def fetch_season_schedule(year: int, client: httpx.AsyncClient | None = None) -> tuple[str, str]:
-    """Stáhne HTML rozpisu pro startovní rok sezóny a vrátí (season, html)."""
+    """Stáhne HTML rozpisu; při blokaci HTTP klienta použije Playwright fallback."""
     season = season_label(year)
     url = schedule_url(year)
-    if client is None:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as own_client:
-            response = await own_client.get(url)
-    else:
-        response = await client.get(url)
-    response.raise_for_status()
-    return season, response.text
+
+    try:
+        if client is None:
+            async with httpx.AsyncClient(
+                follow_redirects=True,
+                timeout=30,
+                headers=BROWSER_HEADERS,
+            ) as own_client:
+                response = await own_client.get(url)
+        else:
+            response = await client.get(url, headers=BROWSER_HEADERS)
+        response.raise_for_status()
+        return season, response.text
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code not in {403, 429}:
+            raise
+
+    html = await _fetch_with_playwright(url)
+    if not html:
+        raise RuntimeError(
+            f"Chance Liga blocked HTTP request ({error.response.status_code}) and Playwright fallback is unavailable. "
+            "Install Playwright and Chromium: pip install playwright && playwright install chromium"
+        )
+
+    return season, html
