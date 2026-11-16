@@ -97,12 +97,30 @@ def run_scraper(max_matches=30):
             match_url = f"https://www.fotmob.com/match/{m_id}"
             
             match_data = {}
+            network_xg = []
+            network_urls = []
+
             def handle_response(response):
-                if "matchDetails" in response.url and response.status == 200:
-                    try:
-                        match_data['payload'] = response.json()
-                    except Exception:
-                        pass
+                try:
+                    if response.status == 200:
+                        network_urls.append(response.url)
+
+                        content_type = response.headers.get("content-type", "").lower()
+                        if "json" in content_type:
+                            data = response.json()
+                            candidates = []
+                            find_xg_candidates(data, candidates)
+
+                            if candidates:
+                                network_xg.append({
+                                    "url": response.url,
+                                    "candidates": candidates[:20]
+                                })
+
+                            if "matchDetails" in response.url:
+                                match_data['payload'] = data
+                except Exception:
+                    pass
 
             page.on("response", handle_response)
             
@@ -116,6 +134,10 @@ def run_scraper(max_matches=30):
 
             page.remove_listener("response", handle_response)
             payload = match_data.get('payload')
+
+            # RYCHLÁ DIAGNOSTIKA: výpis všech JSON URL a xG kandidátů ze sítě
+            print(f"DEBUG network JSON URLs ({m_id}): {network_urls[:30]}")
+            print(f"DEBUG network xG candidates ({m_id}): {network_xg[:10]}")
 
             # Pokud síťový JSON neprošel, zkusíme Next.js tag přímo na stránce zápasu
             if not payload:
@@ -162,7 +184,7 @@ def run_scraper(max_matches=30):
             stat_titles = [str(item.get("title", "")).strip() for item in flat_stats]
             print(f"DEBUG stat titles ({m_id}): {stat_titles}")
 
-            # RYCHLÁ DIAGNOSTIKA: vyhledání všech xG hodnot v celém JSON zápasu
+            # RYCHLÁ DIAGNOSTIKA: vyhledání všech xG hodnot v hlavním JSON zápasu
             xg_candidates = []
             find_xg_candidates(payload, xg_candidates)
             print(f"DEBUG xG candidates ({m_id}): {xg_candidates[:30]}")
