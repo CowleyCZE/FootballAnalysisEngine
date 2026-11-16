@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import pandas as pd
 from playwright.sync_api import sync_playwright
@@ -126,18 +127,52 @@ def run_scraper(max_matches=30):
             
             try:
                 page.goto(match_url, wait_until="domcontentloaded", timeout=25000)
-                page.wait_for_timeout(2500)
+                page.wait_for_timeout(5000)
             except Exception as e:
                 print(f"[{idx+1}] Chyba při načítání {match_url}: {e}")
                 page.remove_listener("response", handle_response)
                 continue
 
-            page.remove_listener("response", handle_response)
-            payload = match_data.get('payload')
+            # RYCHLÁ DIAGNOSTIKA: kontrola výskytu xG ve vykresleném HTML
+            html = page.content()
+            xg_in_html = bool(re.search(r"\bxG\b|expected\s*goals", html, re.IGNORECASE))
+            print(f"DEBUG xG in HTML ({m_id}): {xg_in_html}")
 
-            # RYCHLÁ DIAGNOSTIKA: výpis všech JSON URL a xG kandidátů ze sítě
+            # RYCHLÁ DIAGNOSTIKA: pokus o otevření záložky Stats
+            try:
+                stats_tab = page.get_by_role("tab", name=re.compile("stats", re.IGNORECASE)).first
+                if stats_tab.count() == 0:
+                    stats_tab = page.get_by_text(re.compile("^stats$", re.IGNORECASE)).first
+
+                if stats_tab.count() > 0:
+                    stats_tab.click(timeout=5000)
+                    page.wait_for_timeout(5000)
+                    print(f"DEBUG clicked Stats tab ({m_id})")
+                else:
+                    print(f"DEBUG Stats tab not found ({m_id})")
+            except Exception as e:
+                print(f"DEBUG Stats tab click failed ({m_id}): {e}")
+
+            # RYCHLÁ DIAGNOSTIKA: opakovaná kontrola xG v HTML a __NEXT_DATA__
+            html_after_stats = page.content()
+            xg_in_html_after_stats = bool(re.search(r"\bxG\b|expected\s*goals", html_after_stats, re.IGNORECASE))
+            print(f"DEBUG xG in HTML after Stats ({m_id}): {xg_in_html_after_stats}")
+
+            next_data_el = page.locator("#__NEXT_DATA__")
+            next_data_xg_candidates = []
+            if next_data_el.count() > 0:
+                try:
+                    next_json = json.loads(next_data_el.inner_text())
+                    find_xg_candidates(next_json, next_data_xg_candidates)
+                except Exception:
+                    pass
+
+            print(f"DEBUG __NEXT_DATA__ xG candidates ({m_id}): {next_data_xg_candidates[:20]}")
             print(f"DEBUG network JSON URLs ({m_id}): {network_urls[:30]}")
             print(f"DEBUG network xG candidates ({m_id}): {network_xg[:10]}")
+
+            page.remove_listener("response", handle_response)
+            payload = match_data.get('payload')
 
             # Pokud síťový JSON neprošel, zkusíme Next.js tag přímo na stránce zápasu
             if not payload:
