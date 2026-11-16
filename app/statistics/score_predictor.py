@@ -325,6 +325,8 @@ class ExactScorePredictor:
             h2h_weight = min(0.15, 0.05 * len(h2h_values))
             home_attack = (1 - h2h_weight) * home_attack + h2h_weight * h2h_home
             away_attack = (1 - h2h_weight) * away_attack + h2h_weight * h2h_away
+            away_defence = (1 - h2h_weight) * away_defence + h2h_weight * h2h_home
+            home_defence = (1 - h2h_weight) * home_defence + h2h_weight * h2h_away
             factors["h2h_matches"] = len(h2h_values)
             factors["h2h_weight"] = round(h2h_weight, 3)
 
@@ -353,9 +355,13 @@ class ExactScorePredictor:
         home_motivation = cls._bounded(home_context.get("motivation"), 0.0, 1.0, 0.5)
         away_motivation = cls._bounded(away_context.get("motivation"), 0.0, 1.0, 0.5)
         home_attack *= 1.0 - 0.10 * home_fatigue
+        home_defence *= 1.0 + 0.10 * home_fatigue
         away_attack *= 1.0 - 0.10 * away_fatigue
+        away_defence *= 1.0 + 0.10 * away_fatigue
         home_attack *= 1.0 + 0.06 * (home_motivation - 0.5)
+        home_defence *= 1.0 - 0.06 * (home_motivation - 0.5)
         away_attack *= 1.0 + 0.06 * (away_motivation - 0.5)
+        away_defence *= 1.0 - 0.06 * (away_motivation - 0.5)
         rivalry = cls._bounded(match_context.get("rivalry"), 0.0, 1.0, 0.0)
         style = cls._bounded(match_context.get("style_goal_factor"), 0.85, 1.15, 1.0)
         context_goal_factor = (1.0 - 0.08 * rivalry) * style
