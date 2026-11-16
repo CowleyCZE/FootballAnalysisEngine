@@ -26,6 +26,43 @@ BROWSER_HEADERS = {
     "Referer": "https://www.chanceliga.cz/",
 }
 
+TEAM_CODES = {
+    "acs": "ac sparta praha",
+    "art": "sk artis brno",
+    "boh": "bohemians praha 1905",
+    "fcb": "fc banik ostrava",
+    "fcj": "fc fastav zlin",
+    "fcs": "1 fc slovacko",
+    "fcv": "fc viktoria plzen",
+    "fcz": "fc zlin",
+    "fkb": "fk baumit jablonec",
+    "fkj": "fk jablonec",
+    "fkm": "fk mlada boleslav",
+    "fkp": "fk pardubice",
+    "fkt": "fk teplice",
+    "hkr": "fc hradec kralove",
+    "lib": "fc slovan liberec",
+    "mbl": "fk mlada boleslav",
+    "olo": "sk sigma olomouc",
+    "plz": "fc viktoria plzen",
+    "sig": "sk sigma olomouc",
+    "skk": "sk kladno",
+    "skp": "sk praha",
+    "sks": "sk slavia praha",
+    "teh": "fk teplice",
+    "tep": "fk teplice",
+    "zbr": "fc zbrojovka brno",
+    "zin": "fc zlin",
+    "zli": "fc zlin",
+    "duk": "fk dukla praha",
+    "kar": "mfk karvina",
+    "opa": "fk opava",
+    "pri": "fk pribram",
+    "sla": "sk slavia praha",
+    "spa": "ac sparta praha",
+    "vzp": "fc viktoria plzen",
+}
+
 
 def schedule_url(year: int) -> str:
     return BASE_URL + SCHEDULE_PATH.format(year=year)
@@ -57,6 +94,17 @@ def _slugify(value: str) -> str:
     ascii_text = "".join(char for char in normalized if not unicodedata.combining(char))
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
     return slug
+
+
+def _team_code(name: str) -> str | None:
+    slug = _slugify(name)
+    if not slug:
+        return None
+
+    for code, team_slug in TEAM_CODES.items():
+        if slug == team_slug or slug.endswith(team_slug) or team_slug.endswith(slug):
+            return code
+    return None
 
 
 def _make_record(
@@ -168,33 +216,37 @@ def _parse_schedule_text(soup: BeautifulSoup, season: str) -> list[dict[str, obj
     return records
 
 
-def _associate_match_links_by_slug(records: list[dict[str, object]], soup: BeautifulSoup) -> int:
-    """Přiřadí URL detailu zápasu podle názvů týmů v URL slugu."""
-    candidate_urls: list[str] = []
+def _associate_match_links_by_codes(records: list[dict[str, object]], soup: BeautifulSoup) -> int:
+    """Přiřadí URL detailu podle oficiálních třípísmenných kódů týmů v URL."""
+    candidates: dict[str, str] = {}
 
     for anchor in soup.select("a[href*='/zapas/']"):
         href = anchor.get("href")
-        if not href or not re.search(r"/zapas/\d+-", href):
+        if not href:
             continue
-        candidate_urls.append(urljoin(BASE_URL, href))
 
-    candidate_urls = list(dict.fromkeys(candidate_urls))
+        clean_href = href.split("#", 1)[0]
+        match = re.search(r"/zapas/(\d+)-([a-z]{3})-([a-z]{3})", clean_href)
+        if not match:
+            continue
+
+        match_id, home_code, away_code = match.groups()
+        candidates[f"{home_code}-{away_code}-{match_id}"] = urljoin(BASE_URL, clean_href)
 
     assigned = 0
     for record in records:
         if record.get("match_url"):
             continue
 
-        home_slug = _slugify(str(record["home_team"]))
-        away_slug = _slugify(str(record["away_team"]))
-        if not home_slug or not away_slug:
+        home_code = _team_code(str(record["home_team"]))
+        away_code = _team_code(str(record["away_team"]))
+        if not home_code or not away_code:
             continue
 
         matches = [
             url
-            for url in candidate_urls
-            if home_slug in urlparse(url).path
-            and away_slug in urlparse(url).path
+            for key, url in candidates.items()
+            if key.startswith(f"{home_code}-{away_code}-")
         ]
 
         if len(matches) == 1:
@@ -211,7 +263,7 @@ def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
     if not records:
         records = _parse_schedule_text(soup, season)
 
-    _associate_match_links_by_slug(records, soup)
+    _associate_match_links_by_codes(records, soup)
     return records
 
 
