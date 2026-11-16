@@ -44,6 +44,18 @@ def extract_stat(flat_stats, stat_title):
                 return vals[0], vals[1]
     return None, None
 
+def find_xg_candidates(obj, results, path="$"):
+    """Rekurzivně najde všechny klíče související s xG v JSON zápasu."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            key_lower = str(key).lower()
+            if "xg" in key_lower or "expectedgoal" in key_lower:
+                results.append({"path": f"{path}.{key}", "value": value})
+            find_xg_candidates(value, results, f"{path}.{key}")
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            find_xg_candidates(item, results, f"{path}[{i}]")
+
 def run_scraper(max_matches=30):
     records = []
     
@@ -149,6 +161,11 @@ def run_scraper(max_matches=30):
             # RYCHLÁ DIAGNOSTIKA: výpis skutečných názvů statistických bloků
             stat_titles = [str(item.get("title", "")).strip() for item in flat_stats]
             print(f"DEBUG stat titles ({m_id}): {stat_titles}")
+
+            # RYCHLÁ DIAGNOSTIKA: vyhledání všech xG hodnot v celém JSON zápasu
+            xg_candidates = []
+            find_xg_candidates(payload, xg_candidates)
+            print(f"DEBUG xG candidates ({m_id}): {xg_candidates[:30]}")
 
             home_xg, away_xg = extract_stat(flat_stats, "Expected goals (xG)")
             home_sot, away_sot = extract_stat(flat_stats, "Shots on target")
