@@ -221,11 +221,7 @@ class AdversarialAuditor:
         # Tvorba výzkumných úloh
         research_jobs = RepairQueue.generate_research_jobs(match_id, issues)
 
-        has_missing_cutoff = any(iss.get("type") == "cutoff_missing" for iss in issues)
-        has_critical_cutoff = any(
-            iss.get("type") in ("cutoff_missing", "cutoff_violation") and iss.get("severity") == "CRITICAL"
-            for iss in issues
-        )
+        has_critical_issue = any(iss.get("severity") == "CRITICAL" for iss in issues)
 
         if not cutoff_valid:
             status = "UNRESOLVED"
@@ -234,7 +230,7 @@ class AdversarialAuditor:
             status = "UNRESOLVED"
         elif len(research_jobs) > 0:
             status = "RESEARCH_REQUIRED"
-        elif has_critical_cutoff:
+        elif has_critical_issue:
             status = "UNRESOLVED"
         else:
             status = "AUDIT_COMPLETE"
@@ -268,33 +264,35 @@ class AdversarialAuditor:
     def _save_to_db(self, run_id: str, match_id: int, ai_run_id: str, score: float, status: str,
                     issues: List[Dict[str, Any]], pipeline_run_id: Optional[str] = None):
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # audit_runs.run_id = run pipeline (podle něj API hledá nálezy); audit_id = id tohoto auditu.
-        cursor.execute(
-            "INSERT INTO audit_runs (audit_id, run_id, match_id, ai_run_id, audit_score, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (run_id, pipeline_run_id or run_id, match_id, ai_run_id, score, status, datetime.now(timezone.utc).isoformat())
-        )
-        audit_run_pk = cursor.lastrowid
-
-        for issue in issues:
+            # audit_runs.run_id = run pipeline (podle něj API hledá nálezy); audit_id = id tohoto auditu.
             cursor.execute(
-                "INSERT INTO audit_issues (audit_run_id, issue_type, severity, description, requires_research, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    audit_run_pk,
-                    issue["type"],
-                    issue["severity"],
-                    issue["description"],
-                    1 if issue.get("requires_research") else 0,
-                    datetime.now(timezone.utc).isoformat()
-                )
+                "INSERT INTO audit_runs (audit_id, run_id, match_id, ai_run_id, audit_score, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, pipeline_run_id or run_id, match_id, ai_run_id, score, status, datetime.now(timezone.utc).isoformat())
             )
-            issue_pk = cursor.lastrowid
+            audit_run_pk = cursor.lastrowid
 
-            for eid in issue.get("evidence_ids", []):
-                cursor.execute("INSERT OR IGNORE INTO audit_issue_evidence (audit_issue_id, evidence_id) VALUES (?, ?)", (issue_pk, eid))
-            for cid in issue.get("claim_ids", []):
-                cursor.execute("INSERT OR IGNORE INTO audit_issue_claims (audit_issue_id, claim_id) VALUES (?, ?)", (issue_pk, cid))
+            for issue in issues:
+                cursor.execute(
+                    "INSERT INTO audit_issues (audit_run_id, issue_type, severity, description, requires_research, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        audit_run_pk,
+                        issue["type"],
+                        issue["severity"],
+                        issue["description"],
+                        1 if issue.get("requires_research") else 0,
+                        datetime.now(timezone.utc).isoformat()
+                    )
+                )
+                issue_pk = cursor.lastrowid
 
-        conn.commit()
-        conn.close()
+                for eid in issue.get("evidence_ids", []):
+                    cursor.execute("INSERT OR IGNORE INTO audit_issue_evidence (audit_issue_id, evidence_id) VALUES (?, ?)", (issue_pk, eid))
+                for cid in issue.get("claim_ids", []):
+                    cursor.execute("INSERT OR IGNORE INTO audit_issue_claims (audit_issue_id, claim_id) VALUES (?, ?)", (issue_pk, cid))
+
+            conn.commit()
+        finally:
+            conn.close()
