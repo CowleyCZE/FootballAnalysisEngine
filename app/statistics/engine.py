@@ -64,10 +64,6 @@ class StatisticalEngine:
         if len(home_matches) < 5 or len(away_matches) < 5:
             try:
                 with sqlite3.connect(self.repo.db_path) as conn:
-                    team_rows = conn.execute(
-                        "SELECT id, name FROM teams WHERE id IN (?, ?)",
-                        (home_team_id, away_team_id),
-                    ).fetchall()
                     competition_row = conn.execute(
                         "SELECT COALESCE(c.name, m.competition, '') FROM matches m LEFT JOIN competitions c ON c.id=m.competition_id WHERE m.id=?",
                         (match_id,),
