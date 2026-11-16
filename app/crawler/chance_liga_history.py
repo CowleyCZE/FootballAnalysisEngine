@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import datetime
+from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -41,7 +42,8 @@ def _parse_czech_date(value: str) -> str | None:
 def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
     """Parsuje veřejný rozpis Chance Ligy do normalizovaných záznamů.
 
-    xG v rozpisu není k dispozici; záměrně se nevyplňuje, aby import nevyráběl data.
+    xG v rozpisu není k dispozici; záznam může obsahovat odkaz na detail zápasu,
+    ze kterého lze xG následně ověřit a doplnit.
     """
     soup = BeautifulSoup(html or "", "html.parser")
     records: list[dict[str, object]] = []
@@ -79,6 +81,9 @@ def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
         else:
             continue
 
+        anchor = row.select_one("a[href*='/zapas/']")
+        match_url = urljoin(BASE_URL, anchor["href"]) if anchor and anchor.get("href") else None
+
         records.append(
             {
                 "external_match_id": _external_match_id(season, date, home, away),
@@ -96,6 +101,7 @@ def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
                 "away_xg": None,
                 "home_xga": None,
                 "away_xga": None,
+                "match_url": match_url,
             }
         )
 

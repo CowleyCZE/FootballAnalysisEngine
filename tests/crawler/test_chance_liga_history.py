@@ -21,6 +21,18 @@ HTML = """
 </table>
 """
 
+HTML_WITH_LINK = """
+<table>
+  <tr><th>1.kolo</th></tr>
+  <tr>
+    <td>pá, 19/07/2024</td>
+    <td><a href="/zapas/8197-sk-sigma-olomouc-fc-hradec-kralove">SK Sigma Olomouc</a></td>
+    <td>2:1</td>
+    <td>FC Hradec Králové</td>
+  </tr>
+</table>
+"""
+
 
 def test_parse_schedule_html_extracts_finished_and_scheduled_matches():
     records = parse_schedule_html(HTML, season_label(2024))
@@ -54,3 +66,12 @@ def test_missing_xg_is_not_invented():
 
     assert all(record["home_xg"] is None for record in records)
     assert all(record["away_xg"] is None for record in records)
+
+
+def test_match_detail_url_is_captured_when_available():
+    records = parse_schedule_html(HTML_WITH_LINK, season_label(2024))
+
+    assert len(records) == 1
+    assert records[0]["match_url"] == (
+        "https://www.chanceliga.cz/zapas/8197-sk-sigma-olomouc-fc-hradec-kralove"
+    )
