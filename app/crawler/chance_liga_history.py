@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from datetime import datetime
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -49,6 +50,13 @@ def _parse_czech_date(value: str) -> str | None:
         return datetime(year, month, day, tzinfo=PRAGUE_TZ).date().isoformat()
     except ValueError:
         return None
+
+
+def _slugify(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_text = "".join(char for char in normalized if not unicodedata.combining(char))
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-")
+    return slug
 
 
 def _make_record(
@@ -160,38 +168,38 @@ def _parse_schedule_text(soup: BeautifulSoup, season: str) -> list[dict[str, obj
     return records
 
 
-def _associate_match_links(records: list[dict[str, object]], soup: BeautifulSoup) -> int:
-    """Doplní URL detailů zápasů podle dvojic odkazů na domácí a hosté."""
-    anchors = [
-        anchor
-        for anchor in soup.select("a[href*='/zapas/']")
-        if re.search(r"/zapas/\d+-", anchor.get("href", ""))
-    ]
+def _associate_match_links_by_slug(records: list[dict[str, object]], soup: BeautifulSoup) -> int:
+    """Přiřadí URL detailu zápasu podle názvů týmů v URL slugu."""
+    candidate_urls: list[str] = []
+
+    for anchor in soup.select("a[href*='/zapas/']"):
+        href = anchor.get("href")
+        if not href or not re.search(r"/zapas/\d+-", href):
+            continue
+        candidate_urls.append(urljoin(BASE_URL, href))
+
+    candidate_urls = list(dict.fromkeys(candidate_urls))
 
     assigned = 0
-    anchor_index = 0
-
     for record in records:
         if record.get("match_url"):
             continue
 
-        home_name = str(record["home_team"]).strip()
-        away_name = str(record["away_team"]).strip()
+        home_slug = _slugify(str(record["home_team"]))
+        away_slug = _slugify(str(record["away_team"]))
+        if not home_slug or not away_slug:
+            continue
 
-        while anchor_index + 1 < len(anchors):
-            home_anchor = anchors[anchor_index]
-            away_anchor = anchors[anchor_index + 1]
+        matches = [
+            url
+            for url in candidate_urls
+            if home_slug in urlparse(url).path
+            and away_slug in urlparse(url).path
+        ]
 
-            if (
-                home_anchor.get_text(strip=True) == home_name
-                and away_anchor.get_text(strip=True) == away_name
-            ):
-                record["match_url"] = urljoin(BASE_URL, home_anchor["href"])
-                assigned += 1
-                anchor_index += 2
-                break
-
-            anchor_index += 1
+        if len(matches) == 1:
+            record["match_url"] = matches[0]
+            assigned += 1
 
     return assigned
 
@@ -203,7 +211,7 @@ def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
     if not records:
         records = _parse_schedule_text(soup, season)
 
-    _associate_match_links(records, soup)
+    _associate_match_links_by_slug(records, soup)
     return records
 
 
