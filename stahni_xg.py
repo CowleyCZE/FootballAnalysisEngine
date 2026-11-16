@@ -141,7 +141,11 @@ def get_xg_from_xgedge(pages, home_team, away_team, date):
     """Najde xG pro dany zapas podle data a nazvu tymu v results strankach."""
     try:
         year, month, day = date.split("-")
-        xgedge_date = f"{month}/{day}/{year}"
+        date_variants = {
+            date,
+            f"{month}/{day}/{year}",
+            f"{day}/{month}/{year}",
+        }
     except Exception:
         return None, None
 
@@ -150,7 +154,7 @@ def get_xg_from_xgedge(pages, home_team, away_team, date):
             start = max(0, match.start() - 400)
             window = page_text[start:match.start()]
 
-            if xgedge_date not in window:
+            if not any(date_variant in window for date_variant in date_variants):
                 continue
 
             if text_matches_team(window, home_team) and text_matches_team(window, away_team):
