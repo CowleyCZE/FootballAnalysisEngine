@@ -146,6 +146,10 @@ def run_scraper(max_matches=30):
             flat_stats = []
             collect_all_stats(payload.get("content", {}).get("stats", {}), flat_stats)
 
+            # RYCHLÁ DIAGNOSTIKA: výpis skutečných názvů statistických bloků
+            stat_titles = [str(item.get("title", "")).strip() for item in flat_stats]
+            print(f"DEBUG stat titles ({m_id}): {stat_titles}")
+
             home_xg, away_xg = extract_stat(flat_stats, "Expected goals (xG)")
             home_sot, away_sot = extract_stat(flat_stats, "Shots on target")
             home_poss, away_poss = extract_stat(flat_stats, "Ball possession")
