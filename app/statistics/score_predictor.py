@@ -361,8 +361,8 @@ class ExactScorePredictor:
         context_goal_factor = (1.0 - 0.08 * rivalry) * style
         # Home advantage is already embedded when both venue splits are used.
         home_adv = cls.HOME_ADV_SPLIT if (home_split and away_split) else cls.HOME_ADV_NO_SPLIT
-        lam_home = 0.5 * (home_attack + away_defence) * home_adv * context_goal_factor
-        lam_away = 0.5 * (away_attack + home_defence) * context_goal_factor
+        lam_home = (home_attack * away_defence / league_mean) * home_adv * context_goal_factor
+        lam_away = (away_attack * home_defence / league_mean) * context_goal_factor
         lam_home = max(0.05, min(5.0, lam_home))
         lam_away = max(0.05, min(5.0, lam_away))
         factors.update({"home_advantage": home_adv, "rivalry": rivalry, "context_goal_factor": round(context_goal_factor, 4), "home_fatigue": home_fatigue, "away_fatigue": away_fatigue, "home_motivation": home_motivation, "away_motivation": away_motivation})
