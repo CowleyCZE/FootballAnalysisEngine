@@ -7,7 +7,7 @@ Podporovane zdroje:
 2) FBref (fbref.com) - pres Playwright kvuli 403
 
 Pouziti:
-python xg_zdroje.py --chance-url "https://www.chanceliga.cz/..." --fbref-url "https://fbref.com/..."
+python xg_zdroje.py --chance-url "https://www.chanceliga.cz/..." --fbref-url "https://fbref.com/..." --fbref-url "https://fbref.com/..."
 python xg_zdroje.py --discover-chance
 """
 
@@ -201,7 +201,7 @@ def save_results(results: list[XgResult], filename: str = "xg_alternativni_zdroj
 def main() -> None:
     parser = argparse.ArgumentParser(description="Diagnostika xG z alternativnich zdroju")
     parser.add_argument("--chance-url", help="URL detailu zapasu na chanceliga.cz")
-    parser.add_argument("--fbref-url", help="URL match reportu na fbref.com")
+    parser.add_argument("--fbref-url", action="append", help="URL match reportu na fbref.com (lze zadat vicekrat)")
     parser.add_argument("--discover-chance", action="store_true", help="Vyhleda potencialne odkazy na zapasy")
     parser.add_argument("--output", default="xg_alternativni_zdroje.csv", help="Vystupni CSV soubor")
 
@@ -223,18 +223,19 @@ def main() -> None:
             print(f"Chyba pri stahovani Chance Liga: {e}")
 
     if args.fbref_url:
-        try:
-            html = fetch_html_playwright(args.fbref_url)
-            result = parse_fbref_xg(html, args.fbref_url)
-            results.append(result)
-            print(result)
-        except Exception as e:
-            print(f"Chyba pri stahovani FBref pres Playwright: {e}")
+        for url in args.fbref_url:
+            try:
+                html = fetch_html_playwright(url)
+                result = parse_fbref_xg(html, url)
+                results.append(result)
+                print(result)
+            except Exception as e:
+                print(f"Chyba pri stahovani FBref pres Playwright: {e}")
 
     if not results:
         print("Nebyla zadana zadna URL k testovani.")
         print("Pouziti:")
-        print("python xg_zdroje.py --chance-url '...' --fbref-url '...'")
+        print("python xg_zdroje.py --chance-url '...' --fbref-url '...' --fbref-url '...'")
         print("python xg_zdroje.py --discover-chance")
         return
 
