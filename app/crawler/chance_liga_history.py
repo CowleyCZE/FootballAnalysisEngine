@@ -51,9 +51,46 @@ def _parse_czech_date(value: str) -> str | None:
         return None
 
 
-def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
-    """Parsuje veřejný rozpis Chance Ligy do normalizovaných záznamů."""
-    soup = BeautifulSoup(html or "", "html.parser")
+def _make_record(
+    season: str,
+    date: str,
+    home: str,
+    away: str,
+    score: str,
+    round_name: str,
+    match_url: str | None,
+) -> dict[str, object]:
+    score_match = re.search(r"(\d+)\s*:\s*(\d+)", score)
+    if score_match:
+        home_goals = int(score_match.group(1))
+        away_goals = int(score_match.group(2))
+        status = "FINISHED"
+    else:
+        home_goals = None
+        away_goals = None
+        status = "SCHEDULED"
+
+    return {
+        "external_match_id": _external_match_id(season, date, home, away),
+        "competition": "Chance Liga",
+        "season": season,
+        "home_team": home,
+        "away_team": away,
+        "scheduled_at": f"{date}T00:00:00+01:00",
+        "kickoff_time_known": 0,
+        "status": status,
+        "round": round_name,
+        "home_goals": home_goals,
+        "away_goals": away_goals,
+        "home_xg": None,
+        "away_xg": None,
+        "home_xga": None,
+        "away_xga": None,
+        "match_url": match_url,
+    }
+
+
+def _parse_schedule_table(soup: BeautifulSoup, season: str) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     current_round = ""
 
@@ -77,43 +114,69 @@ def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
         if not date or not home or not away:
             continue
 
-        score_match = re.search(r"(\d+)\s*:\s*(\d+)", score_cell)
-        if score_match:
-            home_goals = int(score_match.group(1))
-            away_goals = int(score_match.group(2))
-            status = "FINISHED"
-        elif "-:-" in score_cell:
-            home_goals = None
-            away_goals = None
-            status = "SCHEDULED"
-        else:
+        if not re.search(r"(\d+\s*:\s*\d+|-:-)", score_cell):
             continue
 
         anchor = row.select_one("a[href*='/zapas/']")
         match_url = urljoin(BASE_URL, anchor["href"]) if anchor and anchor.get("href") else None
-
-        records.append(
-            {
-                "external_match_id": _external_match_id(season, date, home, away),
-                "competition": "Chance Liga",
-                "season": season,
-                "home_team": home,
-                "away_team": away,
-                "scheduled_at": f"{date}T00:00:00+01:00",
-                "kickoff_time_known": 0,
-                "status": status,
-                "round": current_round,
-                "home_goals": home_goals,
-                "away_goals": away_goals,
-                "home_xg": None,
-                "away_xg": None,
-                "home_xga": None,
-                "away_xga": None,
-                "match_url": match_url,
-            }
-        )
+        records.append(_make_record(season, date, home, away, score_cell, current_round, match_url))
 
     return records
+
+
+def _parse_schedule_text(soup: BeautifulSoup, season: str) -> list[dict[str, object]]:
+    """Záložní parser pro stránky, které nevystavují zápasy jako klasickou tabulku."""
+    lines = [re.sub(r"\s+", " ", line).strip() for line in soup.get_text("\n", strip=True).splitlines()]
+    lines = [line for line in lines if line]
+
+    records: list[dict[str, object]] = []
+    current_round = ""
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+
+        round_match = re.fullmatch(r"(\d+)\.\s*kolo", line)
+        if round_match:
+            current_round = round_match.group(1)
+            index += 1
+            continue
+
+        date = _parse_czech_date(line)
+        if not date or index + 3 >= len(lines):
+            index += 1
+            continue
+
+        home = lines[index + 1]
+        score = lines[index + 2]
+        away = lines[index + 3]
+
+        if re.fullmatch(r"(\d+\s*:\s*\d+|-:-)", score):
+            records.append(_make_record(season, date, home, away, score, current_round, None))
+            index += 4
+        else:
+            index += 1
+
+    return records
+
+
+def parse_schedule_html(html: str, season: str) -> list[dict[str, object]]:
+    """Parsuje rozpis Chance Ligy; nejprve tabulku, poté textový fallback."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    records = _parse_schedule_table(soup, season)
+    if records:
+        return records
+    return _parse_schedule_text(soup, season)
+
+
+def diagnose_schedule_html(html: str) -> dict[str, int]:
+    """Vrátí diagnostiku struktury stažené stránky."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    return {
+        "table_rows": len(soup.select("tr")),
+        "match_links": len(soup.select("a[href*='/zapas/']")),
+        "text_lines": len([line for line in soup.get_text("\n", strip=True).splitlines() if line.strip()]),
+    }
 
 
 async def _fetch_with_playwright(url: str) -> str | None:
