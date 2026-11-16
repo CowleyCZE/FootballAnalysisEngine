@@ -4,12 +4,7 @@ Diagnostika a stahovani xG z alternativnich zdroju pro Chance Ligu.
 
 Podporovane zdroje:
 1) Oficialni Chance Liga (chanceliga.cz)
-2) FBref (fbref.com)
-
-Skript je pripraveny jako diagnosticky nastroj:
-- overi, zda dany match page vubec xG obsahuje
-- extrahuje hodnoty, pokud je nalezne
-- uklada vysledek do CSV
+2) FBref (fbref.com) - pres Playwright kvuli 403
 
 Pouziti:
 python xg_zdroje.py --chance-url "https://www.chanceliga.cz/..." --fbref-url "https://fbref.com/..."
@@ -19,12 +14,12 @@ python xg_zdroje.py --discover-chance
 import argparse
 import csv
 import re
-import sys
 from dataclasses import dataclass
 from typing import Optional
 
 import requests
 from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 HEADERS = {
     "User-Agent": (
@@ -48,10 +43,29 @@ class XgResult:
     note: str = ""
 
 
-def fetch_html(url: str) -> str:
+def fetch_html_requests(url: str) -> str:
     response = requests.get(url, headers=HEADERS, timeout=30)
     response.raise_for_status()
     return response.text
+
+
+def fetch_html_playwright(url: str) -> str:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="cs-CZ",
+        )
+        page = context.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(5000)
+        html = page.content()
+        browser.close()
+        return html
 
 
 def parse_number(value: str) -> Optional[float]:
@@ -64,18 +78,9 @@ def parse_number(value: str) -> Optional[float]:
 
 
 def parse_chance_liga_xg(html: str, url: str) -> XgResult:
-    """
-    Pokusi se najit xG na strance zapasu oficialni Chance Ligy.
-
-    Stranka muze pouzivat ruzne varianty:
-    - 'xG 1,24 - 0,87'
-    - 'Očekávané góly (xG)'
-    - samostatne bloky pro domaci a hostujici tym
-    """
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(" ", strip=True)
 
-    # Hledame vzory typu: xG 1,24 - 0,87 nebo xG: 1.24 - 0.87
     patterns = [
         r"xG\s*:?\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–:]\s*([0-9]+(?:[.,][0-9]+)?)",
         r"Očekávané góly\s*\(?xG\)?\s*:?\s*([0-9]+(?:[.,][0-9]+)?)\s*[-–:]\s*([0-9]+(?:[.,][0-9]+)?)",
@@ -106,14 +111,6 @@ def parse_chance_liga_xg(html: str, url: str) -> XgResult:
 
 
 def parse_fbref_xg(html: str, url: str) -> XgResult:
-    """
-    Pokusi se najit xG v match reportu na FBref.
-
-    FBref muze xG zobrazovat v ruznych formatech, napriklad:
-    - 'xG 1.2–0.8'
-    - 'Expected Goals 1.2 - 0.8'
-    - v tabulce team stats
-    """
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text(" ", strip=True)
 
@@ -147,12 +144,8 @@ def parse_fbref_xg(html: str, url: str) -> XgResult:
 
 
 def discover_chance_liga_matches() -> None:
-    """
-    Zakladni diagnostika: stahne statistickou stranku Chance Ligy
-    a vypise odkazy, ktere mohou vest na detail zapasu.
-    """
     url = "https://www.chanceliga.cz/statistiky-landing"
-    html = fetch_html(url)
+    html = fetch_html_requests(url)
     soup = BeautifulSoup(html, "html.parser")
 
     links = []
@@ -222,7 +215,7 @@ def main() -> None:
 
     if args.chance_url:
         try:
-            html = fetch_html(args.chance_url)
+            html = fetch_html_requests(args.chance_url)
             result = parse_chance_liga_xg(html, args.chance_url)
             results.append(result)
             print(result)
@@ -231,12 +224,12 @@ def main() -> None:
 
     if args.fbref_url:
         try:
-            html = fetch_html(args.fbref_url)
+            html = fetch_html_playwright(args.fbref_url)
             result = parse_fbref_xg(html, args.fbref_url)
             results.append(result)
             print(result)
         except Exception as e:
-            print(f"Chyba pri stahovani FBref: {e}")
+            print(f"Chyba pri stahovani FBref pres Playwright: {e}")
 
     if not results:
         print("Nebyla zadana zadna URL k testovani.")
