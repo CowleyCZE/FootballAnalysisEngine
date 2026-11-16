@@ -3,7 +3,7 @@
 Scraper pro Chance Ligu.
 
 Primarni zdroj: FotMob (zakladni statistiky)
-Fallback pro xG: xgEdge (per-match xG)
+Fallback pro xG: xgEdge results pages (per-match xG)
 """
 
 import json
@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
 LEAGUE_URL = "https://www.fotmob.com/leagues/122/overview/1-liga"
-XGEDGE_LEAGUE_URL = "https://xg-edge.com/czech-first-league"
+XGEDGE_RESULTS_URL = "https://xg-edge.com/czech-first-league/results"
 
 HEADERS = {
     "User-Agent": (
@@ -80,10 +80,10 @@ def name_tokens(name):
     return [TOKEN_ALIASES.get(token, token) for token in slug.split("-") if token]
 
 
-def team_matches_slug(team_name, slug):
-    team_tokens = set(name_tokens(team_name))
-    slug_tokens = set(slugify(slug).split("-"))
-    return team_tokens.issubset(slug_tokens)
+def text_matches_team(text, team_name):
+    tokens = set(name_tokens(team_name))
+    text_tokens = set(slugify(text).split("-"))
+    return tokens.issubset(text_tokens)
 
 
 def fetch_html_requests(url):
@@ -107,87 +107,63 @@ def fetch_html_playwright(url):
         return html
 
 
-def build_xgedge_index():
-    """Vytvori index xgEdge zapasu z ligove stranky."""
+def build_xgedge_results_pages():
+    """Nacte vsechny stranky results z xgEdge (včetně paginace)."""
+    pages = []
+    page_number = 1
+
+    while page_number <= 20:
+        url = XGEDGE_RESULTS_URL if page_number == 1 else f"{XGEDGE_RESULTS_URL}?page={page_number}"
+
+        try:
+            html = fetch_html_requests(url)
+        except Exception:
+            html = fetch_html_playwright(url)
+
+        soup = BeautifulSoup(html, "html.parser")
+        text = soup.get_text(" ", strip=True)
+
+        xg_matches = re.findall(r"xG\s+([0-9.]+)\s*[–-]\s*([0-9.]+)", text, re.IGNORECASE)
+        if not xg_matches:
+            break
+
+        pages.append(text)
+
+        if "Next" not in text:
+            break
+
+        page_number += 1
+
+    return pages
+
+
+def get_xg_from_xgedge(pages, home_team, away_team, date):
+    """Najde xG pro dany zapas podle data a nazvu tymu v results strankach."""
     try:
-        html = fetch_html_requests(XGEDGE_LEAGUE_URL)
+        year, month, day = date.split("-")
+        xgedge_date = f"{month}/{day}/{year}"
     except Exception:
-        html = fetch_html_playwright(XGEDGE_LEAGUE_URL)
+        return None, None
 
-    soup = BeautifulSoup(html, "html.parser")
-    index = []
+    for page_text in pages:
+        for match in re.finditer(r"xG\s+([0-9.]+)\s*[–-]\s*([0-9.]+)", page_text, re.IGNORECASE):
+            start = max(0, match.start() - 400)
+            window = page_text[start:match.start()]
 
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        match = re.search(
-            r"/czech-first-league/([a-z0-9-]+)-vs-([a-z0-9-]+)-(\d{4}-\d{2}-\d{2})",
-            href,
-        )
-        if not match:
-            continue
+            if xgedge_date not in window:
+                continue
 
-        home_slug, away_slug, date = match.groups()
-        if not href.startswith("http"):
-            href = f"https://xg-edge.com{href}"
-
-        index.append(
-            {
-                "url": href,
-                "date": date,
-                "home_slug": home_slug,
-                "away_slug": away_slug,
-            }
-        )
-
-    return index
-
-
-def find_xgedge_match(index, home_team, away_team, date):
-    for item in index:
-        if item["date"] != date:
-            continue
-
-        if team_matches_slug(home_team, item["home_slug"]) and team_matches_slug(away_team, item["away_slug"]):
-            return item
-
-    return None
-
-
-def parse_xgedge_xg(html):
-    soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(" ", strip=True)
-
-    patterns = [
-        r"xG\s*[:\-–]?\s*([0-9]+(?:\.[0-9]+)?)\s*[-–]\s*([0-9]+(?:\.[0-9]+)?)",
-        r"xG[^0-9]{0,40}([0-9]+(?:\.[0-9]+)?)\D{0,40}([0-9]+(?:\.[0-9]+)?)",
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            home_xg = float(match.group(1).replace(",", "."))
-            away_xg = float(match.group(2).replace(",", "."))
-            return home_xg, away_xg
+            if text_matches_team(window, home_team) and text_matches_team(window, away_team):
+                home_xg = float(match.group(1))
+                away_xg = float(match.group(2))
+                return home_xg, away_xg
 
     return None, None
 
 
-def get_xg_from_xgedge(index, home_team, away_team, date):
-    match = find_xgedge_match(index, home_team, away_team, date)
-    if not match:
-        return None, None
-
-    try:
-        html = fetch_html_requests(match["url"])
-    except Exception:
-        html = fetch_html_playwright(match["url"])
-
-    return parse_xgedge_xg(html)
-
-
 def run_scraper(max_matches=30):
     records = []
-    xgedge_index = None
+    xgedge_pages = None
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -294,18 +270,18 @@ def run_scraper(max_matches=30):
             time_clean = date_raw[11:16] if date_raw else ""
 
             if (home_xg is None or away_xg is None) and date_clean:
-                if xgedge_index is None:
-                    print("Načítám xgEdge index pro fallback xG...")
+                if xgedge_pages is None:
+                    print("Načítám xgEdge results pro fallback xG...")
                     try:
-                        xgedge_index = build_xgedge_index()
-                        print(f"xgEdge index obsahuje {len(xgedge_index)} zápasů.")
+                        xgedge_pages = build_xgedge_results_pages()
+                        print(f"xgEdge results obsahuje {len(xgedge_pages)} stránek.")
                     except Exception as e:
-                        print(f"Chyba při načítání xgEdge indexu: {e}")
-                        xgedge_index = []
+                        print(f"Chyba při načítání xgEdge results: {e}")
+                        xgedge_pages = []
 
-                if xgedge_index:
+                if xgedge_pages:
                     xg_home, xg_away = get_xg_from_xgedge(
-                        xgedge_index,
+                        xgedge_pages,
                         home_team,
                         away_team,
                         date_clean,
