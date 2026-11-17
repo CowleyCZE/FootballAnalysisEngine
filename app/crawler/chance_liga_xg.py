@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from urllib.parse import urljoin
 
@@ -60,16 +61,26 @@ def extract_xg_from_html(html: str) -> tuple[float, float] | None:
     return home_xg, away_xg
 
 
-async def fetch_match_xg(match_url: str, client: httpx.AsyncClient) -> tuple[float, float] | None:
+async def fetch_match_xg(
+    match_url: str,
+    client: httpx.AsyncClient,
+    max_attempts: int = 4,
+) -> tuple[float, float] | None:
     """Stáhne oficiální statistiky zápasu a pokusí se přečíst xG."""
     url = statistics_url(match_url)
-    try:
-        response = await client.get(url)
-        response.raise_for_status()
-        return extract_xg_from_html(response.text)
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code not in {403, 429}:
-            return None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+            return extract_xg_from_html(response.text)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code not in {403, 429}:
+                return None
+        except (httpx.TransportError, httpx.RemoteProtocolError):
+            if attempt < max_attempts:
+                await asyncio.sleep(2 ** attempt)
+                continue
 
     html = await _fetch_with_playwright(url)
     if not html:
