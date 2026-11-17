@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
+from tqdm import tqdm
 
 from app.crawler.chance_liga_history import _fetch_with_playwright
 
@@ -87,7 +88,7 @@ async def enrich_records_with_xg(
     fetched = 0
     enriched = 0
 
-    for record in records:
+    for record in tqdm(records, desc="xG enrichment", unit="match"):
         match_url = record.get("match_url")
         if not match_url:
             continue
