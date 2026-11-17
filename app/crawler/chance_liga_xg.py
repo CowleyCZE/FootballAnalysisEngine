@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+from pathlib import Path
 from urllib.parse import urljoin
 
 import httpx
@@ -88,32 +90,76 @@ async def fetch_match_xg(
     return extract_xg_from_html(html)
 
 
+def _load_checkpoint(path: str | None) -> dict[str, list[float]]:
+    if not path:
+        return {}
+    checkpoint = Path(path)
+    if not checkpoint.exists():
+        return {}
+    try:
+        data = json.loads(checkpoint.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return {str(key): value for key, value in data.items() if isinstance(value, list) and len(value) == 2}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _save_checkpoint(path: str | None, data: dict[str, list[float]]) -> None:
+    if not path:
+        return
+    checkpoint = Path(path)
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    tmp = checkpoint.with_suffix(checkpoint.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(checkpoint)
+
+
 async def enrich_records_with_xg(
     records: list[dict[str, object]],
     client: httpx.AsyncClient,
+    checkpoint_path: str | None = None,
 ) -> dict[str, int]:
     """Doplní xG do záznamů z oficiálních stránek zápasů.
 
+    Úspěšně stažené hodnoty se průběžně ukládají do checkpoint souboru,
+    takže přerušený import lze bezpečně obnovit bez opakovaného stahování.
     Záznamy bez odkazu nebo bez čitelných hodnot zůstávají s xG NULL.
     """
+    checkpoint = _load_checkpoint(checkpoint_path)
     fetched = 0
     enriched = 0
+    resumed = 0
 
     for record in tqdm(records, desc="xG enrichment", unit="match"):
         match_url = record.get("match_url")
         if not match_url:
             continue
 
-        fetched += 1
-        xg = await fetch_match_xg(str(match_url), client)
-        if xg is None:
-            continue
+        key = str(match_url)
+        cached = checkpoint.get(key)
+        if cached is not None:
+            xg = (float(cached[0]), float(cached[1]))
+            resumed += 1
+        else:
+            fetched += 1
+            xg = await fetch_match_xg(key, client)
+            if xg is None:
+                continue
+            checkpoint[key] = [xg[0], xg[1]]
+            _save_checkpoint(checkpoint_path, checkpoint)
 
         record["home_xg"] = xg[0]
         record["away_xg"] = xg[1]
         enriched += 1
 
-    return {"matches_with_url": fetched, "xg_enriched": enriched}
+    _save_checkpoint(checkpoint_path, checkpoint)
+    return {
+        "matches_with_url": fetched + resumed,
+        "xg_enriched": enriched,
+        "xg_resumed": resumed,
+        "xg_fetched_now": fetched,
+    }
 
 
 def absolute_url(url: str, base: str = "https://www.chanceliga.cz") -> str:

@@ -26,11 +26,12 @@ async def run(
     db_path: str,
     skip_xg: bool = False,
     save_debug_html: bool = True,
+    xg_checkpoint: str | None = None,
 ) -> dict[str, object]:
     initialize_database(db_path)
     all_records: list[dict[str, object]] = []
     season_reports: list[dict[str, object]] = []
-    xg_report = {"matches_with_url": 0, "xg_enriched": 0}
+    xg_report = {"matches_with_url": 0, "xg_enriched": 0, "xg_resumed": 0, "xg_fetched_now": 0}
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
         for year in seasons:
@@ -53,7 +54,7 @@ async def run(
             all_records.extend(records)
 
         if not skip_xg:
-            xg_report = await enrich_records_with_xg(all_records, client)
+            xg_report = await enrich_records_with_xg(all_records, client, checkpoint_path=xg_checkpoint)
 
     with sqlite3.connect(db_path) as conn:
         import_result = import_history_records(
@@ -97,6 +98,11 @@ def main() -> None:
         action="store_true",
         help="Neukládá stažené HTML do data/debug",
     )
+    parser.add_argument(
+        "--xg-checkpoint",
+        default="data/xg_checkpoint.json",
+        help="Cesta k checkpoint souboru pro obnovení xG importu",
+    )
     args = parser.parse_args()
 
     report = asyncio.run(
@@ -105,6 +111,7 @@ def main() -> None:
             args.db,
             skip_xg=args.skip_xg,
             save_debug_html=not args.no_debug_html,
+            xg_checkpoint=args.xg_checkpoint,
         )
     )
     Path(args.db).parent.mkdir(parents=True, exist_ok=True)
