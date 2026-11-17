@@ -104,7 +104,6 @@ def _team_code(name: str) -> str | None:
     slug = _slugify(name)
     if not slug:
         return None
-
     for code, team_slug in TEAM_CODES.items():
         if slug == team_slug or slug.endswith(team_slug) or team_slug.endswith(slug):
             return code
@@ -244,17 +243,30 @@ def _associate_match_links_by_codes(records: list[dict[str, object]], soup: Beau
 
         home_code = _team_code(str(record["home_team"]))
         away_code = _team_code(str(record["away_team"]))
-        if not home_code or not away_code:
+        if home_code and away_code:
+            matches = [
+                url
+                for key, url in candidates.items()
+                if key.startswith(f"{home_code}-{away_code}-")
+            ]
+            if len(matches) == 1:
+                record["match_url"] = matches[0]
+                assigned += 1
+                continue
+
+        # Fallback: přiřazení podle slugů týmů v URL.
+        home_slug = _slugify(str(record["home_team"]))
+        away_slug = _slugify(str(record["away_team"]))
+        if not home_slug or not away_slug:
             continue
 
-        matches = [
+        slug_matches = [
             url
-            for key, url in candidates.items()
-            if key.startswith(f"{home_code}-{away_code}-")
+            for url in candidates.values()
+            if home_slug in url and away_slug in url
         ]
-
-        if len(matches) == 1:
-            record["match_url"] = matches[0]
+        if len(slug_matches) == 1:
+            record["match_url"] = slug_matches[0]
             assigned += 1
 
     return assigned

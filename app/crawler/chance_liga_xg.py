@@ -49,7 +49,7 @@ def extract_xg_from_html(html: str) -> tuple[float, float] | None:
             return values[0], values[1]
 
     match = re.search(
-        r"\bxG\b[^0-9\-]{0,120}(\d+(?:[.,]\d+)?)[^0-9\-]{0,120}(\d+(?:[.,]\d+)?)",
+        r"\bxG\b[^0-9.,\-]+(\d+(?:[.,]\d+)?)[^0-9.,\-]+(\d+(?:[.,]\d+)?)",
         soup.get_text(" ", strip=True),
         flags=re.IGNORECASE,
     )
