@@ -222,6 +222,7 @@ def _parse_schedule_text(soup: BeautifulSoup, season: str) -> list[dict[str, obj
 def _associate_match_links_by_codes(records: list[dict[str, object]], soup: BeautifulSoup) -> int:
     """Přiřadí URL detailu podle oficiálních třípísmenných kódů týmů v URL."""
     candidates: dict[str, str] = {}
+    url_candidates: dict[str, str] = {}
 
     for anchor in soup.select("a[href*='/zapas/']"):
         href = anchor.get("href")
@@ -229,12 +230,16 @@ def _associate_match_links_by_codes(records: list[dict[str, object]], soup: Beau
             continue
 
         clean_href = href.split("#", 1)[0]
+        absolute = urljoin(BASE_URL, clean_href)
+        if re.search(r"/zapas/\d+-", clean_href):
+            url_candidates[absolute] = absolute
+
         match = re.search(r"/zapas/(\d+)-([a-z]{3})-([a-z]{3})", clean_href)
         if not match:
             continue
 
         match_id, home_code, away_code = match.groups()
-        candidates[f"{home_code}-{away_code}-{match_id}"] = urljoin(BASE_URL, clean_href)
+        candidates[f"{home_code}-{away_code}-{match_id}"] = absolute
 
     assigned = 0
     for record in records:
@@ -262,7 +267,7 @@ def _associate_match_links_by_codes(records: list[dict[str, object]], soup: Beau
 
         slug_matches = [
             url
-            for url in candidates.values()
+            for url in url_candidates.values()
             if home_slug in url and away_slug in url
         ]
         if len(slug_matches) == 1:
