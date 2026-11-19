@@ -4,6 +4,8 @@ Cíl: postupně zvýšit přesnost, spolehlivost a užitnost predikcí aplikace 
 
 ## 1. Kompletní historická data
 
+**Stav: [x] Hotovo**
+
 **Co splnit:**
 - Importovat výsledky, góly, data zápasů a základní statistiky pro Chance Ligu za poslední 2–3 sezóny.
 - Doplnit xG a xGA pro každý odehraný zápas, pokud je zdroj dostupný.
@@ -19,6 +21,18 @@ Cíl: postupně zvýšit přesnost, spolehlivost a užitnost predikcí aplikace 
 - Databáze obsahuje kompletní historii bez duplicit.
 - xG/xGA jsou dostupné pro maximální možný počet zápasů.
 - Import lze opakovaně spustit bez duplikace dat.
+
+**Implementace:**
+- Import Chance Ligy pokrývá sezóny 2023/2024, 2024/2025 a 2025/2026.
+- Import obsahuje 720 zápasů, z toho 720 s dostupným xG.
+- Audit potvrdil 0 duplicitních externích ID, 0 dokončených zápasů bez výsledku, 0 budoucích dokončených zápasů a 0 dokončených zápasů bez xG.
+- Kontrola v databázi potvrdila 0 duplicit podle trojice `scheduled_at`, `home_team_id` a `away_team_id`.
+- xG crawler má retry logiku pro přechodné síťové chyby a checkpoint `data/xg_checkpoint.json` pro obnovení přerušeného importu.
+- Resume mechanismus je pokrytý offline testy v `tests/crawler/test_chance_liga_xg_resume.py`.
+
+**Výsledky testů:**
+- `pytest -q`: 825 passed, 1 warning.
+- `pytest tests/crawler/test_chance_liga_xg_resume.py -q`: 5 passed.
 
 ## 2. xG rating týmů
 
