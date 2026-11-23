@@ -12,11 +12,16 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from app.statistics.calibration import PlattCalibrator
+from app.statistics.form import FormEngine
+from app.statistics.team_rating import compute_xg_team_ratings
+
 
 class ExactScorePredictor:
     MODEL_VERSION = "poisson-dc-context-v7"
     MAX_GOALS = 7
     DC_RHO = -0.08  # Dixon-Coles dependence for 0-0 / 1-0 / 0-1 / 1-1
+    DRAW_INFLATION = 1.0  # korekce remíz (1.0 = vypnuto; >1.0 zvyšuje pravděpodobnost remíz)
     PRIOR_WEIGHT = 1.5
     DEFAULT_LEAGUE_MEAN = 1.30
     XG_WEIGHT = 0.35  # podíl xG ve spojení s góly, pokud jsou dostupné oba údaje
@@ -34,6 +39,7 @@ class ExactScorePredictor:
     # Laditelné parametry (backtest, TODO 11.10 bod 2): rozsahy chrání model před absurdními hodnotami.
     TUNABLE_BOUNDS = {
         "DC_RHO": (-0.25, 0.05),
+        "DRAW_INFLATION": (0.85, 1.35),
         "PRIOR_WEIGHT": (0.5, 4.0),
         "FORM_DECAY": (0.02, 0.40),
         "XG_WEIGHT": (0.0, 0.70),
@@ -44,7 +50,7 @@ class ExactScorePredictor:
         "RATING_MAX": (1.20, 2.00),
     }
     _DEFAULT_PARAMS = {
-        "DC_RHO": -0.08, "PRIOR_WEIGHT": 1.5, "FORM_DECAY": 0.14, "XG_WEIGHT": 0.35,
+        "DC_RHO": -0.08, "DRAW_INFLATION": 1.0, "PRIOR_WEIGHT": 1.5, "FORM_DECAY": 0.14, "XG_WEIGHT": 0.35,
         "HOME_ADV_SPLIT": 1.03, "HOME_ADV_NO_SPLIT": 1.08,
         "RATING_SHRINK": 5.0, "RATING_MIN": 0.6, "RATING_MAX": 1.6,
     }
@@ -218,10 +224,9 @@ class ExactScorePredictor:
         away_xg_rates: Optional[Mapping[str, Any]] = None,
         team_features: Optional[Mapping[str, Mapping[str, Any]]] = None,
         params: Optional[Mapping[str, Any]] = None,
+        calibrator: Optional[PlattCalibrator] = None,
     ) -> Optional[Dict[str, Any]]:
         cfg, tuned = cls._resolve_params(params)
-        # Ligový průměr gólů: přednost má průměr ze všech zápasů soutěže (≤ cutoff), jinak
-        # stávající výpočet z předaných řádků (nebo výchozí hodnota). Zdroj je ve factors.
         league_matches = int((league_stats or {}).get("matches") or 0)
         league_mean_in = (league_stats or {}).get("mean")
         goals_seen = [float(r[k]) for r in rows for k in ("home_goals", "away_goals") if r.get(k) is not None]
@@ -237,14 +242,27 @@ class ExactScorePredictor:
         league_mean = max(0.8, min(2.0, league_mean))
 
         ratings: Dict[int, Tuple[float, float]] = {}
+        xg_ratings_used = False
         if league_rows and len(league_rows) >= cls.MIN_LEAGUE_MATCHES:
-            ratings = cls.opponent_ratings(
+            xg_ratings = compute_xg_team_ratings(
                 league_rows,
                 league_mean,
+                iterations=cls.RATING_ITERATIONS,
+                shrink=cfg["RATING_SHRINK"],
                 rating_min=cfg["RATING_MIN"],
                 rating_max=cfg["RATING_MAX"],
-                rating_shrink=cfg["RATING_SHRINK"],
             )
+            if xg_ratings and home_team_id in xg_ratings and away_team_id in xg_ratings:
+                ratings = xg_ratings
+                xg_ratings_used = True
+            else:
+                ratings = cls.opponent_ratings(
+                    league_rows,
+                    league_mean,
+                    rating_min=cfg["RATING_MIN"],
+                    rating_max=cfg["RATING_MAX"],
+                    rating_shrink=cfg["RATING_SHRINK"],
+                )
         home_rates = cls._team_rates(
             rows, home_team_id, "home", league_mean, ratings or None,
             prior_weight=cfg["PRIOR_WEIGHT"], form_decay=cfg["FORM_DECAY"], xg_weight=cfg["XG_WEIGHT"],
@@ -254,8 +272,6 @@ class ExactScorePredictor:
             prior_weight=cfg["PRIOR_WEIGHT"], form_decay=cfg["FORM_DECAY"], xg_weight=cfg["XG_WEIGHT"],
         )
         prior_only = home_rates is None or away_rates is None
-        # Missing history is replaced by a neutral league prior for that team
-        # only; the other team keeps its real data. This is not a team fact.
         if home_rates is None:
             home_attack, home_defence, home_n, home_split = league_mean * 1.08, league_mean * 0.96, 0, False
         else:
@@ -264,6 +280,19 @@ class ExactScorePredictor:
             away_attack, away_defence, away_n, away_split = league_mean * 0.88, league_mean * 1.00, 0, False
         else:
             away_attack, away_defence, away_n, away_split = away_rates
+
+        # EWMA form (xGD, GD, points, venue split, opponent strength)
+        home_ewma_form = FormEngine.calculate_ewma_form(rows, home_team_id, venue="home", ratings=ratings or None)
+        away_ewma_form = FormEngine.calculate_ewma_form(rows, away_team_id, venue="away", ratings=ratings or None)
+        if home_ewma_form["sample_size"] >= 3 and home_ewma_form["form_score"] is not None:
+            f_mult = max(0.92, min(1.08, 1.0 + 0.03 * float(home_ewma_form["form_score"])))
+            home_attack *= f_mult
+            home_defence /= f_mult
+        if away_ewma_form["sample_size"] >= 3 and away_ewma_form["form_score"] is not None:
+            f_mult = max(0.92, min(1.08, 1.0 + 0.03 * float(away_ewma_form["form_score"])))
+            away_attack *= f_mult
+            away_defence /= f_mult
+
         xg_used: Dict[str, Any] = {}
         home_values = [home_attack, home_defence]
         away_values = [away_attack, away_defence]
@@ -281,7 +310,6 @@ class ExactScorePredictor:
             ("home", home_xg_rates, home_values),
             ("away", away_xg_rates, away_values),
         ):
-            # Completed match rows already contain xG; don't count the same sample twice.
             if not supplied or history_xg_counts[side] >= 3:
                 continue
             try:
@@ -292,7 +320,6 @@ class ExactScorePredictor:
                     continue
             except (KeyError, TypeError, ValueError):
                 continue
-            # Shrink xG-only/current-season evidence toward the established rates.
             weight = min(0.60, n_xg / (n_xg + 5.0)) if n_xg else 0.25
             values[0] = (1 - weight) * values[0] + weight * attack_xg
             values[1] = (1 - weight) * values[1] + weight * defence_xg
@@ -336,6 +363,8 @@ class ExactScorePredictor:
             "league_mean_source": league_source,
             "league_matches": league_matches,
             "opponent_adjusted": bool(ratings),
+            "xg_ratings_used": xg_ratings_used,
+            "ewma_form": {"home": home_ewma_form, "away": away_ewma_form},
             "h2h_matches": 0,
             "prior_only": prior_only,
             "historical_xg_matches": history_xg_counts,
@@ -353,7 +382,6 @@ class ExactScorePredictor:
         if tuned:
             factors["tuned_params"] = dict(tuned)
 
-        # H2H is intentionally capped and low-weighted: old meetings must not dominate form.
         h2h = cls._chronological(h2h_rows or [])
         h2h_values = []
         for row in h2h:
@@ -376,7 +404,6 @@ class ExactScorePredictor:
         home_context = home_context or {}
         away_context = away_context or {}
         match_context = match_context or {}
-        # Multipliers are bounded so untrusted research data cannot create absurd scores.
         home_att_mult = cls._bounded(home_context.get("attack_multiplier"), 0.70, 1.30, 1.0)
         away_att_mult = cls._bounded(away_context.get("attack_multiplier"), 0.70, 1.30, 1.0)
         home_def_mult = cls._bounded(home_context.get("defence_multiplier"), 0.70, 1.30, 1.0)
@@ -392,7 +419,6 @@ class ExactScorePredictor:
                 "home_absences": int(home_context.get("absences_counted") or 0),
                 "away_absences": int(away_context.get("absences_counted") or 0),
             }
-        # Positive fatigue value means more fatigue and therefore a small performance penalty.
         home_fatigue = cls._bounded(home_context.get("fatigue"), 0.0, 1.0, 0.0)
         away_fatigue = cls._bounded(away_context.get("fatigue"), 0.0, 1.0, 0.0)
         home_motivation = cls._bounded(home_context.get("motivation"), 0.0, 1.0, 0.5)
@@ -408,7 +434,6 @@ class ExactScorePredictor:
         rivalry = cls._bounded(match_context.get("rivalry"), 0.0, 1.0, 0.0)
         style = cls._bounded(match_context.get("style_goal_factor"), 0.85, 1.15, 1.0)
         context_goal_factor = (1.0 - 0.08 * rivalry) * style
-        # Home advantage is already embedded when both venue splits are used.
         home_adv = cfg["HOME_ADV_SPLIT"] if (home_split and away_split) else cfg["HOME_ADV_NO_SPLIT"]
         lam_home = (home_attack * away_defence / league_mean) * home_adv * context_goal_factor
         lam_away = (away_attack * home_defence / league_mean) * context_goal_factor
@@ -419,9 +444,6 @@ class ExactScorePredictor:
         probs_h = [math.exp(-lam_home) * lam_home ** g / math.factorial(g) for g in range(cls.MAX_GOALS + 1)]
         probs_a = [math.exp(-lam_away) * lam_away ** g / math.factorial(g) for g in range(cls.MAX_GOALS + 1)]
         grid = {(h, a): probs_h[h] * probs_a[a] for h in range(cls.MAX_GOALS + 1) for a in range(cls.MAX_GOALS + 1)}
-        # Dixon-Coles (1997) requires all four tau factors to stay non-negative:
-        # for rho < 0: 1 + max(lam_home, lam_away) * rho >= 0
-        # for rho > 0: 1 - lam_home * lam_away * rho >= 0 and 1 - rho >= 0
         rho = cfg["DC_RHO"]
         if rho < 0:
             rho = max(rho, -1.0 / max(lam_home, lam_away, 1.0))
@@ -431,14 +453,25 @@ class ExactScorePredictor:
         grid[(0, 1)] *= max(0.0, 1.0 + lam_home * rho)
         grid[(1, 0)] *= max(0.0, 1.0 + lam_away * rho)
         grid[(1, 1)] *= max(0.0, 1.0 - rho)
+        draw_inflation = cfg["DRAW_INFLATION"]
+        if draw_inflation != 1.0:
+            for g in range(cls.MAX_GOALS + 1):
+                grid[(g, g)] *= draw_inflation
+            factors["draw_inflation"] = round(draw_inflation, 4)
         norm = sum(grid.values())
         grid = {key: value / norm for key, value in grid.items()}
         modal = max(grid, key=grid.get)
         p_home = sum(p for (h, a), p in grid.items() if h > a)
         p_draw = sum(p for (h, a), p in grid.items() if h == a)
         p_away = sum(p for (h, a), p in grid.items() if h < a)
-        # Tip skóre musí souhlasit s nejpravděpodobnějším výsledkem 1-X-2 (TODO 11.32): samotný modus mřížky vychází
-        # při λ≈1,3–1,7 téměř vždy 1:1, i když je favoritem jeden z týmů. Vybere se nejpravděpodobnější skóre uvnitř favorizovaného výsledku.
+        if calibrator is not None:
+            factors["raw_1x2_probabilities"] = {
+                "home": round(p_home, 6),
+                "draw": round(p_draw, 6),
+                "away": round(p_away, 6),
+            }
+            p_home, p_draw, p_away = calibrator.calibrate(p_home, p_draw, p_away)
+            factors["calibrated"] = True
         favoured = max(("home", p_home), ("draw", p_draw), ("away", p_away), key=lambda item: item[1])[0]
         if cls.OUTCOME_CONSISTENT_TIP:
             in_outcome = {k: v for k, v in grid.items()
@@ -450,7 +483,6 @@ class ExactScorePredictor:
         factors["modal_score"] = f"{modal[0]}-{modal[1]}"
         factors["tip_is_modal_score"] = best == modal
         return {
-            # Přípona "+tuned" = použity parametry z backtestu (config/model_params.yaml) → predikce je dohledatelná.
             "model_version": cls.MODEL_VERSION + ("+tuned" if tuned else ""),
             "expected_home_goals": round(lam_home, 3), "expected_away_goals": round(lam_away, 3),
             "predicted_home_goals": best[0], "predicted_away_goals": best[1],
